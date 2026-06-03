@@ -19,6 +19,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
 
     private volatile IReadOnlyList<string>? _acceptedDomains;
     private volatile IReadOnlyList<string>? _acceptedSenderDomains;
+    private volatile IReadOnlyList<IpAccessRule>? _ipAccessRules;
     private volatile IReadOnlyList<DomainRoute>? _domainRoutes;
     private volatile IReadOnlyList<HeaderRewriteEntry>? _headerRewriteRules;
     private volatile IReadOnlyList<SenderRewriteEntry>? _senderRewriteRules;
@@ -78,6 +79,34 @@ public class RuntimeConfigCache : IRuntimeConfigCache
             _acceptedSenderDomains = domains;
             _logger.LogDebug("Loaded {Count} accepted sender domains into cache", domains.Count);
             return domains;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default)
+    {
+        if (_ipAccessRules is { } cached)
+            return cached;
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (_ipAccessRules is { } cached2)
+                return cached2;
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var rules = await db.IpAccessRules
+                .AsNoTracking()
+                .OrderBy(r => r.SortOrder)
+                .ToListAsync(ct);
+
+            _ipAccessRules = rules;
+            _logger.LogDebug("Loaded {Count} IP access rules into cache", rules.Count);
+            return rules;
         }
         finally
         {
@@ -176,6 +205,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
     {
         _acceptedDomains = null;
         _acceptedSenderDomains = null;
+        _ipAccessRules = null;
         _domainRoutes = null;
         _headerRewriteRules = null;
         _senderRewriteRules = null;

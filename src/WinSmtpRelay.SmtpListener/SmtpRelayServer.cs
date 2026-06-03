@@ -39,6 +39,12 @@ public class SmtpRelayServer : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (_config.Endpoints.Count == 0)
+        {
+            _logger.LogWarning("No SMTP endpoints configured (SmtpListener:Endpoints is empty) — the SMTP listener will not start.");
+            return;
+        }
+
         var certificate = _certificateLoader.LoadCertificate();
         var hasTlsEndpoints = _config.Endpoints.Any(e => e.ImplicitTls || e.RequireTls);
 

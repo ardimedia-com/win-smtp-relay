@@ -7,6 +7,7 @@ internal class StubRuntimeConfigCache : IRuntimeConfigCache
 {
     public List<string> AcceptedDomains { get; set; } = [];
     public List<string> AcceptedSenderDomains { get; set; } = [];
+    public List<IpAccessRule> IpAccessRules { get; set; } = [];
     public List<DomainRoute> DomainRoutes { get; set; } = [];
     public List<HeaderRewriteEntry> HeaderRewriteRules { get; set; } = [];
     public List<SenderRewriteEntry> SenderRewriteRules { get; set; } = [];
@@ -16,6 +17,9 @@ internal class StubRuntimeConfigCache : IRuntimeConfigCache
 
     public Task<IReadOnlyList<string>> GetAcceptedSenderDomainsAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<string>>(AcceptedSenderDomains);
+
+    public Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<IpAccessRule>>(IpAccessRules);
 
     public Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<DomainRoute>>(DomainRoutes);

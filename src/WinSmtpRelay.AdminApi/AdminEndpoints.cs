@@ -341,22 +341,25 @@ public static class AdminEndpoints
         ep.MapGet("/", async (IIpAccessRuleService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
 
-        ep.MapPost("/", async (IpAccessRule rule, IIpAccessRuleService svc, CancellationToken ct) =>
+        ep.MapPost("/", async (IpAccessRule rule, IIpAccessRuleService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
             var created = await svc.CreateAsync(rule, ct);
+            cache.Invalidate();
             return Results.Created($"/api/ip-rules/{created.Id}", created);
         });
 
-        ep.MapPut("/{id:int}", async (int id, IpAccessRule rule, IIpAccessRuleService svc, CancellationToken ct) =>
+        ep.MapPut("/{id:int}", async (int id, IpAccessRule rule, IIpAccessRuleService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
             rule.Id = id;
             await svc.UpdateAsync(rule, ct);
+            cache.Invalidate();
             return Results.Ok(new { Message = "IP access rule updated" });
         });
 
-        ep.MapDelete("/{id:int}", async (int id, IIpAccessRuleService svc, CancellationToken ct) =>
+        ep.MapDelete("/{id:int}", async (int id, IIpAccessRuleService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
             await svc.DeleteAsync(id, ct);
+            cache.Invalidate();
             return Results.Ok(new { Message = "IP access rule deleted" });
         });
     }

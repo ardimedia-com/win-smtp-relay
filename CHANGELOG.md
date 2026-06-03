@@ -19,10 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The admin UI now binds to loopback (`127.0.0.1`) by default and serves over HTTPS (the ASP.NET Core development certificate in Development; configurable via `AdminUi:CertificatePath` / `AdminUi:CertificatePassword` for production). It previously bound `0.0.0.0` over plain HTTP.
+- IP access rules stored in the database are now the authoritative source for relay IP authorization, evaluated with first-match Allow/Deny semantics by sort order. `Deny` rules are now honored (previously they were never evaluated), and edits made in the admin UI take effect immediately (cache invalidation). The static `SmtpListener:AllowedNetworks` list is used only as a fallback when no database rules exist.
 
 ### Fixed
 
 - The SMTP client IP was always `null` because the listener read the wrong `ISessionContext` property key, which silently disabled the IP allow-list relay restriction, per-IP rate limiting, failed-auth auto-ban, and SPF source-IP checks (SPF fell back to loopback). The listener now uses the SmtpServer `EndpointListener.RemoteEndPointKey` constant at all call sites.
+- Duplicate SMTP endpoint binding and a doubled `AllowedNetworks` list: pre-initialized collections in `SmtpListenerOptions` were appended to (not replaced) by configuration binding, producing two `0.0.0.0:25` endpoints and eight allowed networks from four. Bound collections now start empty.
 
 ### Security
 

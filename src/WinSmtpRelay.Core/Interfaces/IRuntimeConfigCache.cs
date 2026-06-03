@@ -10,6 +10,10 @@ public interface IRuntimeConfigCache
 {
     Task<IReadOnlyList<string>> GetAcceptedDomainsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<string>> GetAcceptedSenderDomainsAsync(CancellationToken ct = default);
+
+    /// <summary>IP access rules ordered by <see cref="IpAccessRule.SortOrder"/> (authoritative relay IP policy).</summary>
+    Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default);
+
     Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<HeaderRewriteEntry>> GetHeaderRewriteRulesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<SenderRewriteEntry>> GetSenderRewriteRulesAsync(CancellationToken ct = default);

@@ -70,13 +70,27 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             return false;
         }
 
-        // Check IP-based relay restrictions
-        if (remoteEndPoint is not null &&
-            _options.AllowedNetworks.Count > 0 &&
-            !IpNetworkHelper.IsInAnyNetwork(remoteEndPoint.Address, _options.AllowedNetworks))
+        // Check IP-based relay restrictions. DB-stored IP access rules are authoritative
+        // (Allow/Deny, first match by sort order); fall back to the static appsettings
+        // AllowedNetworks list only when no DB rules exist.
+        if (remoteEndPoint is not null)
         {
-            _logger.LogWarning("Relay denied for {ClientIp}: not in allowed networks", remoteEndPoint.Address);
-            return false;
+            var ipRules = await _configCache.GetIpAccessRulesAsync(cancellationToken);
+            var decision = IpAccessEvaluator.Evaluate(remoteEndPoint.Address, ipRules);
+
+            if (decision is false)
+            {
+                _logger.LogWarning("Relay denied for {ClientIp}: blocked by IP access rules", remoteEndPoint.Address);
+                return false;
+            }
+
+            if (decision is null &&
+                _options.AllowedNetworks.Count > 0 &&
+                !IpNetworkHelper.IsInAnyNetwork(remoteEndPoint.Address, _options.AllowedNetworks))
+            {
+                _logger.LogWarning("Relay denied for {ClientIp}: not in allowed networks", remoteEndPoint.Address);
+                return false;
+            }
         }
 
         // Check per-sender rate limit
