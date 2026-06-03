@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SmtpServer;
 using SmtpServer.Mail;
+using SmtpServer.Net;
 using SmtpServer.Storage;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Interfaces;
@@ -53,7 +54,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             return false;
         }
 
-        var remoteEndPoint = context.Properties.TryGetValue("RemoteEndPoint", out var ep) ? ep as IPEndPoint : null;
+        var remoteEndPoint = context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep) ? ep as IPEndPoint : null;
         var clientIp = remoteEndPoint?.Address.ToString();
 
         // Check if IP is auto-banned (failed auth)

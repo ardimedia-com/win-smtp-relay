@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SmtpServer;
 using SmtpServer.Authentication;
+using SmtpServer.Net;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Security;
 
@@ -30,7 +31,7 @@ public class RelayUserAuthenticator : UserAuthenticator, IUserAuthenticator
         string password,
         CancellationToken cancellationToken)
     {
-        var clientIp = context.Properties.TryGetValue("RemoteEndPoint", out var ep)
+        var clientIp = context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep)
             ? (ep as IPEndPoint)?.Address.ToString()
             : null;
 

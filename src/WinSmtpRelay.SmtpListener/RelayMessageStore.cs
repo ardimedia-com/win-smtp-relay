@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SmtpServer;
 using SmtpServer.Mail;
+using SmtpServer.Net;
 using SmtpServer.Protocol;
 using SmtpServer.Storage;
 using WinSmtpRelay.Core.Interfaces;
@@ -47,7 +48,7 @@ public class RelayMessageStore : MessageStore
         var recipients = string.Join(";", transaction.To.Select(m => m.AsAddress()));
         var messageId = ExtractMessageId(rawMessage) ?? $"<{Guid.NewGuid()}@winsmtprelay>";
 
-        var remoteEndPoint = context.Properties.TryGetValue("RemoteEndPoint", out var ep)
+        var remoteEndPoint = context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep)
             ? ep as IPEndPoint
             : null;
         var sourceIp = remoteEndPoint?.Address.ToString();

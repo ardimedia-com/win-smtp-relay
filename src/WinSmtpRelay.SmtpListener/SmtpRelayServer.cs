@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using SmtpServer;
 using SmtpServer.Authentication;
 using SmtpServer.ComponentModel;
+using SmtpServer.Net;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Security;
 
@@ -85,7 +86,7 @@ public class SmtpRelayServer : BackgroundService
         smtpServer.SessionCreated += (sender, args) =>
         {
             _logger.LogDebug("SMTP session created from {RemoteEndPoint}",
-                args.Context.Properties.TryGetValue("RemoteEndPoint", out var ep) ? ep : "unknown");
+                args.Context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep) ? ep : "unknown");
         };
 
         smtpServer.SessionCompleted += (sender, args) =>
