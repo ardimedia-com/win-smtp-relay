@@ -142,7 +142,33 @@
         <header style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem 2rem;border-bottom:1px solid var(--border);">
             <BbSidebarTrigger />
             <ThemeToggle />
+            <div style="margin-left:auto;display:flex;align-items:center;gap:1rem;">
+                <AuthorizeView>
+                    <Authorized>
+                        <span style="font-size:0.85rem;color:var(--muted-foreground);">@context.User.Identity?.Name</span>
+                        <form action="/account/logout" method="post" style="margin:0;">
+                            <AntiforgeryToken />
+                            <button type="submit" class="logout-button" title="Sign out">
+                                <LucideIcon Name="log-out" Size="16" />
+                                <span>Sign out</span>
+                            </button>
+                        </form>
+                    </Authorized>
+                </AuthorizeView>
+            </div>
         </header>
+        <AuthorizeView Context="auth">
+            <Authorized>
+                @if (auth.User.HasClaim(RelayClaimTypes.MustChangePassword, "true"))
+                {
+                    <div class="must-change-banner" role="alert">
+                        <LucideIcon Name="triangle-alert" Size="16" />
+                        <span>You are signed in with a temporary password.</span>
+                        <a href="/account/change-password">Change it now</a>
+                    </div>
+                }
+            </Authorized>
+        </AuthorizeView>
         <main style="flex:1;padding:2rem;overflow-y:auto;">
             @Body
         </main>

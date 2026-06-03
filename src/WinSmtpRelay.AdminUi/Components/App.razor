@@ -1,3 +1,5 @@
+@using Microsoft.AspNetCore.Http
+@using Microsoft.AspNetCore.Components.Endpoints
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -17,11 +19,23 @@
         })();
     </script>
     <ImportMap />
-    <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
+    <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 <body>
-    <Routes @rendermode="RenderMode.InteractiveServer" />
+    <Routes @rendermode="PageRenderMode" />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <script src="@Assets["_content/WinSmtpRelay.AdminUi/js/theme.js"]"></script>
 </body>
 </html>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    // Account pages (login/logout/change-password) are marked [ExcludeFromInteractiveRouting]
+    // so they render static SSR — required because cookie sign-in/out needs an unstarted
+    // HTTP response (impossible over an established interactive circuit). Everything else
+    // stays InteractiveServer.
+    private IComponentRenderMode? PageRenderMode =>
+        HttpContext.AcceptsInteractiveRouting() ? RenderMode.InteractiveServer : null;
+}

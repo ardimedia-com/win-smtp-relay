@@ -1,12 +1,16 @@
 using BlazorBlueprint.Components;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.AdminApi;
+using WinSmtpRelay.AdminApi.Auth;
+using WinSmtpRelay.AdminUi.Authentication;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Delivery;
 using WinSmtpRelay.SmtpListener;
 using WinSmtpRelay.Storage;
+using WinSmtpRelay.Storage.Identity;
 
 // Windows Services run from System32 — set working directory to exe location
 // so relative paths (SQLite DB, config files) resolve correctly
@@ -47,12 +51,32 @@ builder.Services.AddHostedService<WinSmtpRelay.Service.ServiceStateReporter>();
 
 // Kestrel for Admin UI + API
 var adminUiConfig = builder.Configuration.GetSection(AdminUiOptions.SectionName).Get<AdminUiOptions>() ?? new();
+
+// Whether the admin plane will actually serve HTTPS (a cert is available).
+var adminHttpsActive = adminUiConfig.UseHttps &&
+    ((!string.IsNullOrWhiteSpace(adminUiConfig.CertificatePath) && File.Exists(adminUiConfig.CertificatePath))
+     || builder.Environment.IsDevelopment());
+
 if (adminUiConfig.Enabled)
 {
     builder.WebHost.ConfigureKestrel(options =>
     {
-        options.Listen(System.Net.IPAddress.Parse(adminUiConfig.BindAddress), adminUiConfig.Port);
+        options.Listen(System.Net.IPAddress.Parse(adminUiConfig.BindAddress), adminUiConfig.Port, listen =>
+        {
+            if (!adminUiConfig.UseHttps)
+                return;
+
+            if (!string.IsNullOrWhiteSpace(adminUiConfig.CertificatePath) && File.Exists(adminUiConfig.CertificatePath))
+                listen.UseHttps(adminUiConfig.CertificatePath, adminUiConfig.CertificatePassword);
+            else if (builder.Environment.IsDevelopment())
+                listen.UseHttps(); // ASP.NET Core development certificate
+            // else: no certificate available — serves HTTP (warned at startup)
+        });
     });
+
+    // Admin authentication/authorization (cookie + API key) and tenant-aware policies.
+    builder.Services.AddRelayAdminAuth();
+    builder.Services.AddRelayAdminUiAuth();
 
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();
@@ -74,6 +98,7 @@ if (adminUiConfig.Enabled)
     builder.Services.AddHostedService<WinSmtpRelay.Service.TrayIconService>();
     builder.Services.AddHostedService<WinSmtpRelay.Service.StatisticsAggregator>();
     builder.Services.AddHostedService<WinSmtpRelay.Storage.ConfigurationSeeder>();
+    builder.Services.AddHostedService<WinSmtpRelay.Service.AdminSeeder>();
 }
 
 var app = builder.Build();
@@ -87,13 +112,22 @@ using (var scope = app.Services.CreateScope())
 
 if (adminUiConfig.Enabled)
 {
+    app.UseAuthentication();
+    app.UseAuthorization();
     app.UseAntiforgery();
 
-    // Admin REST API
+    // Admin REST API (authorized inside MapAdminApi; /api/health is anonymous)
     app.MapAdminApi();
 
-    // SignalR hub for live activity
-    app.MapHub<ActivityHub>("/hubs/activity");
+    // SignalR hub for live activity — authenticated admins only
+    app.MapHub<ActivityHub>("/hubs/activity").RequireAuthorization();
+
+    // Cookie sign-out endpoint (posted from the admin layout)
+    app.MapPost("/account/logout", async (SignInManager<AdminUser> signInManager) =>
+    {
+        await signInManager.SignOutAsync();
+        return Results.LocalRedirect("/account/login");
+    });
 
     // Static assets (fingerprinted CSS/JS from RCLs)
     app.MapStaticAssets();
@@ -101,6 +135,13 @@ if (adminUiConfig.Enabled)
     // Blazor Admin UI
     app.MapRazorComponents<WinSmtpRelay.AdminUi.Components.App>()
         .AddInteractiveServerRenderMode();
+
+    if (!adminHttpsActive)
+        app.Logger.LogWarning(
+            "Admin UI is serving over plain HTTP — no HTTPS certificate is configured. " +
+            "Set AdminUi:CertificatePath/CertificatePassword for production deployments.");
+    app.Logger.LogInformation("Admin UI listening on {Scheme}://{Address}:{Port}",
+        adminHttpsActive ? "https" : "http", adminUiConfig.BindAddress, adminUiConfig.Port);
 }
 
 await app.RunAsync();

@@ -239,3 +239,116 @@ nav[aria-label="breadcrumb"] {
 .gap-1 { gap: 0.5rem; }
 .items-center { align-items: center; }
 .justify-between { justify-content: space-between; }
+
+/* Account (login / change password) pages */
+.account-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    background: var(--background);
+}
+
+.account-card {
+    width: 100%;
+    max-width: 24rem;
+    padding: 2rem;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background: var(--card, var(--background));
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.account-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    font-size: 1.15rem;
+    margin-bottom: 1.5rem;
+    color: var(--foreground);
+}
+
+.account-title { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.25rem; }
+.account-subtitle { font-size: 0.85rem; color: var(--muted-foreground); margin: 0 0 1.25rem; }
+
+.account-field { margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.account-field label { font-size: 0.8rem; font-weight: 500; color: var(--foreground); }
+
+.account-input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--background);
+    color: var(--foreground);
+    font-size: 0.9rem;
+}
+.account-input:focus { outline: 2px solid var(--ring, var(--primary)); outline-offset: 1px; }
+
+.account-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--muted-foreground);
+    margin-bottom: 1.25rem;
+}
+
+.account-button {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+    border: none;
+    border-radius: 0.5rem;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+}
+.account-button:hover { opacity: 0.9; }
+
+.account-error {
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 1rem;
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--destructive) 12%, transparent);
+    color: var(--destructive);
+    border: 1px solid color-mix(in srgb, var(--destructive) 35%, transparent);
+    font-size: 0.85rem;
+}
+
+.account-card .validation-message { color: var(--destructive); font-size: 0.78rem; }
+
+/* Header logout button + temp-password banner */
+.logout-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--foreground);
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+.logout-button:hover { background: var(--muted); }
+
+.must-change-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 2rem;
+    background: color-mix(in srgb, var(--destructive) 10%, transparent);
+    color: var(--destructive);
+    border-bottom: 1px solid color-mix(in srgb, var(--destructive) 30%, transparent);
+    font-size: 0.85rem;
+}
+.must-change-banner a { color: inherit; font-weight: 600; }

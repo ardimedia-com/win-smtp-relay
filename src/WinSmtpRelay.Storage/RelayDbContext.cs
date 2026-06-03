@@ -1,14 +1,21 @@
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.Core.Models;
+using WinSmtpRelay.Storage.Identity;
 
 namespace WinSmtpRelay.Storage;
 
-public class RelayDbContext(DbContextOptions<RelayDbContext> options) : DbContext(options)
+public class RelayDbContext(DbContextOptions<RelayDbContext> options)
+    : IdentityDbContext<AdminUser, AdminRole, int>(options)
 {
     public DbSet<QueuedMessage> QueuedMessages => Set<QueuedMessage>();
     public DbSet<DeliveryLog> DeliveryLogs => Set<DeliveryLog>();
     public DbSet<RelayUser> RelayUsers => Set<RelayUser>();
     public DbSet<DailyStatistics> DailyStatistics => Set<DailyStatistics>();
+
+    // Multi-tenancy + admin auth
+    public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
 
     // Configuration entities (runtime-editable via Admin UI)
     public DbSet<ReceiveConnector> ReceiveConnectors => Set<ReceiveConnector>();
@@ -24,6 +31,39 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options) : DbContex
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder); // Identity tables (AspNetUsers, AspNetRoles, ...)
+
+        modelBuilder.Entity<Tenant>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Slug).IsUnique();
+            entity.Property(e => e.Name).HasMaxLength(200);
+            entity.Property(e => e.Slug).HasMaxLength(100);
+            entity.HasData(new Tenant
+            {
+                Id = TenantDefaults.DefaultTenantId,
+                Name = TenantDefaults.DefaultName,
+                Slug = TenantDefaults.DefaultSlug,
+                IsEnabled = true,
+                CreatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            });
+        });
+
+        modelBuilder.Entity<ApiKey>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.KeyPrefix);
+            entity.Property(e => e.Name).HasMaxLength(100);
+            entity.Property(e => e.KeyPrefix).HasMaxLength(16);
+            entity.Property(e => e.KeyHash).HasMaxLength(64);
+            entity.Property(e => e.Role).HasMaxLength(50);
+        });
+
+        modelBuilder.Entity<Identity.AdminUser>(entity =>
+        {
+            entity.Property(e => e.DisplayName).HasMaxLength(200);
+        });
+
         modelBuilder.Entity<QueuedMessage>(entity =>
         {
             entity.HasKey(e => e.Id);

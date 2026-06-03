@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.Reflection;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 using WinSmtpRelay.Security;
@@ -15,7 +17,17 @@ public static class AdminEndpoints
 {
     public static IEndpointRouteBuilder MapAdminApi(this IEndpointRouteBuilder endpoints)
     {
-        var group = endpoints.MapGroup("/api");
+        // Baseline: every /api endpoint requires an authenticated admin (any role).
+        var group = endpoints.MapGroup("/api").RequireAuthorization(AuthorizationPolicies.AdminView);
+
+        // Elevate every mutating endpoint (non-GET) to AdminFull, so read-only
+        // viewers cannot create/update/delete. /api/health opts out via AllowAnonymous.
+        ((IEndpointConventionBuilder)group).Add(builder =>
+        {
+            var methods = builder.Metadata.OfType<HttpMethodMetadata>().FirstOrDefault()?.HttpMethods;
+            if (methods is { Count: > 0 } && methods.All(m => m is not ("GET" or "HEAD")))
+                builder.Metadata.Add(new AuthorizeAttribute(AuthorizationPolicies.AdminFull));
+        });
 
         MapHealthEndpoints(group);
         MapMetricsEndpoints(group);
@@ -46,7 +58,7 @@ public static class AdminEndpoints
         {
             Status = "Healthy",
             Timestamp = DateTime.UtcNow
-        }));
+        })).AllowAnonymous();
     }
 
     private static void MapMetricsEndpoints(RouteGroupBuilder group)

@@ -1,0 +1,82 @@
+@page "/account/login"
+@layout AccountLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@inject SignInManager<AdminUser> SignInManager
+@inject NavigationManager Nav
+@inject ILogger<Login> Logger
+
+<PageTitle>Sign in — WinSmtpRelay</PageTitle>
+
+<h1 class="account-title">Sign in</h1>
+<p class="account-subtitle">Enter your administrator credentials.</p>
+
+@if (errorMessage is not null)
+{
+    <div class="account-error" role="alert">@errorMessage</div>
+}
+
+<EditForm Model="Input" method="post" OnValidSubmit="LoginUser" FormName="login">
+    <DataAnnotationsValidator />
+    <div class="account-field">
+        <label for="email">Email</label>
+        <InputText id="email" @bind-Value="Input.Email" autocomplete="username" class="account-input" />
+        <ValidationMessage For="() => Input.Email" />
+    </div>
+    <div class="account-field">
+        <label for="password">Password</label>
+        <InputText id="password" type="password" @bind-Value="Input.Password" autocomplete="current-password" class="account-input" />
+        <ValidationMessage For="() => Input.Password" />
+    </div>
+    <label class="account-checkbox">
+        <InputCheckbox @bind-Value="Input.RememberMe" /> Keep me signed in
+    </label>
+    <button type="submit" class="account-button">Sign in</button>
+</EditForm>
+
+@code {
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = new();
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private string? errorMessage;
+
+    private async Task LoginUser()
+    {
+        var result = await SignInManager.PasswordSignInAsync(
+            Input.Email, Input.Password, Input.RememberMe, lockoutOnFailure: true);
+
+        if (result.Succeeded)
+        {
+            Logger.LogInformation("Admin {Email} signed in", Input.Email);
+            Nav.NavigateTo(GetSafeReturnUrl());
+            return;
+        }
+
+        errorMessage = result.IsLockedOut
+            ? "Account locked due to too many failed attempts. Try again later."
+            : "Invalid email or password.";
+        Logger.LogWarning("Failed admin sign-in for {Email} (lockedOut={LockedOut})", Input.Email, result.IsLockedOut);
+    }
+
+    // Prevent open redirects: only allow local relative paths.
+    private string GetSafeReturnUrl()
+    {
+        if (!string.IsNullOrEmpty(ReturnUrl) && Uri.IsWellFormedUriString(ReturnUrl, UriKind.Relative) && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//"))
+            return ReturnUrl;
+        return "/";
+    }
+
+    private sealed class InputModel
+    {
+        [Required, EmailAddress]
+        public string Email { get; set; } = "";
+
+        [Required, DataType(DataType.Password)]
+        public string Password { get; set; } = "";
+
+        public bool RememberMe { get; set; }
+    }
+}

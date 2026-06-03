@@ -19,7 +19,8 @@ Open-source SMTP relay server for Windows. Built with .NET 10, designed as a mod
 - DKIM signing, SPF/DMARC verification
 - IP-based relay restrictions
 - Pickup folder for .eml files
-- Blazor admin UI (HTTPS)
+- Blazor admin UI (HTTPS, loopback by default), sign-in required
+- Authenticated admin access: cookie login + API keys, role-based authorization (host / tenant admin / viewer)
 - REST API for management and monitoring
 - Windows Service with Event Log integration
 - MSI installer (WiX v5)
@@ -126,6 +127,21 @@ As a Windows Service:
 sc.exe create WinSmtpRelay binPath="C:\path\to\WinSmtpRelay.Service.exe"
 sc.exe start WinSmtpRelay
 ```
+
+## Admin access
+
+The admin UI and REST API require authentication and bind to `127.0.0.1` over HTTPS by default.
+
+On first start the service seeds a host administrator and writes a one-time password to the log (Windows Event Log and console):
+
+```
+Username: admin@local
+Password: <random, shown once>
+```
+
+Sign in at `https://localhost:8025/account/login` and change the password immediately (you are prompted to). To expose the admin UI beyond loopback, put it behind a reverse proxy or change `AdminUi:BindAddress` deliberately, and configure a real certificate via `AdminUi:CertificatePath` / `AdminUi:CertificatePassword`.
+
+For automation, create an API key and pass it as `X-Api-Key: <key>` (or `Authorization: Bearer <key>`). Keys are scoped to a tenant and a role.
 
 ## License
 

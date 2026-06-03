@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using WinSmtpRelay.AdminApi;
+using WinSmtpRelay.AdminApi.Auth;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 using WinSmtpRelay.Storage;
@@ -15,7 +17,9 @@ namespace WinSmtpRelay.Integration.Tests;
 public class AdminApiTests
 {
     private WebApplication _app = null!;
-    private HttpClient _client = null!;
+    private HttpClient _client = null!;       // authenticated as HostAdmin (API key)
+    private HttpClient _anonClient = null!;   // no credentials
+    private HttpClient _viewerClient = null!; // authenticated as TenantViewer (read-only)
     private string _dbPath = null!;
 
     [TestInitialize]
@@ -26,27 +30,43 @@ public class AdminApiTests
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddRelayStorage($"Data Source={_dbPath}");
+        builder.Services.AddRelayAdminAuth();
 
         _app = builder.Build();
 
+        string hostKey, viewerKey;
         using (var scope = _app.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
             await db.Database.MigrateAsync();
+
+            var keys = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+            (_, hostKey) = await keys.CreateAsync(null, "test-host", RelayRoles.HostAdmin, null, default);
+            (_, viewerKey) = await keys.CreateAsync(TenantDefaults.DefaultTenantId, "test-viewer", RelayRoles.TenantViewer, null, default);
         }
 
+        _app.UseAuthentication();
+        _app.UseAuthorization();
         _app.MapAdminApi();
 
         await _app.StartAsync();
 
         var address = _app.Urls.First();
         _client = new HttpClient { BaseAddress = new Uri(address) };
+        _client.DefaultRequestHeaders.Add(ApiKeyDefaults.HeaderName, hostKey);
+
+        _anonClient = new HttpClient { BaseAddress = new Uri(address) };
+
+        _viewerClient = new HttpClient { BaseAddress = new Uri(address) };
+        _viewerClient.DefaultRequestHeaders.Add(ApiKeyDefaults.HeaderName, viewerKey);
     }
 
     [TestCleanup]
     public async Task Cleanup()
     {
         _client.Dispose();
+        _anonClient.Dispose();
+        _viewerClient.Dispose();
         await _app.StopAsync();
         await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
@@ -100,7 +120,6 @@ public class AdminApiTests
     [TestCategory("Integration")]
     public async Task QueueMessage_EnqueueAndRetrieve()
     {
-        // Enqueue a message directly via the service
         using (var scope = _app.Services.CreateScope())
         {
             var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
@@ -114,7 +133,6 @@ public class AdminApiTests
             });
         }
 
-        // Verify via API
         var statusResponse = await _client.GetAsync("/api/queue/status");
         var status = await statusResponse.Content.ReadFromJsonAsync<QueueStatusResponse>();
         Assert.AreEqual(1, status?.Depth);
@@ -205,6 +223,63 @@ public class AdminApiTests
         var body = await response.Content.ReadAsStringAsync();
         Assert.IsTrue(body.Contains("runtime", StringComparison.OrdinalIgnoreCase));
         Assert.IsTrue(body.Contains(".NET", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ---- Authentication / authorization regression tests ----
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Health_IsAnonymous()
+    {
+        var response = await _anonClient.GetAsync("/api/health");
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Unauthenticated_GetUsers_Returns401()
+    {
+        var response = await _anonClient.GetAsync("/api/users");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Unauthenticated_CreateUser_Returns401()
+    {
+        var response = await _anonClient.PostAsJsonAsync("/api/users",
+            new CreateUserRequest("intruder", "P@ssw0rd!"));
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Unauthenticated_DeleteQueueMessage_Returns401()
+    {
+        var response = await _anonClient.DeleteAsync("/api/queue/messages/1");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task InvalidApiKey_Returns401()
+    {
+        using var client = new HttpClient { BaseAddress = _client.BaseAddress };
+        client.DefaultRequestHeaders.Add(ApiKeyDefaults.HeaderName, "wsr_thisisnotavalidkey");
+        var response = await client.GetAsync("/api/users");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Viewer_CanRead_ButCannotMutate()
+    {
+        var read = await _viewerClient.GetAsync("/api/users");
+        Assert.AreEqual(HttpStatusCode.OK, read.StatusCode);
+
+        var write = await _viewerClient.PostAsJsonAsync("/api/users",
+            new CreateUserRequest("blocked", "P@ssw0rd!"));
+        Assert.AreEqual(HttpStatusCode.Forbidden, write.StatusCode);
     }
 
     private record HealthResponse(string Status);
