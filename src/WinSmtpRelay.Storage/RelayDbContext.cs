@@ -30,6 +30,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<DomainRoute> DomainRoutes => Set<DomainRoute>();
     public DbSet<DkimDomain> DkimDomains => Set<DkimDomain>();
     public DbSet<RateLimitSettings> RateLimitSettings => Set<RateLimitSettings>();
+    public DbSet<PortalSettings> PortalSettings => Set<PortalSettings>();
     public DbSet<HeaderRewriteEntry> HeaderRewriteEntries => Set<HeaderRewriteEntry>();
     public DbSet<SenderRewriteEntry> SenderRewriteEntries => Set<SenderRewriteEntry>();
 
@@ -172,6 +173,17 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.HasData(new RateLimitSettings
             {
                 Id = 1,
+                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            });
+        });
+
+        modelBuilder.Entity<PortalSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasData(new PortalSettings
+            {
+                Id = 1,
+                SelfServiceSignupEnabled = false,
                 UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             });
         });

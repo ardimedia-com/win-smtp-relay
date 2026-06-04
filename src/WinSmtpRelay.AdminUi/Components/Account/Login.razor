@@ -6,7 +6,7 @@
 @inject WinSmtpRelay.Core.Interfaces.IRuntimeConfigCache ConfigCache
 @inject NavigationManager Nav
 @inject ILogger<Login> Logger
-@inject Microsoft.Extensions.Options.IOptions<WinSmtpRelay.Core.Configuration.AdminUiOptions> UiOptions
+@inject WinSmtpRelay.Core.Interfaces.IPortalSettingsService PortalSettings
 
 <PageTitle>Sign in — WinSmtpRelay</PageTitle>
 
@@ -43,7 +43,7 @@
     <a href="/account/forgot-password">Forgot your password?</a>
 </p>
 
-@if (UiOptions.Value.SelfServiceSignupEnabled)
+@if (signupEnabled)
 {
     <p class="account-subtitle" style="margin-top:1rem;text-align:center;">
         No account? <a href="/signup">Create an organization</a>
@@ -58,6 +58,10 @@
     private string? ReturnUrl { get; set; }
 
     private string? errorMessage;
+    private bool signupEnabled;
+
+    protected override async Task OnInitializedAsync()
+        => signupEnabled = (await PortalSettings.GetAsync()).SelfServiceSignupEnabled;
 
     private async Task LoginUser()
     {

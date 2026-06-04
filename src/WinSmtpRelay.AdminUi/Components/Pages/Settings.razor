@@ -1,0 +1,71 @@
+@page "/settings"
+@using WinSmtpRelay.Core.Interfaces
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
+@inject IServiceScopeFactory ScopeFactory
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem>
+            <BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink>
+        </BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem>
+            <BbBreadcrumbPage>Settings</BbBreadcrumbPage>
+        </BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>Settings</h1>
+    <p>Host-level portal settings. Applied immediately — no restart required.</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[160px] w-full" />
+}
+else
+{
+    <div style="max-width:560px;">
+    <BbCard>
+        <BbCardHeader>
+            <BbCardTitle>Self-service signup</BbCardTitle>
+        </BbCardHeader>
+        <BbCardContent>
+            <div style="display:flex;align-items:center;gap:0.75rem;">
+                <BbSwitch Checked="signupEnabled" CheckedChanged="OnToggleAsync" id="signup-toggle" />
+                <span>Allow anonymous organizations to sign up at <span class="mono">/signup</span></span>
+            </div>
+            <p class="text-muted" style="font-size:0.8rem;margin-top:0.75rem;">
+                When enabled, a "Create an organization" link appears on the sign-in page. A new signup creates a
+                <strong>disabled</strong> tenant that must be confirmed by email verification or host approval before it can sign in.
+            </p>
+            @if (!string.IsNullOrEmpty(statusMessage))
+            {
+                <p class="text-muted" style="margin-top:0.5rem;">@statusMessage</p>
+            }
+        </BbCardContent>
+    </BbCard>
+    </div>
+}
+
+@code {
+    private bool signupEnabled;
+    private bool isLoading = true;
+    private string? statusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        signupEnabled = (await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync()).SelfServiceSignupEnabled;
+        isLoading = false;
+    }
+
+    private async Task OnToggleAsync(bool value)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSelfServiceSignupEnabledAsync(value);
+        signupEnabled = value;
+        statusMessage = value ? "Self-service signup enabled." : "Self-service signup disabled.";
+    }
+}

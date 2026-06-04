@@ -10,13 +10,14 @@
 @inject ITenantSignupService SignupService
 @inject IMessageQueue Queue
 @inject IOptions<AdminUiOptions> UiOptions
+@inject IPortalSettingsService PortalSettings
 @inject WinSmtpRelay.AdminUi.Services.ISignupRateLimiter SignupRateLimiter
 @inject NavigationManager Nav
 @inject ILogger<Signup> Logger
 
 <PageTitle>Sign up — WinSmtpRelay</PageTitle>
 
-@if (!UiOptions.Value.SelfServiceSignupEnabled)
+@if (!signupEnabled)
 {
     <h1 class="account-title">Sign up unavailable</h1>
     <p class="account-subtitle">Self-service signup is disabled on this server. Contact an administrator.</p>
@@ -99,10 +100,15 @@ else
     private string? errorMessage;
     private bool submitted;
     private bool emailed;
+    private bool signupEnabled;
+
+    protected override async Task OnInitializedAsync()
+        => signupEnabled = (await PortalSettings.GetAsync()).SelfServiceSignupEnabled;
 
     private async Task SubmitAsync()
     {
-        if (!UiOptions.Value.SelfServiceSignupEnabled)
+        // Re-check live in case the host toggled signup off between page load and submit.
+        if (!(await PortalSettings.GetAsync()).SelfServiceSignupEnabled)
             return;
 
         // Throttle abuse by client IP before creating anything.

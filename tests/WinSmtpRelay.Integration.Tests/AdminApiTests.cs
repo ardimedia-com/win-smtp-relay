@@ -695,5 +695,28 @@ public class AdminApiTests
         }
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task PortalSettings_SignupToggle_DefaultsOff_AndPersists()
+    {
+        using (var scope = _app.Services.CreateScope())
+        {
+            var svc = scope.ServiceProvider.GetRequiredService<IPortalSettingsService>();
+            Assert.IsFalse((await svc.GetAsync()).SelfServiceSignupEnabled, "signup should default to off");
+            await svc.SetSelfServiceSignupEnabledAsync(true);
+        }
+
+        using (var scope = _app.Services.CreateScope())
+            Assert.IsTrue((await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync()).SelfServiceSignupEnabled,
+                "the enabled toggle should persist");
+
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSelfServiceSignupEnabledAsync(false);
+
+        using (var scope = _app.Services.CreateScope())
+            Assert.IsFalse((await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync()).SelfServiceSignupEnabled,
+                "the disabled toggle should persist");
+    }
+
     private record HealthResponse(string Status);
 }

@@ -30,6 +30,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDomainRouteService, DomainRouteService>();
         services.AddScoped<IDkimDomainService, DkimDomainService>();
         services.AddScoped<IRateLimitSettingsService, RateLimitSettingsService>();
+        services.AddScoped<IPortalSettingsService, PortalSettingsService>();
         services.AddScoped<IMessageFilterService, MessageFilterService>();
 
         // Singleton cache for runtime-editable config (invalidated by Admin API)

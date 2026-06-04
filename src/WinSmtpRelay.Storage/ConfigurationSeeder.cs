@@ -19,6 +19,7 @@ public class ConfigurationSeeder(
     IOptions<DkimOptions> dkimOpts,
     IOptions<RateLimitOptions> rateLimitOpts,
     IOptions<MessageFilterOptions> filterOpts,
+    IOptions<AdminUiOptions> adminUiOpts,
     ILogger<ConfigurationSeeder> logger) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -32,6 +33,7 @@ public class ConfigurationSeeder(
         await SeedSendConnectorsAsync(db, cancellationToken);
         await SeedDkimDomainsAsync(db, cancellationToken);
         await SeedRateLimitSettingsAsync(db, cancellationToken);
+        await SeedPortalSettingsAsync(db, cancellationToken);
         await SeedMessageFiltersAsync(db, cancellationToken);
     }
 
@@ -169,8 +171,8 @@ public class ConfigurationSeeder(
         logger.LogInformation("Seeded {Count} DKIM domain(s) from appsettings", opts.Domains.Count);
     }
 
-    // Matches the HasData seed in RelayDbContext: an untouched row carries this timestamp.
-    private static readonly DateTime RateLimitSeedSentinel = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    // Matches the HasData seeds in RelayDbContext: an untouched settings row carries this timestamp.
+    private static readonly DateTime SeedSentinel = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     private async Task SeedRateLimitSettingsAsync(RelayDbContext db, CancellationToken ct)
     {
@@ -179,7 +181,7 @@ public class ConfigurationSeeder(
 
         // Apply appsettings only while the row has never been edited (UI edits bump UpdatedUtc
         // past the seed sentinel). Once edited, the database is authoritative — do not clobber it.
-        if (existing.UpdatedUtc != RateLimitSeedSentinel)
+        if (existing.UpdatedUtc != SeedSentinel)
             return;
 
         var opts = rateLimitOpts.Value;
@@ -192,6 +194,22 @@ public class ConfigurationSeeder(
 
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied rate limit settings from appsettings (row not yet edited)");
+    }
+
+    private async Task SeedPortalSettingsAsync(RelayDbContext db, CancellationToken ct)
+    {
+        var existing = await db.PortalSettings.FindAsync([1], ct);
+        if (existing is null) return; // seeded by EF HasData
+
+        // Apply appsettings only while the row has never been edited (the UI toggle bumps
+        // UpdatedUtc past the seed sentinel). Once edited, the database is authoritative.
+        if (existing.UpdatedUtc != SeedSentinel)
+            return;
+
+        existing.SelfServiceSignupEnabled = adminUiOpts.Value.SelfServiceSignupEnabled;
+        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Applied portal settings from appsettings (row not yet edited)");
     }
 
     private async Task SeedMessageFiltersAsync(RelayDbContext db, CancellationToken ct)
