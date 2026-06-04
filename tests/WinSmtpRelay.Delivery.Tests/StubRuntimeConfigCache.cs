@@ -30,6 +30,12 @@ internal class StubRuntimeConfigCache : IRuntimeConfigCache
     public Task<int?> GetTenantForRecipientDomainAsync(string domain, CancellationToken ct = default)
         => Task.FromResult<int?>(RecipientDomainOwners.TryGetValue(domain, out var t) ? t : null);
 
+    /// <summary>Tenant ids treated as disabled; all others are enabled (default: none disabled).</summary>
+    public HashSet<int> DisabledTenants { get; set; } = [];
+
+    public Task<bool> IsTenantEnabledAsync(int tenantId, CancellationToken ct = default)
+        => Task.FromResult(!DisabledTenants.Contains(tenantId));
+
     public Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<DomainRoute>>(DomainRoutes);
 

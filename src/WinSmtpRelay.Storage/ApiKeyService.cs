@@ -63,6 +63,13 @@ public class ApiKeyService(RelayDbContext db) : IApiKeyService
                 if (!candidate.IsEnabled || (candidate.ExpiresUtc is not null && candidate.ExpiresUtc <= now))
                     return null;
 
+                // Reject keys belonging to a disabled tenant (host-level keys have no tenant).
+                if (candidate.TenantId is int keyTenantId &&
+                    !await db.Tenants.AsNoTracking().AnyAsync(t => t.Id == keyTenantId && t.IsEnabled, cancellationToken))
+                {
+                    return null;
+                }
+
                 candidate.LastUsedUtc = now;
                 await db.SaveChangesAsync(cancellationToken);
                 return candidate;

@@ -449,5 +449,66 @@ public class AdminApiTests
         Assert.IsFalse(dup.Succeeded);
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task ApiKey_ForDisabledTenant_FailsValidation()
+    {
+        int tenantId;
+        string plaintext;
+        using (var scope = _app.Services.CreateScope())
+        {
+            var tenant = await scope.ServiceProvider.GetRequiredService<ITenantService>().CreateAsync("Keyed Co", "keyed-co");
+            tenantId = tenant.Id;
+            var keys = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+            (_, plaintext) = await keys.CreateAsync(tenantId, "k", RelayRoles.TenantAdmin, null, default);
+        }
+
+        // Validates while the tenant is enabled.
+        using (var scope = _app.Services.CreateScope())
+            Assert.IsNotNull(await scope.ServiceProvider.GetRequiredService<IApiKeyService>().ValidateAsync(plaintext, default));
+
+        // Disabling the tenant invalidates the key.
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<ITenantService>().UpdateAsync(tenantId, "Keyed Co", isEnabled: false);
+        using (var scope = _app.Services.CreateScope())
+            Assert.IsNull(await scope.ServiceProvider.GetRequiredService<IApiKeyService>().ValidateAsync(plaintext, default));
+
+        // Re-enabling restores it.
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<ITenantService>().UpdateAsync(tenantId, "Keyed Co", isEnabled: true);
+        using (var scope = _app.Services.CreateScope())
+            Assert.IsNotNull(await scope.ServiceProvider.GetRequiredService<IApiKeyService>().ValidateAsync(plaintext, default));
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task TenantService_CannotDisableDefaultTenant()
+    {
+        using var scope = _app.Services.CreateScope();
+        var tenants = scope.ServiceProvider.GetRequiredService<ITenantService>();
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => tenants.UpdateAsync(TenantDefaults.DefaultTenantId, "Default", isEnabled: false));
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task RuntimeConfigCache_ReflectsTenantEnabledState_AfterInvalidation()
+    {
+        int tenantId;
+        using (var scope = _app.Services.CreateScope())
+            tenantId = (await scope.ServiceProvider.GetRequiredService<ITenantService>().CreateAsync("Toggle Co", "toggle-co")).Id;
+
+        var cache = _app.Services.GetRequiredService<IRuntimeConfigCache>();
+        Assert.IsTrue(await cache.IsTenantEnabledAsync(tenantId));
+
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<ITenantService>().UpdateAsync(tenantId, "Toggle Co", isEnabled: false);
+        Assert.IsFalse(await cache.IsTenantEnabledAsync(tenantId), "cache should reflect the disable after invalidation");
+
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<ITenantService>().UpdateAsync(tenantId, "Toggle Co", isEnabled: true);
+        Assert.IsTrue(await cache.IsTenantEnabledAsync(tenantId), "cache should reflect the re-enable after invalidation");
+    }
+
     private record HealthResponse(string Status);
 }

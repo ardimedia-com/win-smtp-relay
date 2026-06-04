@@ -80,10 +80,13 @@ else
                     </BbTableCell>
                     <BbTableCell>@t.CreatedUtc.ToString("yyyy-MM-dd")</BbTableCell>
                     <BbTableCell>
-                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
-                                @onclick="() => ToggleAsync(t)" title="@(t.IsEnabled ? "Disable" : "Enable")">
-                            <LucideIcon Name="@(t.IsEnabled ? "pause" : "play")" />
-                        </BbButton>
+                        @if (t.Id != TenantDefaults.DefaultTenantId || !t.IsEnabled)
+                        {
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
+                                    @onclick="() => ToggleAsync(t)" title="@(t.IsEnabled ? "Disable" : "Enable")">
+                                <LucideIcon Name="@(t.IsEnabled ? "pause" : "play")" />
+                            </BbButton>
+                        }
                         @if (t.Id != TenantDefaults.DefaultTenantId)
                         {
                             <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
@@ -156,16 +159,25 @@ else
     private async Task ToggleAsync(Tenant t)
     {
         using var scope = ScopeFactory.CreateScope();
-        if (!t.IsEnabled)
+        try
         {
-            // Enabling — also approves a pending self-service signup (confirms + unlocks its admins).
-            var signup = scope.ServiceProvider.GetRequiredService<ITenantSignupService>();
-            await signup.ApproveTenantAsync(t.Id);
+            if (!t.IsEnabled)
+            {
+                // Enabling — also approves a pending self-service signup (confirms + unlocks its admins).
+                var signup = scope.ServiceProvider.GetRequiredService<ITenantSignupService>();
+                await signup.ApproveTenantAsync(t.Id);
+                statusMessage = $"Tenant '{t.Name}' enabled";
+            }
+            else
+            {
+                var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
+                await svc.UpdateAsync(t.Id, t.Name, false);
+                statusMessage = $"Tenant '{t.Name}' disabled";
+            }
         }
-        else
+        catch (InvalidOperationException ex)
         {
-            var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
-            await svc.UpdateAsync(t.Id, t.Name, false);
+            statusMessage = ex.Message;
         }
         await RefreshAsync();
     }

@@ -3,6 +3,7 @@
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
 @inject SignInManager<AdminUser> SignInManager
+@inject WinSmtpRelay.Core.Interfaces.IRuntimeConfigCache ConfigCache
 @inject NavigationManager Nav
 @inject ILogger<Login> Logger
 @inject Microsoft.Extensions.Options.IOptions<WinSmtpRelay.Core.Configuration.AdminUiOptions> UiOptions
@@ -57,20 +58,38 @@
 
     private async Task LoginUser()
     {
-        var result = await SignInManager.PasswordSignInAsync(
-            Input.Email, Input.Password, Input.RememberMe, lockoutOnFailure: true);
-
-        if (result.Succeeded)
+        // Validate the password without issuing the cookie yet, so a disabled tenant
+        // can be blocked after a correct password (avoids revealing valid credentials
+        // for an account whose tenant is disabled).
+        var user = await SignInManager.UserManager.FindByNameAsync(Input.Email);
+        if (user is not null)
         {
-            Logger.LogInformation("Admin {Email} signed in", Input.Email);
-            Nav.NavigateTo(GetSafeReturnUrl());
-            return;
+            var check = await SignInManager.CheckPasswordSignInAsync(user, Input.Password, lockoutOnFailure: true);
+            if (check.Succeeded)
+            {
+                if (user.TenantId is int tenantId && !await ConfigCache.IsTenantEnabledAsync(tenantId))
+                {
+                    errorMessage = "Your organization's account is disabled. Contact an administrator.";
+                    Logger.LogWarning("Sign-in blocked for {Email}: tenant {TenantId} is disabled", Input.Email, tenantId);
+                    return;
+                }
+
+                await SignInManager.SignInAsync(user, Input.RememberMe);
+                Logger.LogInformation("Admin {Email} signed in", Input.Email);
+                Nav.NavigateTo(GetSafeReturnUrl());
+                return;
+            }
+
+            if (check.IsLockedOut)
+            {
+                errorMessage = "Account locked due to too many failed attempts. Try again later.";
+                Logger.LogWarning("Failed admin sign-in for {Email} (lockedOut=True)", Input.Email);
+                return;
+            }
         }
 
-        errorMessage = result.IsLockedOut
-            ? "Account locked due to too many failed attempts. Try again later."
-            : "Invalid email or password.";
-        Logger.LogWarning("Failed admin sign-in for {Email} (lockedOut={LockedOut})", Input.Email, result.IsLockedOut);
+        errorMessage = "Invalid email or password.";
+        Logger.LogWarning("Failed admin sign-in for {Email}", Input.Email);
     }
 
     // Prevent open redirects: only allow local relative paths.

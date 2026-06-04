@@ -4,7 +4,7 @@ using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class TenantService(RelayDbContext db) : ITenantService
+public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITenantService
 {
     public async Task<IReadOnlyList<Tenant>> GetAllAsync(CancellationToken cancellationToken = default)
         => await db.Tenants.AsNoTracking().OrderBy(t => t.Id).ToListAsync(cancellationToken);
@@ -30,18 +30,27 @@ public class TenantService(RelayDbContext db) : ITenantService
         };
         db.Tenants.Add(tenant);
         await db.SaveChangesAsync(cancellationToken);
+        cache.Invalidate();
         return tenant;
     }
 
     public async Task UpdateAsync(int id, string name, bool isEnabled, CancellationToken cancellationToken = default)
     {
+        if (id == TenantDefaults.DefaultTenantId && !isEnabled)
+            throw new InvalidOperationException("The default tenant cannot be disabled.");
+
         var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
         if (tenant is null)
             return;
 
+        var enabledChanged = tenant.IsEnabled != isEnabled;
         tenant.Name = name.Trim();
         tenant.IsEnabled = isEnabled;
         await db.SaveChangesAsync(cancellationToken);
+
+        // The SMTP/API path caches the enabled-tenant set; refresh it when that changes.
+        if (enabledChanged)
+            cache.Invalidate();
     }
 
     public async Task DeleteAsync(int id, CancellationToken cancellationToken = default)
@@ -51,6 +60,7 @@ public class TenantService(RelayDbContext db) : ITenantService
 
         // FK constraints are Restrict, so this throws if the tenant still owns any data.
         await db.Tenants.Where(t => t.Id == id).ExecuteDeleteAsync(cancellationToken);
+        cache.Invalidate();
     }
 
     public static string NormalizeSlug(string slug)

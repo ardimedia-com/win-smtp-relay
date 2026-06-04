@@ -67,6 +67,17 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             context.Properties["TenantId"] = ownerTenant ?? Core.Models.TenantDefaults.DefaultTenantId;
         }
 
+        // Reject mail for a disabled tenant (the owning tenant was just resolved above).
+        var resolvedTenantId = context.Properties.TryGetValue("TenantId", out var tid) && tid is int tenantId
+            ? tenantId
+            : Core.Models.TenantDefaults.DefaultTenantId;
+        if (!await _configCache.IsTenantEnabledAsync(resolvedTenantId, cancellationToken))
+        {
+            _logger.LogWarning("Message from {Sender} rejected: tenant {TenantId} is disabled",
+                from.AsAddress(), resolvedTenantId);
+            return false;
+        }
+
         // Check if IP is auto-banned (failed auth)
         if (clientIp is not null && _rateLimiter.IsIpBanned(clientIp))
         {

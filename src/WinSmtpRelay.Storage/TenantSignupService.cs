@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.Core.Authorization;
+using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 using WinSmtpRelay.Storage.Identity;
 
@@ -23,7 +24,7 @@ public interface ITenantSignupService
     Task ApproveTenantAsync(int tenantId, CancellationToken ct = default);
 }
 
-public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userManager) : ITenantSignupService
+public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userManager, IRuntimeConfigCache cache) : ITenantSignupService
 {
     public async Task<SignupResult> SignUpAsync(string tenantName, string tenantSlug, string adminEmail, string password, CancellationToken ct = default)
     {
@@ -114,6 +115,8 @@ public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userM
         {
             tenant.IsEnabled = true;
             await db.SaveChangesAsync(ct);
+            // The SMTP/API path caches the enabled-tenant set; refresh it now this tenant is live.
+            cache.Invalidate();
         }
     }
 }

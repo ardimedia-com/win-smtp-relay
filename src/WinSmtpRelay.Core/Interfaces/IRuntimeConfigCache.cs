@@ -20,6 +20,9 @@ public interface IRuntimeConfigCache
     /// <summary>The tenant that owns an accepted recipient domain, or null if no tenant claims it.</summary>
     Task<int?> GetTenantForRecipientDomainAsync(string domain, CancellationToken ct = default);
 
+    /// <summary>True if the tenant exists and is enabled. Used to gate the SMTP path for disabled tenants.</summary>
+    Task<bool> IsTenantEnabledAsync(int tenantId, CancellationToken ct = default);
+
     Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<HeaderRewriteEntry>> GetHeaderRewriteRulesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<SenderRewriteEntry>> GetSenderRewriteRulesAsync(CancellationToken ct = default);

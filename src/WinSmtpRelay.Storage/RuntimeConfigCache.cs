@@ -25,6 +25,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
     private volatile IReadOnlyList<DomainRoute>? _domainRoutes;
     private volatile IReadOnlyList<HeaderRewriteEntry>? _headerRewriteRules;
     private volatile IReadOnlyList<SenderRewriteEntry>? _senderRewriteRules;
+    private volatile IReadOnlySet<int>? _enabledTenants;
 
     public RuntimeConfigCache(IServiceScopeFactory scopeFactory, ILogger<RuntimeConfigCache> logger)
     {
@@ -126,6 +127,37 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         {
             _lock.Release();
         }
+    }
+
+    public async Task<bool> IsTenantEnabledAsync(int tenantId, CancellationToken ct = default)
+    {
+        var set = _enabledTenants;
+        if (set is null)
+        {
+            await _lock.WaitAsync(ct);
+            try
+            {
+                if (_enabledTenants is null)
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+                    var ids = await db.Tenants
+                        .AsNoTracking()
+                        .Where(t => t.IsEnabled)
+                        .Select(t => t.Id)
+                        .ToListAsync(ct);
+                    _enabledTenants = ids.ToHashSet();
+                    _logger.LogDebug("Loaded {Count} enabled tenants into cache", ids.Count);
+                }
+                set = _enabledTenants;
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        return set.Contains(tenantId);
     }
 
     public async Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default)
@@ -253,6 +285,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         _domainRoutes = null;
         _headerRewriteRules = null;
         _senderRewriteRules = null;
+        _enabledTenants = null;
         _logger.LogInformation("Runtime configuration cache invalidated");
     }
 }
