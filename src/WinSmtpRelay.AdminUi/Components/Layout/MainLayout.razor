@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject NavigationManager Nav
 
 <BbTooltipProvider>
 <BbSidebarProvider DefaultOpen="true">
@@ -212,3 +213,21 @@
 </BbTooltipProvider>
 
 <BbPortalHost />
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthState { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is null)
+            return;
+
+        // Hard-enforce the temporary-password change: a user signed in with a
+        // must-change password may only reach the change-password page (which uses
+        // AccountLayout, so this layout — and thus this redirect — never runs there).
+        var state = await AuthState;
+        if (state.User.HasClaim(RelayClaimTypes.MustChangePassword, "true"))
+            Nav.NavigateTo("/account/change-password", forceLoad: true);
+    }
+}

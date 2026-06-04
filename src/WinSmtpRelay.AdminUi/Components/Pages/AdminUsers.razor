@@ -99,6 +99,10 @@ else
                                 <LucideIcon Name="@(r.Enabled ? "pause" : "play")" />
                             </BbButton>
                             <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
+                                    @onclick="() => ResetPasswordAsync(r.Id)" title="Reset password">
+                                <LucideIcon Name="key-round" />
+                            </BbButton>
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
                                     @onclick="() => { deleteTargetId = r.Id; showDelete = true; }" title="Delete">
                                 <LucideIcon Name="trash-2" />
                             </BbButton>
@@ -117,8 +121,8 @@ else
 <BbDialog @bind-Open="showSecret">
     <BbDialogContent>
         <BbDialogHeader>
-            <BbDialogTitle>Admin created</BbDialogTitle>
-            <BbDialogDescription>Share this one-time password securely. The user must change it on first sign-in.</BbDialogDescription>
+            <BbDialogTitle>@secretTitle</BbDialogTitle>
+            <BbDialogDescription>@secretDescription</BbDialogDescription>
         </BbDialogHeader>
         <div class="form-group"><BbInput Value="@createdPassword" ReadOnly="true" /></div>
         <BbDialogFooter><BbDialogClose><BbButton Variant="ButtonVariant.Outline">Done</BbButton></BbDialogClose></BbDialogFooter>
@@ -150,6 +154,8 @@ else
     private bool isLoading = true;
     private bool showSecret;
     private string createdPassword = "";
+    private string secretTitle = "Admin created";
+    private string secretDescription = "";
     private bool showDelete;
     private int deleteTargetId;
     private int currentUserId;
@@ -225,9 +231,40 @@ else
 
         await um.AddToRoleAsync(user, role);
         createdPassword = password;
+        secretTitle = "Admin created";
+        secretDescription = "Share this one-time password securely. The user must change it on first sign-in.";
         showSecret = true;
         statusMessage = $"Admin '{user.Email}' created";
         newEmail = "";
+        await RefreshAsync();
+    }
+
+    private async Task ResetPasswordAsync(int id)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var um = scope.ServiceProvider.GetRequiredService<UserManager<AdminUser>>();
+        var user = await um.Users.FirstOrDefaultAsync(u => u.Id == id);
+        if (user is null || user.Id == currentUserId || !InScope(user)) return;
+
+        var password = GenerateTempPassword();
+        var token = await um.GeneratePasswordResetTokenAsync(user);
+        var result = await um.ResetPasswordAsync(user, token, password);
+        if (!result.Succeeded)
+        {
+            statusMessage = string.Join(" ", result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        // Force a change on next sign-in. ResetPasswordAsync also rolls the security stamp,
+        // so any existing sessions for this user are invalidated on the next revalidation.
+        user.MustChangePassword = true;
+        await um.UpdateAsync(user);
+
+        createdPassword = password;
+        secretTitle = "Password reset";
+        secretDescription = $"Share this one-time password with {user.Email} securely. They must change it on next sign-in.";
+        showSecret = true;
+        statusMessage = $"Password reset for '{user.Email}'";
         await RefreshAsync();
     }
 
