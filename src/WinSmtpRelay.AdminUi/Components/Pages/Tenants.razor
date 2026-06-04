@@ -156,8 +156,17 @@ else
     private async Task ToggleAsync(Tenant t)
     {
         using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
-        await svc.UpdateAsync(t.Id, t.Name, !t.IsEnabled);
+        if (!t.IsEnabled)
+        {
+            // Enabling — also approves a pending self-service signup (confirms + unlocks its admins).
+            var signup = scope.ServiceProvider.GetRequiredService<ITenantSignupService>();
+            await signup.ApproveTenantAsync(t.Id);
+        }
+        else
+        {
+            var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
+            await svc.UpdateAsync(t.Id, t.Name, false);
+        }
         await RefreshAsync();
     }
 

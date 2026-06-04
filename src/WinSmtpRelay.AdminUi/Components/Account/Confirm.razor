@@ -1,0 +1,36 @@
+@page "/account/confirm"
+@layout AccountLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@inject ITenantSignupService Signup
+
+<PageTitle>Account verification — WinSmtpRelay</PageTitle>
+
+@if (confirmed == true)
+{
+    <h1 class="account-title">Account verified</h1>
+    <p class="account-subtitle">Your account is active. You can now sign in.</p>
+    <a class="account-button" href="/account/login">Sign in</a>
+}
+else
+{
+    <h1 class="account-title">Verification failed</h1>
+    <p class="account-subtitle">This verification link is invalid or has expired. Ask an administrator to approve your account.</p>
+    <a class="account-button" href="/account/login">Back to sign in</a>
+}
+
+@code {
+    [SupplyParameterFromQuery]
+    private int UserId { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? Token { get; set; }
+
+    private bool? confirmed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        confirmed = UserId > 0 && !string.IsNullOrEmpty(Token)
+            && await Signup.ConfirmAsync(UserId, Token);
+    }
+}

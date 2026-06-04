@@ -21,4 +21,14 @@ public class AdminUiOptions
 
     /// <summary>Password for <see cref="CertificatePath"/>, if any.</summary>
     public string? CertificatePassword { get; set; }
+
+    /// <summary>
+    /// Allow anonymous self-service tenant signup at /signup. Off by default (on-prem installs
+    /// bound to loopback should not expose public signup). New tenants are created disabled and
+    /// activate on email verification or host approval.
+    /// </summary>
+    public bool SelfServiceSignupEnabled { get; set; }
+
+    /// <summary>From address for signup verification emails (sent via the relay's own pipeline). Required for email verification; host approval works without it.</summary>
+    public string? SignupFromAddress { get; set; }
 }

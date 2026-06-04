@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using WinSmtpRelay.AdminApi;
@@ -10,6 +11,7 @@ using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 using WinSmtpRelay.Storage;
+using WinSmtpRelay.Storage.Identity;
 
 namespace WinSmtpRelay.Integration.Tests;
 
@@ -39,6 +41,12 @@ public class AdminApiTests
         {
             var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
             await db.Database.MigrateAsync();
+
+            // Seed admin roles (the real app does this in AdminSeeder).
+            var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<AdminRole>>();
+            foreach (var role in RelayRoles.All)
+                if (!await roleManager.RoleExistsAsync(role))
+                    await roleManager.CreateAsync(new AdminRole(role));
 
             var keys = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
             (_, hostKey) = await keys.CreateAsync(null, "test-host", RelayRoles.HostAdmin, null, default);
@@ -381,6 +389,64 @@ public class AdminApiTests
 
         var viewerCreate = await _viewerClient.PostAsJsonAsync("/api/tenants", new CreateTenantRequest("X", "x"));
         Assert.AreEqual(HttpStatusCode.Forbidden, viewerCreate.StatusCode);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Signup_CreatesPendingTenant_HostApprovalActivates()
+    {
+        using var scope = _app.Services.CreateScope();
+        var signup = scope.ServiceProvider.GetRequiredService<ITenantSignupService>();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<AdminUser>>();
+
+        var result = await signup.SignUpAsync("Acme", "acme-co", "owner@acme.test", "P@ssword12345");
+        Assert.IsTrue(result.Succeeded, result.Error);
+
+        // Tenant created disabled; admin unverified and locked out.
+        var tenant = await db.Tenants.FirstAsync(t => t.Id == result.TenantId);
+        Assert.IsFalse(tenant.IsEnabled);
+        var user = await users.FindByIdAsync(result.UserId.ToString());
+        Assert.IsNotNull(user);
+        Assert.IsFalse(user!.EmailConfirmed);
+        Assert.IsTrue(await users.IsLockedOutAsync(user));
+
+        // Host approval activates the tenant and unlocks/confirms the admin.
+        await signup.ApproveTenantAsync(result.TenantId);
+        Assert.IsTrue((await db.Tenants.FirstAsync(t => t.Id == result.TenantId)).IsEnabled);
+        var activated = await users.FindByIdAsync(result.UserId.ToString());
+        Assert.IsTrue(activated!.EmailConfirmed);
+        Assert.IsFalse(await users.IsLockedOutAsync(activated));
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Signup_EmailTokenConfirmation_Activates()
+    {
+        using var scope = _app.Services.CreateScope();
+        var signup = scope.ServiceProvider.GetRequiredService<ITenantSignupService>();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+
+        var result = await signup.SignUpAsync("Beta Inc", "beta-inc", "owner@beta.test", "P@ssword12345");
+        Assert.IsTrue(result.Succeeded, result.Error);
+
+        var confirmed = await signup.ConfirmAsync(result.UserId, result.ConfirmToken!);
+        Assert.IsTrue(confirmed);
+        Assert.IsTrue((await db.Tenants.FirstAsync(t => t.Id == result.TenantId)).IsEnabled);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Signup_DuplicateSlug_Fails()
+    {
+        using var scope = _app.Services.CreateScope();
+        var signup = scope.ServiceProvider.GetRequiredService<ITenantSignupService>();
+
+        var first = await signup.SignUpAsync("Gamma", "gamma", "a@gamma.test", "P@ssword12345");
+        Assert.IsTrue(first.Succeeded, first.Error);
+
+        var dup = await signup.SignUpAsync("Gamma 2", "gamma", "b@gamma.test", "P@ssword12345");
+        Assert.IsFalse(dup.Succeeded);
     }
 
     private record HealthResponse(string Status);

@@ -36,6 +36,7 @@ public static class RelayAuthExtensions
             .AddDefaultTokenProviders();
 
         services.AddScoped<IUserClaimsPrincipalFactory<AdminUser>, AdditionalUserClaimsPrincipalFactory>();
+        services.AddScoped<WinSmtpRelay.Storage.ITenantSignupService, WinSmtpRelay.Storage.TenantSignupService>();
 
         services.AddAuthentication(options =>
             {

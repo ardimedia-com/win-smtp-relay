@@ -53,7 +53,7 @@ public class TenantService(RelayDbContext db) : ITenantService
         await db.Tenants.Where(t => t.Id == id).ExecuteDeleteAsync(cancellationToken);
     }
 
-    private static string NormalizeSlug(string slug)
+    public static string NormalizeSlug(string slug)
     {
         var trimmed = (slug ?? "").Trim().ToLowerInvariant();
         var chars = trimmed.Select(c => char.IsLetterOrDigit(c) || c is '-' ? c : '-').ToArray();

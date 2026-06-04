@@ -5,6 +5,7 @@
 @inject SignInManager<AdminUser> SignInManager
 @inject NavigationManager Nav
 @inject ILogger<Login> Logger
+@inject Microsoft.Extensions.Options.IOptions<WinSmtpRelay.Core.Configuration.AdminUiOptions> UiOptions
 
 <PageTitle>Sign in — WinSmtpRelay</PageTitle>
 
@@ -33,6 +34,13 @@
     </label>
     <button type="submit" class="account-button">Sign in</button>
 </EditForm>
+
+@if (UiOptions.Value.SelfServiceSignupEnabled)
+{
+    <p class="account-subtitle" style="margin-top:1rem;text-align:center;">
+        No account? <a href="/signup">Create an organization</a>
+    </p>
+}
 
 @code {
     [SupplyParameterFromForm]
