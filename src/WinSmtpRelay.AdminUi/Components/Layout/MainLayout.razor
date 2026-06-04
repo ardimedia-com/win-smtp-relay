@@ -131,6 +131,20 @@
                     </BbSidebarMenuItem>
                 </BbSidebarMenu>
             </BbSidebarGroup>
+
+            <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin">
+                <BbSidebarGroup>
+                    <BbSidebarGroupLabel>Host</BbSidebarGroupLabel>
+                    <BbSidebarMenu>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="tenants">
+                                <LucideIcon Name="building-2" />
+                                <span>Tenants</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                    </BbSidebarMenu>
+                </BbSidebarGroup>
+            </AuthorizeView>
         </BbSidebarContent>
 
         <BbSidebarFooter>

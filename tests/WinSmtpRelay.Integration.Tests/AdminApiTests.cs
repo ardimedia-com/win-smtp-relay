@@ -360,5 +360,28 @@ public class AdminApiTests
         Assert.IsTrue(afterDelete!.Any(u => u.Id == aliceId));
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Tenants_HostCanManage_NonHostForbidden()
+    {
+        // Host admin can create + list tenants.
+        var create = await _client.PostAsJsonAsync("/api/tenants", new CreateTenantRequest("Acme Corp", "acme"));
+        Assert.AreEqual(HttpStatusCode.Created, create.StatusCode);
+
+        var list = await _client.GetFromJsonAsync<Tenant[]>("/api/tenants");
+        Assert.IsTrue(list!.Any(t => t.Slug == "acme"));
+
+        // Duplicate slug -> Conflict.
+        var dup = await _client.PostAsJsonAsync("/api/tenants", new CreateTenantRequest("Acme 2", "acme"));
+        Assert.AreEqual(HttpStatusCode.Conflict, dup.StatusCode);
+
+        // A tenant-scoped (non-host) principal is forbidden from tenant administration.
+        var viewerList = await _viewerClient.GetAsync("/api/tenants");
+        Assert.AreEqual(HttpStatusCode.Forbidden, viewerList.StatusCode);
+
+        var viewerCreate = await _viewerClient.PostAsJsonAsync("/api/tenants", new CreateTenantRequest("X", "x"));
+        Assert.AreEqual(HttpStatusCode.Forbidden, viewerCreate.StatusCode);
+    }
+
     private record HealthResponse(string Status);
 }

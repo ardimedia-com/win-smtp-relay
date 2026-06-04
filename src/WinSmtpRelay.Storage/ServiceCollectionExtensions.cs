@@ -18,6 +18,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IStatisticsService, StatisticsService>();
         services.AddScoped<IApiKeyService, ApiKeyService>();
+        services.AddScoped<ITenantService, TenantService>();
 
         // Configuration services
         services.AddScoped<IReceiveConnectorService, ReceiveConnectorService>();

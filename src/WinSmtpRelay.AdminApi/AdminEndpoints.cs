@@ -37,6 +37,7 @@ public static class AdminEndpoints
         MapDkimEndpoints(group);
         MapServerEndpoints(group);
         MapStatisticsEndpoints(group);
+        MapTenantEndpoints(group);
 
         // Configuration endpoints
         MapReceiveConnectorEndpoints(group);
@@ -242,6 +243,51 @@ public static class AdminEndpoints
             });
         });
     }
+    private static void MapTenantEndpoints(RouteGroupBuilder group)
+    {
+        // Tenant administration is host-only (in addition to the group's baseline authorization).
+        var ep = group.MapGroup("/tenants").RequireAuthorization(AuthorizationPolicies.HostAdmin);
+
+        ep.MapGet("/", async (ITenantService svc, CancellationToken ct) =>
+            Results.Ok(await svc.GetAllAsync(ct)));
+
+        ep.MapPost("/", async (CreateTenantRequest req, ITenantService svc, CancellationToken ct) =>
+        {
+            try
+            {
+                var created = await svc.CreateAsync(req.Name, req.Slug, ct);
+                return Results.Created($"/api/tenants/{created.Id}", created);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { Error = ex.Message });
+            }
+        });
+
+        ep.MapPut("/{id:int}", async (int id, UpdateTenantRequest req, ITenantService svc, CancellationToken ct) =>
+        {
+            await svc.UpdateAsync(id, req.Name, req.IsEnabled, ct);
+            return Results.Ok(new { Message = "Tenant updated" });
+        });
+
+        ep.MapDelete("/{id:int}", async (int id, ITenantService svc, CancellationToken ct) =>
+        {
+            try
+            {
+                await svc.DeleteAsync(id, ct);
+                return Results.Ok(new { Message = "Tenant deleted" });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { Error = ex.Message });
+            }
+            catch (DbUpdateException)
+            {
+                return Results.BadRequest(new { Error = "Tenant still owns data and cannot be deleted." });
+            }
+        });
+    }
+
     private static void MapStatisticsEndpoints(RouteGroupBuilder group)
     {
         var stats = group.MapGroup("/statistics");
@@ -550,3 +596,5 @@ public record DeliveryLogSummary(
 
 public record CreateAcceptedDomainRequest(string Domain);
 public record CreateAcceptedSenderDomainRequest(string Domain);
+public record CreateTenantRequest(string Name, string Slug);
+public record UpdateTenantRequest(string Name, bool IsEnabled);
