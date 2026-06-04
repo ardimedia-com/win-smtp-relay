@@ -271,20 +271,17 @@ public static class AdminEndpoints
             return Results.Ok(new { Message = "Tenant updated" });
         });
 
+        // Destructive: removes the tenant and ALL its data. Host-only (group is HostAdmin-gated).
         ep.MapDelete("/{id:int}", async (int id, ITenantService svc, CancellationToken ct) =>
         {
             try
             {
-                await svc.DeleteAsync(id, ct);
-                return Results.Ok(new { Message = "Tenant deleted" });
+                await svc.PurgeAndDeleteAsync(id, ct);
+                return Results.Ok(new { Message = "Tenant and all its data deleted" });
             }
             catch (InvalidOperationException ex)
             {
                 return Results.BadRequest(new { Error = ex.Message });
-            }
-            catch (DbUpdateException)
-            {
-                return Results.BadRequest(new { Error = "Tenant still owns data and cannot be deleted." });
             }
         });
     }

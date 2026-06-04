@@ -17,4 +17,11 @@ public interface ITenantService
 
     /// <summary>Deletes a tenant. The default tenant cannot be deleted; deletion fails if the tenant still owns data.</summary>
     Task DeleteAsync(int id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Permanently deletes a tenant together with ALL its data (relay users, connectors, domains,
+    /// routing, DKIM, filters, queue, delivery logs, statistics, API keys, and admin accounts).
+    /// The default tenant cannot be deleted. Destructive and irreversible.
+    /// </summary>
+    Task PurgeAndDeleteAsync(int id, CancellationToken cancellationToken = default);
 }

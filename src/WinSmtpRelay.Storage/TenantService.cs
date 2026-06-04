@@ -63,6 +63,44 @@ public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITena
         cache.Invalidate();
     }
 
+    public async Task PurgeAndDeleteAsync(int id, CancellationToken cancellationToken = default)
+    {
+        if (id == TenantDefaults.DefaultTenantId)
+            throw new InvalidOperationException("The default tenant cannot be deleted.");
+
+        if (!await db.Tenants.AnyAsync(t => t.Id == id, cancellationToken))
+            return;
+
+        // Delete every owned row before the tenant (the tenant FKs are Restrict). IgnoreQueryFilters
+        // makes this independent of the ambient scope; a transaction keeps it all-or-nothing.
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        // DomainRoutes reference SendConnectors, so remove them first.
+        await db.DomainRoutes.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.SendConnectors.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.DkimDomains.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.AcceptedDomains.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.AcceptedSenderDomains.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.IpAccessRules.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.ReceiveConnectors.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.HeaderRewriteEntries.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.SenderRewriteEntries.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.RelayUsers.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.DeliveryLogs.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.QueuedMessages.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.DailyStatistics.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+
+        // Tenant-bound but not ITenantOwned (nullable TenantId, no FK): clean up to avoid orphans.
+        // Deleting admin users cascades to their Identity role/claim rows at the database level.
+        await db.ApiKeys.Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+        await db.Users.Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
+
+        await db.Tenants.Where(t => t.Id == id).ExecuteDeleteAsync(cancellationToken);
+
+        await tx.CommitAsync(cancellationToken);
+        cache.Invalidate();
+    }
+
     public static string NormalizeSlug(string slug)
     {
         var trimmed = (slug ?? "").Trim().ToLowerInvariant();

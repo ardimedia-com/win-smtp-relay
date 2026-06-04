@@ -605,5 +605,46 @@ public class AdminApiTests
         }
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task PurgeAndDelete_RemovesTenantAndAllItsData()
+    {
+        int tid;
+        using (var scope = _app.Services.CreateScope())
+        {
+            var sp = scope.ServiceProvider;
+            tid = (await sp.GetRequiredService<ITenantService>().CreateAsync("Doomed", "doomed")).Id;
+
+            var db = sp.GetRequiredService<RelayDbContext>();
+            // A delivery log makes the tenant FK-Restrict block a plain delete.
+            db.DeliveryLogs.Add(new DeliveryLog { TenantId = tid, Recipient = "r@doomed", StatusCode = "250", StatusMessage = "ok" });
+            db.Users.Add(new AdminUser { UserName = "owner@doomed", Email = "owner@doomed", TenantId = tid });
+            await db.SaveChangesAsync();
+
+            await sp.GetRequiredService<IApiKeyService>().CreateAsync(tid, "k", RelayRoles.TenantAdmin, null, default);
+        }
+
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<ITenantService>().PurgeAndDeleteAsync(tid);
+
+        using (var scope = _app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            Assert.IsFalse(await db.Tenants.AnyAsync(t => t.Id == tid), "tenant should be gone");
+            Assert.IsFalse(await db.DeliveryLogs.IgnoreQueryFilters().AnyAsync(l => l.TenantId == tid), "delivery logs should be purged");
+            Assert.IsFalse(await db.ApiKeys.AnyAsync(k => k.TenantId == tid), "api keys should be purged");
+            Assert.IsFalse(await db.Users.AnyAsync(u => u.TenantId == tid), "admin users should be purged");
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task PurgeAndDelete_RefusesDefaultTenant()
+    {
+        using var scope = _app.Services.CreateScope();
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => scope.ServiceProvider.GetRequiredService<ITenantService>().PurgeAndDeleteAsync(TenantDefaults.DefaultTenantId));
+    }
+
     private record HealthResponse(string Status);
 }

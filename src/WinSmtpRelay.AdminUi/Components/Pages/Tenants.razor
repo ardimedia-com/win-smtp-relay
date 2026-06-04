@@ -105,7 +105,7 @@ else
     <BbAlertDialogContent>
         <BbAlertDialogHeader>
             <BbAlertDialogTitle>Delete Tenant</BbAlertDialogTitle>
-            <BbAlertDialogDescription>This permanently removes the tenant. It only succeeds if the tenant owns no data (users, connectors, domains, etc.).</BbAlertDialogDescription>
+            <BbAlertDialogDescription>This permanently deletes the tenant <strong>and all of its data</strong> — relay users, mail queue, delivery logs, connectors, domains, DKIM keys, filters, API keys, and admin accounts. This cannot be undone.</BbAlertDialogDescription>
         </BbAlertDialogHeader>
         <BbAlertDialogFooter>
             <BbAlertDialogCancel>
@@ -189,12 +189,12 @@ else
         var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
         try
         {
-            await svc.DeleteAsync(deleteTargetId);
-            statusMessage = "Tenant deleted";
+            await svc.PurgeAndDeleteAsync(deleteTargetId);
+            statusMessage = "Tenant and all its data deleted";
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
-            statusMessage = ex is InvalidOperationException ? ex.Message : "Tenant still owns data and cannot be deleted.";
+            statusMessage = ex.Message;
         }
         await RefreshAsync();
     }
