@@ -14,46 +14,80 @@ public class DnsSetupService(
     IOptions<DnsOptions> options,
     IDkimDomainService dkimDomains,
     IAcceptedSenderDomainService senderDomains,
+    IDnsSettingsService dnsSettings,
     ILogger<DnsSetupService> logger) : IDnsSetupService
 {
     private readonly DnsOptions _options = options.Value;
 
+    // The runtime (DB) recommendation inputs, loaded once per scope. Falls back to the appsettings
+    // values until loaded (e.g. when only the synchronous Build* methods are exercised).
+    private DnsOptions? _effective;
+    private DnsOptions Current => _effective ?? _options;
+
+    private async Task EnsureEffectiveAsync(CancellationToken ct)
+    {
+        if (_effective is not null)
+            return;
+
+        var s = await dnsSettings.GetAsync(ct);
+        _effective = new DnsOptions
+        {
+            PublicHostname = s.PublicHostname,
+            SendingIpAddresses = SplitList(s.SendingIpAddresses),
+            SpfIncludes = SplitList(s.SpfIncludes),
+            SpfAllQualifier = s.SpfAllQualifier,
+            DmarcReportEmail = s.DmarcReportEmail,
+            DmarcPolicy = s.DmarcPolicy,
+            DmarcPercentage = s.DmarcPercentage,
+        };
+    }
+
+    private static List<string> SplitList(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
     private bool HasSpfIdentity =>
-        _options.SendingIpAddresses.Count > 0
-        || !string.IsNullOrWhiteSpace(_options.PublicHostname)
-        || _options.SpfIncludes.Count > 0;
+        Current.SendingIpAddresses.Count > 0
+        || !string.IsNullOrWhiteSpace(Current.PublicHostname)
+        || Current.SpfIncludes.Count > 0;
 
     public string BuildRecommendedSpf()
     {
+        var current = Current;
         var parts = new List<string> { "v=spf1" };
-        foreach (var ip in _options.SendingIpAddresses)
+        foreach (var ip in current.SendingIpAddresses)
             parts.Add((ip.Contains(':') ? "ip6:" : "ip4:") + ip.Trim());
-        if (!string.IsNullOrWhiteSpace(_options.PublicHostname))
-            parts.Add("a:" + _options.PublicHostname.Trim());
-        foreach (var include in _options.SpfIncludes)
+        if (!string.IsNullOrWhiteSpace(current.PublicHostname))
+            parts.Add("a:" + current.PublicHostname.Trim());
+        foreach (var include in current.SpfIncludes)
             parts.Add("include:" + include.Trim());
-        parts.Add(string.IsNullOrWhiteSpace(_options.SpfAllQualifier) ? "~all" : _options.SpfAllQualifier.Trim());
+        parts.Add(string.IsNullOrWhiteSpace(current.SpfAllQualifier) ? "~all" : current.SpfAllQualifier.Trim());
         return string.Join(' ', parts);
     }
 
     public string BuildRecommendedDmarc(string domain)
     {
-        var policy = string.IsNullOrWhiteSpace(_options.DmarcPolicy) ? "none" : _options.DmarcPolicy.Trim();
+        var current = Current;
+        var policy = string.IsNullOrWhiteSpace(current.DmarcPolicy) ? "none" : current.DmarcPolicy.Trim();
         var record = $"v=DMARC1; p={policy}";
-        if (!string.IsNullOrWhiteSpace(_options.DmarcReportEmail))
-            record += $"; rua=mailto:{_options.DmarcReportEmail.Trim()}";
-        record += $"; pct={_options.DmarcPercentage}";
+        if (!string.IsNullOrWhiteSpace(current.DmarcReportEmail))
+            record += $"; rua=mailto:{current.DmarcReportEmail.Trim()}";
+        record += $"; pct={current.DmarcPercentage}";
         return record;
     }
 
     public async Task<DomainDnsSetup> CheckDomainAsync(string domain, CancellationToken ct = default)
     {
+        await EnsureEffectiveAsync(ct);
         var dkimRows = await dkimDomains.GetAllAsync(ct);
         return await CheckCoreAsync(domain, dkimRows, ct);
     }
 
     public async Task<IReadOnlyList<DomainDnsSetup>> CheckAllSenderDomainsAsync(CancellationToken ct = default)
     {
+        await EnsureEffectiveAsync(ct);
+
         // Load DB-backed config once; DNS lookups below touch no DbContext, so they are safe to
         // run sequentially over a shared scoped DbContext (no concurrent EF access).
         var senders = await senderDomains.GetAllAsync(ct);

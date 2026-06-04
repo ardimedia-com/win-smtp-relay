@@ -28,7 +28,7 @@ public class DnsSetupServiceTests
     [TestCategory("Unit")]
     public void BuildOwnershipRecord_PrefixesToken()
     {
-        var service = new DnsSetupService(null!, Options.Create(new DnsOptions()), null!, null!, NullLogger<DnsSetupService>.Instance);
+        var service = new DnsSetupService(null!, Options.Create(new DnsOptions()), null!, null!, null!, NullLogger<DnsSetupService>.Instance);
         Assert.AreEqual("winsmtprelay-verification=abc123", service.BuildOwnershipRecord("abc123"));
     }
 
@@ -37,7 +37,7 @@ public class DnsSetupServiceTests
     public async Task CheckOwnershipAsync_EmptyToken_ReturnsFalseWithoutDnsLookup()
     {
         // null DNS client — an empty token must short-circuit before any lookup.
-        var service = new DnsSetupService(null!, Options.Create(new DnsOptions()), null!, null!, NullLogger<DnsSetupService>.Instance);
+        var service = new DnsSetupService(null!, Options.Create(new DnsOptions()), null!, null!, null!, NullLogger<DnsSetupService>.Instance);
         Assert.IsFalse(await service.CheckOwnershipAsync("example.com", ""));
     }
 
@@ -52,7 +52,7 @@ public class DnsSetupServiceTests
             SpfIncludes = ["_spf.example.net"],
             SpfAllQualifier = "~all"
         };
-        var service = new DnsSetupService(null!, Options.Create(options), null!, null!, NullLogger<DnsSetupService>.Instance);
+        var service = new DnsSetupService(null!, Options.Create(options), null!, null!, null!, NullLogger<DnsSetupService>.Instance);
 
         Assert.AreEqual("v=spf1 ip4:203.0.113.10 a:relay.example.com include:_spf.example.net ~all", service.BuildRecommendedSpf());
     }
@@ -62,7 +62,7 @@ public class DnsSetupServiceTests
     public void BuildRecommendedSpf_Ipv6UsesIp6Mechanism()
     {
         var options = new DnsOptions { SendingIpAddresses = ["2001:db8::1"], SpfAllQualifier = "-all" };
-        var service = new DnsSetupService(null!, Options.Create(options), null!, null!, NullLogger<DnsSetupService>.Instance);
+        var service = new DnsSetupService(null!, Options.Create(options), null!, null!, null!, NullLogger<DnsSetupService>.Instance);
 
         Assert.AreEqual("v=spf1 ip6:2001:db8::1 -all", service.BuildRecommendedSpf());
     }
@@ -72,7 +72,7 @@ public class DnsSetupServiceTests
     public void BuildRecommendedDmarc_UsesPolicyRuaAndPercentage()
     {
         var options = new DnsOptions { DmarcPolicy = "quarantine", DmarcReportEmail = "dmarc@example.com", DmarcPercentage = 50 };
-        var service = new DnsSetupService(null!, Options.Create(options), null!, null!, NullLogger<DnsSetupService>.Instance);
+        var service = new DnsSetupService(null!, Options.Create(options), null!, null!, null!, NullLogger<DnsSetupService>.Instance);
 
         Assert.AreEqual("v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com; pct=50", service.BuildRecommendedDmarc("example.com"));
     }
@@ -82,7 +82,7 @@ public class DnsSetupServiceTests
     public void BuildRecommendedDmarc_OmitsRuaWhenNoEmail()
     {
         var options = new DnsOptions { DmarcPolicy = "none", DmarcReportEmail = null, DmarcPercentage = 100 };
-        var service = new DnsSetupService(null!, Options.Create(options), null!, null!, NullLogger<DnsSetupService>.Instance);
+        var service = new DnsSetupService(null!, Options.Create(options), null!, null!, null!, NullLogger<DnsSetupService>.Instance);
 
         Assert.AreEqual("v=DMARC1; p=none; pct=100", service.BuildRecommendedDmarc("example.com"));
     }

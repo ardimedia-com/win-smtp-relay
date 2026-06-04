@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The DNS recommendation inputs (public hostname, sending IPs, SPF includes/qualifier, DMARC report address/policy/percentage) that drive the **DNS Setup** page's recommended SPF/DMARC records are now runtime settings on the **Settings** page, applied without a restart. Stored in `DnsSettings` (lists as delimited strings), seeded once from the appsettings `Dns` section; the DNS Setup page reads them on its next check.
 - Statistics retention (how many days of daily statistics to keep) and the daily aggregation time are now runtime settings on the **Settings** page; the background aggregator reads them each cycle, so changes apply without a restart. Stored in `StatisticsRetentionSettings`, seeded once from the appsettings `Statistics` section.
 - Backup-MX behaviour (enabled, the held domains, retry interval, and max hold time) is now a runtime setting on the **Settings** page, applied immediately with no restart. It is stored in the database (`BackupMxSettings`, domains as a delimited list), cached on the SMTP/delivery path, and seeded once from the appsettings `BackupMx` section.
 - Inbound email authentication (SPF/DMARC enabled + the failure enforcement mode: log-only / reject / quarantine) is now a runtime setting on the **Settings** page, applied immediately with no restart. It is stored in the database (`EmailAuthSettings`), cached on the SMTP path, and seeded once from the appsettings `EmailAuthentication` section.

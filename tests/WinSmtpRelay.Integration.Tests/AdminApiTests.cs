@@ -824,5 +824,34 @@ public class AdminApiTests
             Assert.AreEqual(1, (await scope.ServiceProvider.GetRequiredService<IStatisticsRetentionSettingsService>().GetAsync()).RetentionDays);
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task DnsSettings_UpdatePersists()
+    {
+        using (var scope = _app.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IDnsSettingsService>().UpdateAsync(new WinSmtpRelay.Core.Models.DnsSettings
+            {
+                PublicHostname = "relay.example.com",
+                SendingIpAddresses = "203.0.113.10; 2001:db8::1",
+                SpfIncludes = "_spf.example.net",
+                SpfAllQualifier = "-all",
+                DmarcReportEmail = "dmarc@example.com",
+                DmarcPolicy = "reject",
+                DmarcPercentage = 150 // out of range -> clamped to 100
+            });
+        }
+
+        using (var scope = _app.Services.CreateScope())
+        {
+            var dns = await scope.ServiceProvider.GetRequiredService<IDnsSettingsService>().GetAsync();
+            Assert.AreEqual("relay.example.com", dns.PublicHostname);
+            Assert.AreEqual("203.0.113.10; 2001:db8::1", dns.SendingIpAddresses);
+            Assert.AreEqual("-all", dns.SpfAllQualifier);
+            Assert.AreEqual("reject", dns.DmarcPolicy);
+            Assert.AreEqual(100, dns.DmarcPercentage, "percentage should be clamped to 1-100");
+        }
+    }
+
     private record HealthResponse(string Status);
 }

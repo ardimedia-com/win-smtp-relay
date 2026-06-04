@@ -23,6 +23,7 @@ public class ConfigurationSeeder(
     IOptions<EmailAuthenticationOptions> emailAuthOpts,
     IOptions<BackupMxOptions> backupMxOpts,
     IOptions<StatisticsOptions> statisticsOpts,
+    IOptions<DnsOptions> dnsOpts,
     ILogger<ConfigurationSeeder> logger) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -40,6 +41,7 @@ public class ConfigurationSeeder(
         await SeedEmailAuthSettingsAsync(db, cancellationToken);
         await SeedBackupMxSettingsAsync(db, cancellationToken);
         await SeedStatisticsRetentionSettingsAsync(db, cancellationToken);
+        await SeedDnsSettingsAsync(db, cancellationToken);
         await SeedMessageFiltersAsync(db, cancellationToken);
     }
 
@@ -268,6 +270,27 @@ public class ConfigurationSeeder(
         // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied statistics retention settings from appsettings (row not yet edited)");
+    }
+
+    private async Task SeedDnsSettingsAsync(RelayDbContext db, CancellationToken ct)
+    {
+        var existing = await db.DnsSettings.FindAsync([1], ct);
+        if (existing is null) return; // seeded by EF HasData
+
+        if (existing.UpdatedUtc != SeedSentinel)
+            return; // edited via UI — DB authoritative
+
+        var opts = dnsOpts.Value;
+        existing.PublicHostname = opts.PublicHostname;
+        existing.SendingIpAddresses = string.Join(";", opts.SendingIpAddresses);
+        existing.SpfIncludes = string.Join(";", opts.SpfIncludes);
+        existing.SpfAllQualifier = opts.SpfAllQualifier;
+        existing.DmarcReportEmail = opts.DmarcReportEmail;
+        existing.DmarcPolicy = opts.DmarcPolicy;
+        existing.DmarcPercentage = opts.DmarcPercentage;
+        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Applied DNS recommendation settings from appsettings (row not yet edited)");
     }
 
     private async Task SeedMessageFiltersAsync(RelayDbContext db, CancellationToken ct)

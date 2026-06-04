@@ -34,6 +34,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<EmailAuthSettings> EmailAuthSettings => Set<EmailAuthSettings>();
     public DbSet<BackupMxSettings> BackupMxSettings => Set<BackupMxSettings>();
     public DbSet<StatisticsRetentionSettings> StatisticsRetentionSettings => Set<StatisticsRetentionSettings>();
+    public DbSet<DnsSettings> DnsSettings => Set<DnsSettings>();
     public DbSet<HeaderRewriteEntry> HeaderRewriteEntries => Set<HeaderRewriteEntry>();
     public DbSet<SenderRewriteEntry> SenderRewriteEntries => Set<SenderRewriteEntry>();
 
@@ -229,6 +230,27 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 Id = 1,
                 RetentionDays = 90,
                 AggregationTimeUtc = "00:00",
+                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            });
+        });
+
+        modelBuilder.Entity<DnsSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PublicHostname).HasMaxLength(255);
+            entity.Property(e => e.SendingIpAddresses).HasMaxLength(1000);
+            entity.Property(e => e.SpfIncludes).HasMaxLength(2000);
+            entity.Property(e => e.SpfAllQualifier).HasMaxLength(20);
+            entity.Property(e => e.DmarcReportEmail).HasMaxLength(320);
+            entity.Property(e => e.DmarcPolicy).HasMaxLength(20);
+            entity.HasData(new DnsSettings
+            {
+                Id = 1,
+                SendingIpAddresses = "",
+                SpfIncludes = "",
+                SpfAllQualifier = "~all",
+                DmarcPolicy = "none",
+                DmarcPercentage = 100,
                 UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             });
         });
