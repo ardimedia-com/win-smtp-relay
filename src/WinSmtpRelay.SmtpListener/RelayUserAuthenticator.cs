@@ -67,7 +67,7 @@ public class RelayUserAuthenticator : UserAuthenticator, IUserAuthenticator
 
             // Track failed auth for auto-ban
             if (clientIp is not null)
-                _rateLimiter.RecordFailedAuth(clientIp);
+                await _rateLimiter.RecordFailedAuthAsync(clientIp, cancellationToken);
         }
 
         return result;

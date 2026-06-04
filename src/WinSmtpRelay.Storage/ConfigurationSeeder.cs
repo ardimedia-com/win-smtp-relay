@@ -169,21 +169,29 @@ public class ConfigurationSeeder(
         logger.LogInformation("Seeded {Count} DKIM domain(s) from appsettings", opts.Domains.Count);
     }
 
+    // Matches the HasData seed in RelayDbContext: an untouched row carries this timestamp.
+    private static readonly DateTime RateLimitSeedSentinel = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
     private async Task SeedRateLimitSettingsAsync(RelayDbContext db, CancellationToken ct)
     {
         var existing = await db.RateLimitSettings.FindAsync([1], ct);
         if (existing is null) return; // seeded by EF HasData
 
-        // Only update if still at defaults (not yet edited)
+        // Apply appsettings only while the row has never been edited (UI edits bump UpdatedUtc
+        // past the seed sentinel). Once edited, the database is authoritative — do not clobber it.
+        if (existing.UpdatedUtc != RateLimitSeedSentinel)
+            return;
+
         var opts = rateLimitOpts.Value;
         existing.MaxConnectionsPerIpPerMinute = opts.MaxConnectionsPerIpPerMinute;
         existing.MaxMessagesPerSenderPerMinute = opts.MaxMessagesPerSenderPerMinute;
         existing.MaxMessagesPerSenderPerDay = opts.MaxMessagesPerSenderPerDay;
         existing.FailedAuthBanThreshold = opts.FailedAuthBanThreshold;
         existing.FailedAuthBanMinutes = opts.FailedAuthBanMinutes;
+        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
 
         await db.SaveChangesAsync(ct);
-        logger.LogInformation("Synced rate limit settings from appsettings");
+        logger.LogInformation("Applied rate limit settings from appsettings (row not yet edited)");
     }
 
     private async Task SeedMessageFiltersAsync(RelayDbContext db, CancellationToken ct)

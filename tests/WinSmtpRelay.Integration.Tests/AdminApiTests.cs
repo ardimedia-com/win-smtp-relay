@@ -510,5 +510,29 @@ public class AdminApiTests
         Assert.IsTrue(await cache.IsTenantEnabledAsync(tenantId), "cache should reflect the re-enable after invalidation");
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task RateLimitSettings_CacheReflectsUpdate_AfterInvalidation()
+    {
+        var cache = _app.Services.GetRequiredService<IRuntimeConfigCache>();
+        var before = await cache.GetRateLimitSettingsAsync();
+
+        using (var scope = _app.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IRateLimitSettingsService>().UpdateAsync(new RateLimitSettings
+            {
+                MaxConnectionsPerIpPerMinute = before.MaxConnectionsPerIpPerMinute + 7,
+                MaxMessagesPerSenderPerMinute = before.MaxMessagesPerSenderPerMinute,
+                MaxMessagesPerSenderPerDay = before.MaxMessagesPerSenderPerDay,
+                FailedAuthBanThreshold = before.FailedAuthBanThreshold,
+                FailedAuthBanMinutes = before.FailedAuthBanMinutes
+            });
+        }
+
+        var after = await cache.GetRateLimitSettingsAsync();
+        Assert.AreEqual(before.MaxConnectionsPerIpPerMinute + 7, after.MaxConnectionsPerIpPerMinute,
+            "the cache should reflect the persisted update after invalidation");
+    }
+
     private record HealthResponse(string Status);
 }

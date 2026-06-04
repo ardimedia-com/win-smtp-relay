@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using WinSmtpRelay.Core.Configuration;
+using WinSmtpRelay.Core.Interfaces;
+using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Security;
 
@@ -11,12 +11,12 @@ public class RateLimiter
     private readonly ConcurrentDictionary<string, SlidingWindowCounter> _ipRecords = new();
     private readonly ConcurrentDictionary<string, SlidingWindowCounter> _senderRecords = new();
     private readonly ConcurrentDictionary<string, FailedAuthRecord> _failedAuthRecords = new();
-    private readonly RateLimitOptions _options;
+    private readonly IRuntimeConfigCache _cache;
     private readonly ILogger<RateLimiter> _logger;
 
-    public RateLimiter(IOptions<RateLimitOptions> options, ILogger<RateLimiter> logger)
+    public RateLimiter(IRuntimeConfigCache cache, ILogger<RateLimiter> logger)
     {
-        _options = options.Value;
+        _cache = cache;
         _logger = logger;
     }
 
@@ -49,9 +49,10 @@ public class RateLimiter
         }
     }
 
-    public bool IsIpAllowed(string ipAddress)
+    public async Task<bool> IsIpAllowedAsync(string ipAddress, CancellationToken ct = default)
     {
-        if (_options.MaxConnectionsPerIpPerMinute <= 0) return true;
+        var settings = await _cache.GetRateLimitSettingsAsync(ct);
+        if (settings.MaxConnectionsPerIpPerMinute <= 0) return true;
 
         var record = _ipRecords.GetOrAdd(ipAddress, _ => new SlidingWindowCounter());
         var now = DateTime.UtcNow;
@@ -60,9 +61,9 @@ public class RateLimiter
         {
             record.PruneOlderThan(now.AddMinutes(-5));
 
-            if (record.CountSince(now.AddMinutes(-1)) >= _options.MaxConnectionsPerIpPerMinute)
+            if (record.CountSince(now.AddMinutes(-1)) >= settings.MaxConnectionsPerIpPerMinute)
             {
-                _logger.LogWarning("IP rate limit exceeded for {Ip}: {Limit}/min", ipAddress, _options.MaxConnectionsPerIpPerMinute);
+                _logger.LogWarning("IP rate limit exceeded for {Ip}: {Limit}/min", ipAddress, settings.MaxConnectionsPerIpPerMinute);
                 return false;
             }
 
@@ -71,9 +72,10 @@ public class RateLimiter
         }
     }
 
-    public bool IsSenderAllowed(string senderAddress)
+    public async Task<bool> IsSenderAllowedAsync(string senderAddress, CancellationToken ct = default)
     {
-        if (_options.MaxMessagesPerSenderPerMinute <= 0 && _options.MaxMessagesPerSenderPerDay <= 0)
+        var settings = await _cache.GetRateLimitSettingsAsync(ct);
+        if (settings.MaxMessagesPerSenderPerMinute <= 0 && settings.MaxMessagesPerSenderPerDay <= 0)
             return true;
 
         var record = _senderRecords.GetOrAdd(senderAddress.ToLowerInvariant(), _ => new SlidingWindowCounter());
@@ -83,17 +85,17 @@ public class RateLimiter
         {
             record.PruneOlderThan(now.AddDays(-1));
 
-            if (_options.MaxMessagesPerSenderPerMinute > 0 &&
-                record.CountSince(now.AddMinutes(-1)) >= _options.MaxMessagesPerSenderPerMinute)
+            if (settings.MaxMessagesPerSenderPerMinute > 0 &&
+                record.CountSince(now.AddMinutes(-1)) >= settings.MaxMessagesPerSenderPerMinute)
             {
-                _logger.LogWarning("Sender rate limit exceeded for {Sender}: {Limit}/min", senderAddress, _options.MaxMessagesPerSenderPerMinute);
+                _logger.LogWarning("Sender rate limit exceeded for {Sender}: {Limit}/min", senderAddress, settings.MaxMessagesPerSenderPerMinute);
                 return false;
             }
 
-            if (_options.MaxMessagesPerSenderPerDay > 0 &&
-                record.CountSince(now.AddDays(-1)) >= _options.MaxMessagesPerSenderPerDay)
+            if (settings.MaxMessagesPerSenderPerDay > 0 &&
+                record.CountSince(now.AddDays(-1)) >= settings.MaxMessagesPerSenderPerDay)
             {
-                _logger.LogWarning("Sender rate limit exceeded for {Sender}: {Limit}/day", senderAddress, _options.MaxMessagesPerSenderPerDay);
+                _logger.LogWarning("Sender rate limit exceeded for {Sender}: {Limit}/day", senderAddress, settings.MaxMessagesPerSenderPerDay);
                 return false;
             }
 
@@ -102,19 +104,20 @@ public class RateLimiter
         }
     }
 
-    public void RecordFailedAuth(string ipAddress)
+    public async Task RecordFailedAuthAsync(string ipAddress, CancellationToken ct = default)
     {
+        var settings = await _cache.GetRateLimitSettingsAsync(ct);
         var record = _failedAuthRecords.GetOrAdd(ipAddress, _ => new FailedAuthRecord());
         lock (record)
         {
             record.FailCount++;
             record.LastFailUtc = DateTime.UtcNow;
 
-            if (record.FailCount >= _options.FailedAuthBanThreshold)
+            if (record.FailCount >= settings.FailedAuthBanThreshold)
             {
-                record.BannedUntilUtc = DateTime.UtcNow.AddMinutes(_options.FailedAuthBanMinutes);
+                record.BannedUntilUtc = DateTime.UtcNow.AddMinutes(settings.FailedAuthBanMinutes);
                 _logger.LogWarning("IP {Ip} auto-banned for {Minutes} minutes after {Count} failed auth attempts",
-                    ipAddress, _options.FailedAuthBanMinutes, record.FailCount);
+                    ipAddress, settings.FailedAuthBanMinutes, record.FailCount);
             }
         }
     }

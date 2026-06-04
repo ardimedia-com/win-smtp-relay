@@ -4,7 +4,7 @@ using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class RateLimitSettingsService(RelayDbContext db) : IRateLimitSettingsService
+public class RateLimitSettingsService(RelayDbContext db, IRuntimeConfigCache cache) : IRateLimitSettingsService
 {
     public async Task<RateLimitSettings> GetAsync(CancellationToken ct = default)
     {
@@ -31,5 +31,8 @@ public class RateLimitSettingsService(RelayDbContext db) : IRateLimitSettingsSer
         existing.UpdatedUtc = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
+
+        // The SMTP hot path caches these settings — refresh so edits take effect immediately.
+        cache.Invalidate();
     }
 }

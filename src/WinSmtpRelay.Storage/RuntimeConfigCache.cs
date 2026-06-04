@@ -26,6 +26,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
     private volatile IReadOnlyList<HeaderRewriteEntry>? _headerRewriteRules;
     private volatile IReadOnlyList<SenderRewriteEntry>? _senderRewriteRules;
     private volatile IReadOnlySet<int>? _enabledTenants;
+    private volatile RateLimitSettings? _rateLimitSettings;
 
     public RuntimeConfigCache(IServiceScopeFactory scopeFactory, ILogger<RuntimeConfigCache> logger)
     {
@@ -160,6 +161,32 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         return set.Contains(tenantId);
     }
 
+    public async Task<RateLimitSettings> GetRateLimitSettingsAsync(CancellationToken ct = default)
+    {
+        if (_rateLimitSettings is { } cached)
+            return cached;
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (_rateLimitSettings is { } cached2)
+                return cached2;
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var settings = await db.RateLimitSettings.AsNoTracking().FirstOrDefaultAsync(ct)
+                ?? new RateLimitSettings();
+
+            _rateLimitSettings = settings;
+            _logger.LogDebug("Loaded rate-limit settings into cache");
+            return settings;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default)
     {
         if (_ipAccessRules is { } cached)
@@ -286,6 +313,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         _headerRewriteRules = null;
         _senderRewriteRules = null;
         _enabledTenants = null;
+        _rateLimitSettings = null;
         _logger.LogInformation("Runtime configuration cache invalidated");
     }
 }

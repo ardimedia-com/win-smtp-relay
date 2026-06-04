@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
-using WinSmtpRelay.Core.Configuration;
+using WinSmtpRelay.Core.Interfaces;
+using WinSmtpRelay.Core.Models;
 using WinSmtpRelay.Security;
 
 namespace WinSmtpRelay.Security.Tests;
@@ -8,11 +8,8 @@ namespace WinSmtpRelay.Security.Tests;
 [TestClass]
 public class RateLimiterTests
 {
-    private static RateLimiter CreateLimiter(RateLimitOptions? options = null)
-    {
-        var opts = Options.Create(options ?? new RateLimitOptions());
-        return new RateLimiter(opts, NullLogger<RateLimiter>.Instance);
-    }
+    private static RateLimiter CreateLimiter(RateLimitSettings? settings = null)
+        => new(new StubCache(settings ?? new RateLimitSettings()), NullLogger<RateLimiter>.Instance);
 
     [TestMethod]
     [TestCategory("Unit")]
@@ -60,39 +57,39 @@ public class RateLimiterTests
 
     [TestMethod]
     [TestCategory("Unit")]
-    public void IsIpAllowed_BlocksAfterExceeded()
+    public async Task IsIpAllowed_BlocksAfterExceeded()
     {
-        var limiter = CreateLimiter(new RateLimitOptions { MaxConnectionsPerIpPerMinute = 3 });
+        var limiter = CreateLimiter(new RateLimitSettings { MaxConnectionsPerIpPerMinute = 3 });
 
-        Assert.IsTrue(limiter.IsIpAllowed("192.168.1.1"));
-        Assert.IsTrue(limiter.IsIpAllowed("192.168.1.1"));
-        Assert.IsTrue(limiter.IsIpAllowed("192.168.1.1"));
-        Assert.IsFalse(limiter.IsIpAllowed("192.168.1.1"));
+        Assert.IsTrue(await limiter.IsIpAllowedAsync("192.168.1.1"));
+        Assert.IsTrue(await limiter.IsIpAllowedAsync("192.168.1.1"));
+        Assert.IsTrue(await limiter.IsIpAllowedAsync("192.168.1.1"));
+        Assert.IsFalse(await limiter.IsIpAllowedAsync("192.168.1.1"));
 
         // Different IP should still be allowed
-        Assert.IsTrue(limiter.IsIpAllowed("192.168.1.2"));
+        Assert.IsTrue(await limiter.IsIpAllowedAsync("192.168.1.2"));
     }
 
     [TestMethod]
     [TestCategory("Unit")]
-    public void IsSenderAllowed_BlocksAfterExceeded()
+    public async Task IsSenderAllowed_BlocksAfterExceeded()
     {
-        var limiter = CreateLimiter(new RateLimitOptions
+        var limiter = CreateLimiter(new RateLimitSettings
         {
             MaxMessagesPerSenderPerMinute = 2,
             MaxMessagesPerSenderPerDay = 1000
         });
 
-        Assert.IsTrue(limiter.IsSenderAllowed("user@example.com"));
-        Assert.IsTrue(limiter.IsSenderAllowed("user@example.com"));
-        Assert.IsFalse(limiter.IsSenderAllowed("user@example.com"));
+        Assert.IsTrue(await limiter.IsSenderAllowedAsync("user@example.com"));
+        Assert.IsTrue(await limiter.IsSenderAllowedAsync("user@example.com"));
+        Assert.IsFalse(await limiter.IsSenderAllowedAsync("user@example.com"));
     }
 
     [TestMethod]
     [TestCategory("Unit")]
-    public void FailedAuth_BansIpAfterThreshold()
+    public async Task FailedAuth_BansIpAfterThreshold()
     {
-        var limiter = CreateLimiter(new RateLimitOptions
+        var limiter = CreateLimiter(new RateLimitSettings
         {
             FailedAuthBanThreshold = 3,
             FailedAuthBanMinutes = 30
@@ -102,29 +99,47 @@ public class RateLimiterTests
 
         Assert.IsFalse(limiter.IsIpBanned(ip));
 
-        limiter.RecordFailedAuth(ip);
-        limiter.RecordFailedAuth(ip);
+        await limiter.RecordFailedAuthAsync(ip);
+        await limiter.RecordFailedAuthAsync(ip);
         Assert.IsFalse(limiter.IsIpBanned(ip));
 
-        limiter.RecordFailedAuth(ip); // 3rd = threshold
+        await limiter.RecordFailedAuthAsync(ip); // 3rd = threshold
         Assert.IsTrue(limiter.IsIpBanned(ip));
     }
 
     [TestMethod]
     [TestCategory("Unit")]
-    public void ClearFailedAuth_RemovesBan()
+    public async Task ClearFailedAuth_RemovesBan()
     {
-        var limiter = CreateLimiter(new RateLimitOptions
+        var limiter = CreateLimiter(new RateLimitSettings
         {
             FailedAuthBanThreshold = 1,
             FailedAuthBanMinutes = 60
         });
 
         var ip = "10.0.0.1";
-        limiter.RecordFailedAuth(ip);
+        await limiter.RecordFailedAuthAsync(ip);
         Assert.IsTrue(limiter.IsIpBanned(ip));
 
         limiter.ClearFailedAuth(ip);
         Assert.IsFalse(limiter.IsIpBanned(ip));
+    }
+
+    /// <summary>Minimal cache stub: the rate limiter only reads <see cref="GetRateLimitSettingsAsync"/>.</summary>
+    private sealed class StubCache(RateLimitSettings settings) : IRuntimeConfigCache
+    {
+        public Task<RateLimitSettings> GetRateLimitSettingsAsync(CancellationToken ct = default)
+            => Task.FromResult(settings);
+
+        public Task<IReadOnlyList<string>> GetAcceptedDomainsAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<string>> GetAcceptedSenderDomainsAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<int?> GetTenantForSenderDomainAsync(string domain, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<int?> GetTenantForRecipientDomainAsync(string domain, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<bool> IsTenantEnabledAsync(int tenantId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<HeaderRewriteEntry>> GetHeaderRewriteRulesAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<SenderRewriteEntry>> GetSenderRewriteRulesAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public void Invalidate() { }
     }
 }

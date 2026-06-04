@@ -86,7 +86,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         }
 
         // Check per-IP rate limit
-        if (clientIp is not null && !_rateLimiter.IsIpAllowed(clientIp))
+        if (clientIp is not null && !await _rateLimiter.IsIpAllowedAsync(clientIp, cancellationToken))
         {
             return false;
         }
@@ -117,7 +117,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         }
 
         // Check per-sender rate limit
-        if (!_rateLimiter.IsSenderAllowed(from.AsAddress()))
+        if (!await _rateLimiter.IsSenderAllowedAsync(from.AsAddress(), cancellationToken))
         {
             return false;
         }
