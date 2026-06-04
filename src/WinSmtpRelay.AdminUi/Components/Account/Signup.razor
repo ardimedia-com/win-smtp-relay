@@ -107,8 +107,9 @@ else
 
     private async Task SubmitAsync()
     {
+        var portal = await PortalSettings.GetAsync();
         // Re-check live in case the host toggled signup off between page load and submit.
-        if (!(await PortalSettings.GetAsync()).SelfServiceSignupEnabled)
+        if (!portal.SelfServiceSignupEnabled)
             return;
 
         // Throttle abuse by client IP before creating anything.
@@ -126,7 +127,10 @@ else
             return;
         }
 
-        var fromAddress = UiOptions.Value.SignupFromAddress;
+        // Prefer the runtime (DB) from-address; fall back to the appsettings value.
+        var fromAddress = !string.IsNullOrWhiteSpace(portal.SignupFromAddress)
+            ? portal.SignupFromAddress
+            : UiOptions.Value.SignupFromAddress;
         if (!string.IsNullOrWhiteSpace(fromAddress) && result.ConfirmToken is not null)
         {
             var confirmUrl = $"{Nav.BaseUri}account/confirm?userId={result.UserId}&token={Uri.EscapeDataString(result.ConfirmToken)}";

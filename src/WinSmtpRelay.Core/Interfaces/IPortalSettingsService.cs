@@ -8,4 +8,7 @@ public interface IPortalSettingsService
 
     /// <summary>Enables or disables anonymous self-service signup at runtime (no restart needed).</summary>
     Task SetSelfServiceSignupEnabledAsync(bool enabled, CancellationToken ct = default);
+
+    /// <summary>Sets the signup/reset email from-address (null/blank clears it, falling back to appsettings).</summary>
+    Task SetSignupFromAddressAsync(string? fromAddress, CancellationToken ct = default);
 }

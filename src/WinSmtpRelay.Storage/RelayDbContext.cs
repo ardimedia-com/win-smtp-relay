@@ -180,6 +180,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
         modelBuilder.Entity<PortalSettings>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.SignupFromAddress).HasMaxLength(320);
             entity.HasData(new PortalSettings
             {
                 Id = 1,

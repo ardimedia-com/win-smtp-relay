@@ -718,5 +718,27 @@ public class AdminApiTests
                 "the disabled toggle should persist");
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task PortalSettings_SignupFromAddress_DefaultsNull_PersistsAndClears()
+    {
+        using (var scope = _app.Services.CreateScope())
+        {
+            var svc = scope.ServiceProvider.GetRequiredService<IPortalSettingsService>();
+            Assert.IsNull((await svc.GetAsync()).SignupFromAddress, "from-address should default to null");
+            await svc.SetSignupFromAddressAsync("noreply@test.example");
+        }
+
+        using (var scope = _app.Services.CreateScope())
+            Assert.AreEqual("noreply@test.example",
+                (await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync()).SignupFromAddress);
+
+        // Blank clears it back to null (so the appsettings fallback applies).
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSignupFromAddressAsync("   ");
+        using (var scope = _app.Services.CreateScope())
+            Assert.IsNull((await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync()).SignupFromAddress);
+    }
+
     private record HealthResponse(string Status);
 }

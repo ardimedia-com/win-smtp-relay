@@ -24,4 +24,18 @@ public class PortalSettingsService(RelayDbContext db) : IPortalSettingsService
         settings.UpdatedUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
     }
+
+    public async Task SetSignupFromAddressAsync(string? fromAddress, CancellationToken ct = default)
+    {
+        var settings = await db.PortalSettings.FirstOrDefaultAsync(ct);
+        if (settings is null)
+        {
+            settings = new PortalSettings { Id = 1 };
+            db.PortalSettings.Add(settings);
+        }
+
+        settings.SignupFromAddress = string.IsNullOrWhiteSpace(fromAddress) ? null : fromAddress.Trim();
+        settings.UpdatedUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
 }

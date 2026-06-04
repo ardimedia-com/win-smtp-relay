@@ -12,5 +12,11 @@ public class PortalSettings
     /// <summary>Whether the anonymous self-service tenant signup page (/signup) is available.</summary>
     public bool SelfServiceSignupEnabled { get; set; }
 
+    /// <summary>
+    /// From-address for signup verification and password-reset emails. When null/blank, the
+    /// appsettings <c>AdminUi:SignupFromAddress</c> value is used as a fallback.
+    /// </summary>
+    public string? SignupFromAddress { get; set; }
+
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
 }

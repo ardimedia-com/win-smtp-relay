@@ -40,6 +40,22 @@ else
                 When enabled, a "Create an organization" link appears on the sign-in page. A new signup creates a
                 <strong>disabled</strong> tenant that must be confirmed by email verification or host approval before it can sign in.
             </p>
+
+            <div class="form-group" style="margin-top:1.25rem;">
+                <BbLabel>Verification email from-address</BbLabel>
+                <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <BbInput @bind-Value="signupFromAddress" Placeholder="noreply@yourdomain.tld" />
+                    <BbButton Variant="ButtonVariant.Default" @onclick="SaveFromAddressAsync">
+                        <LucideIcon Name="save" /> Save
+                    </BbButton>
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;">
+                    From-address for signup verification and password-reset emails, sent through this relay's own
+                    delivery pipeline. Leave blank to use the <span class="mono">appsettings</span> value. The domain
+                    should be one this relay is configured to send for (accepted sender domain, ideally with DKIM).
+                </p>
+            </div>
+
             @if (!string.IsNullOrEmpty(statusMessage))
             {
                 <p class="text-muted" style="margin-top:0.5rem;">@statusMessage</p>
@@ -51,13 +67,16 @@ else
 
 @code {
     private bool signupEnabled;
+    private string? signupFromAddress;
     private bool isLoading = true;
     private string? statusMessage;
 
     protected override async Task OnInitializedAsync()
     {
         using var scope = ScopeFactory.CreateScope();
-        signupEnabled = (await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync()).SelfServiceSignupEnabled;
+        var settings = await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync();
+        signupEnabled = settings.SelfServiceSignupEnabled;
+        signupFromAddress = settings.SignupFromAddress;
         isLoading = false;
     }
 
@@ -67,5 +86,14 @@ else
         await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSelfServiceSignupEnabledAsync(value);
         signupEnabled = value;
         statusMessage = value ? "Self-service signup enabled." : "Self-service signup disabled.";
+    }
+
+    private async Task SaveFromAddressAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSignupFromAddressAsync(signupFromAddress);
+        statusMessage = string.IsNullOrWhiteSpace(signupFromAddress)
+            ? "From-address cleared (using the appsettings value)."
+            : $"From-address set to {signupFromAddress.Trim()}.";
     }
 }
