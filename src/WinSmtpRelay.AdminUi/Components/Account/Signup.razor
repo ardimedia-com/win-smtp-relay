@@ -10,6 +10,7 @@
 @inject ITenantSignupService SignupService
 @inject IMessageQueue Queue
 @inject IOptions<AdminUiOptions> UiOptions
+@inject WinSmtpRelay.AdminUi.Services.ISignupRateLimiter SignupRateLimiter
 @inject NavigationManager Nav
 @inject ILogger<Signup> Logger
 
@@ -86,6 +87,9 @@ else
     [SupplyParameterFromForm]
     private InputModel Input { get; set; } = new();
 
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
     private string? errorMessage;
     private bool submitted;
     private bool emailed;
@@ -94,6 +98,14 @@ else
     {
         if (!UiOptions.Value.SelfServiceSignupEnabled)
             return;
+
+        // Throttle abuse by client IP before creating anything.
+        if (!SignupRateLimiter.TryRegister(HttpContext.Connection.RemoteIpAddress?.ToString()))
+        {
+            errorMessage = "Too many signup attempts from your network. Please try again later.";
+            Logger.LogWarning("Signup throttled for IP {Ip}", HttpContext.Connection.RemoteIpAddress);
+            return;
+        }
 
         var result = await SignupService.SignUpAsync(Input.TenantName, Input.Slug, Input.Email, Input.Password);
         if (!result.Succeeded)

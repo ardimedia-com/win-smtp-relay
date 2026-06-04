@@ -31,4 +31,7 @@ public class AdminUiOptions
 
     /// <summary>From address for signup verification emails (sent via the relay's own pipeline). Required for email verification; host approval works without it.</summary>
     public string? SignupFromAddress { get; set; }
+
+    /// <summary>Maximum self-service signup attempts per client IP per hour (abuse control). 0 disables the limit.</summary>
+    public int SignupMaxAttemptsPerIpPerHour { get; set; } = 5;
 }

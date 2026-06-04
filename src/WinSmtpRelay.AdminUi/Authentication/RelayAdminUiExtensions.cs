@@ -16,6 +16,7 @@ public static class RelayAdminUiExtensions
         services.AddCascadingAuthenticationState();
         services.AddScoped<AuthenticationStateProvider, RevalidatingIdentityAuthenticationStateProvider>();
         services.AddScoped<CircuitHandler, TenantCircuitHandler>();
+        services.AddSingleton<Services.ISignupRateLimiter, Services.SignupRateLimiter>();
         return services;
     }
 }
