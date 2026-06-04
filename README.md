@@ -17,6 +17,7 @@ Open-source SMTP relay server for Windows. Built with .NET 10, designed as a mod
 - STARTTLS (port 587) and implicit TLS (port 465)
 - SMTP AUTH with per-user SendAs control and rate limits
 - DKIM signing, SPF/DMARC verification
+- DNS setup page (SPF/DKIM/DMARC readiness check per sender domain)
 - IP-based relay restrictions
 - Pickup folder for .eml files
 - Blazor admin UI (HTTPS, loopback by default), sign-in required

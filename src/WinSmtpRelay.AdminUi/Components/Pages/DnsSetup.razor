@@ -1,0 +1,164 @@
+@page "/dns/setup"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject ITenantScopeFactory ScopeFactory
+@inject IJSRuntime JS
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>DNS Setup</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header page-header-row">
+    <div>
+        <h1>DNS Setup</h1>
+        <p>Required vs. published SPF / DKIM / DMARC records for your sender domains. Publish the expected values at your DNS provider so mail you send authenticates.</p>
+    </div>
+    <div class="flex gap-1 items-center">
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="RefreshAsync" Disabled="@isLoading">
+            <LucideIcon Name="refresh-cw" /> Re-check all
+        </BbButton>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
+            <LucideIcon Name="info" /> About
+        </BbButton>
+    </div>
+</div>
+
+<div style="max-width:480px;" class="mb-1">
+<BbCard>
+    <BbCardHeader><BbCardTitle>Check a domain</BbCardTitle></BbCardHeader>
+    <BbCardContent>
+        <div class="form-group">
+            <BbLabel>Domain</BbLabel>
+            <BbInput @bind-Value="adHocDomain" Placeholder="example.com" />
+        </div>
+    </BbCardContent>
+    <BbCardFooter>
+        <BbButton Variant="ButtonVariant.Default" @onclick="CheckAdHocAsync" Disabled="@string.IsNullOrWhiteSpace(adHocDomain)">
+            <LucideIcon Name="search" /> Check
+        </BbButton>
+    </BbCardFooter>
+</BbCard>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[200px] w-full" />
+}
+else if (results.Count == 0)
+{
+    <p class="text-muted">No accepted sender domains configured. Add one under Accepted Domains (Sender), or check a domain above.</p>
+}
+else
+{
+    @foreach (var setup in results)
+    {
+        <BbCard Class="mb-1">
+            <BbCardHeader>
+                <div class="flex items-center justify-between">
+                    <BbCardTitle>@setup.Domain</BbCardTitle>
+                    <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => RecheckOneAsync(setup.Domain)">
+                        <LucideIcon Name="refresh-cw" /> Re-check
+                    </BbButton>
+                </div>
+            </BbCardHeader>
+            <BbCardContent>
+                @foreach (var rec in new[] { setup.Spf, setup.Dkim, setup.Dmarc })
+                {
+                    <div class="dns-record">
+                        <div class="dns-record-head">
+                            <strong>@rec.RecordType</strong>
+                            <span class="badge-status @BadgeClass(rec.Status)">@rec.Status</span>
+                        </div>
+                        <div class="dns-record-name mono text-muted">@rec.RecordName</div>
+                        <div class="text-muted" style="font-size:0.8rem;">@rec.Explanation</div>
+                        @if (!string.IsNullOrEmpty(rec.Expected))
+                        {
+                            <div class="dns-record-row">
+                                <span class="dns-record-label">Expected</span>
+                                <code class="mono dns-record-value">@rec.Expected</code>
+                                <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => CopyAsync(rec.Expected)" title="Copy">
+                                    <LucideIcon Name="copy" />
+                                </BbButton>
+                            </div>
+                        }
+                        <div class="dns-record-row">
+                            <span class="dns-record-label">Published</span>
+                            <code class="mono dns-record-value">@(string.IsNullOrEmpty(rec.Live) ? "— not found —" : rec.Live)</code>
+                        </div>
+                    </div>
+                }
+            </BbCardContent>
+        </BbCard>
+    }
+}
+
+<BbDialog @bind-Open="showHelp">
+    <BbDialogContent>
+        <BbDialogHeader>
+            <BbDialogTitle>About DNS Setup</BbDialogTitle>
+            <BbDialogDescription>Publish these records so recipients trust mail from your domains</BbDialogDescription>
+        </BbDialogHeader>
+        <div style="font-size:0.875rem;line-height:1.6;">
+            <p><strong>SPF</strong> — a TXT record at the domain root authorising this relay's sending IPs. The recommended value is built from the server's <code>Dns</code> settings.</p>
+            <p><strong>DKIM</strong> — a TXT record at <code>&lt;selector&gt;._domainkey.&lt;domain&gt;</code> carrying the public key. Long keys are split into multiple quoted strings by DNS providers — that is normal; the published value is reassembled before comparison.</p>
+            <p><strong>DMARC</strong> — a TXT record at <code>_dmarc.&lt;domain&gt;</code> setting the policy and reporting address.</p>
+            <p class="text-muted">Status reflects live DNS and is subject to TTL/propagation — after publishing a change, allow time and use Re-check.</p>
+        </div>
+        <BbDialogFooter>
+            <BbDialogClose><BbButton Variant="ButtonVariant.Outline">Close</BbButton></BbDialogClose>
+        </BbDialogFooter>
+    </BbDialogContent>
+</BbDialog>
+
+@code {
+    private List<DomainDnsSetup> results = [];
+    private string adHocDomain = "";
+    private bool isLoading = true;
+    private bool showHelp;
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        using var scope = ScopeFactory.CreateScope();
+        var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
+        results = [.. await dns.CheckAllSenderDomainsAsync()];
+        isLoading = false;
+    }
+
+    private async Task CheckAdHocAsync()
+    {
+        var domain = adHocDomain.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(domain)) return;
+        using var scope = ScopeFactory.CreateScope();
+        var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
+        var setup = await dns.CheckDomainAsync(domain);
+        results.RemoveAll(r => r.Domain == domain);
+        results.Insert(0, setup);
+        adHocDomain = "";
+    }
+
+    private async Task RecheckOneAsync(string domain)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
+        var setup = await dns.CheckDomainAsync(domain);
+        var idx = results.FindIndex(r => r.Domain == domain);
+        if (idx >= 0) results[idx] = setup;
+    }
+
+    private async Task CopyAsync(string value) => await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+
+    private static string BadgeClass(DnsRecordStatus status) => status switch
+    {
+        DnsRecordStatus.Ok => "badge-success",
+        DnsRecordStatus.Mismatch => "badge-warning",
+        DnsRecordStatus.Missing => "badge-error",
+        _ => "badge-muted"
+    };
+}

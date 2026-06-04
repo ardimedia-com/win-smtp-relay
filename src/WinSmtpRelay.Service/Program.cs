@@ -40,6 +40,7 @@ builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(Webh
 builder.Services.Configure<MessageFilterOptions>(builder.Configuration.GetSection(MessageFilterOptions.SectionName));
 builder.Services.Configure<BackupMxOptions>(builder.Configuration.GetSection(BackupMxOptions.SectionName));
 builder.Services.Configure<StatisticsOptions>(builder.Configuration.GetSection(StatisticsOptions.SectionName));
+builder.Services.Configure<DnsOptions>(builder.Configuration.GetSection(DnsOptions.SectionName));
 
 // Storage
 var connectionString = builder.Configuration.GetConnectionString("RelayDb") ?? "Data Source=winsmtprelay.db";
@@ -82,6 +83,9 @@ if (adminUiConfig.Enabled)
     // Admin authentication/authorization (cookie + API key) and tenant-aware policies.
     builder.Services.AddRelayAdminAuth();
     builder.Services.AddRelayAdminUiAuth();
+
+    // DNS setup / domain-authentication checks (uses the singleton ILookupClient from the delivery engine).
+    builder.Services.AddScoped<WinSmtpRelay.Core.Interfaces.IDnsSetupService, WinSmtpRelay.Security.DnsSetupService>();
 
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();

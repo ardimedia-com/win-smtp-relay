@@ -372,3 +372,15 @@ nav[aria-label="breadcrumb"] {
     cursor: pointer;
     outline: none;
 }
+
+/* DNS setup records */
+.dns-record {
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--border);
+}
+.dns-record:first-child { border-top: none; }
+.dns-record-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+.dns-record-name { font-size: 0.8rem; margin-bottom: 0.25rem; word-break: break-all; }
+.dns-record-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.35rem; }
+.dns-record-label { flex: 0 0 5rem; font-size: 0.75rem; color: var(--muted-foreground); }
+.dns-record-value { flex: 1; word-break: break-all; font-size: 0.8rem; }
