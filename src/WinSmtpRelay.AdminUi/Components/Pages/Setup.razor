@@ -92,7 +92,18 @@ else
         </div>
     </div>
 
-    @if (nextAction is not null)
+    @if (!readiness.CanSend && nextAction is null)
+    {
+        @* e.g. a host admin viewing a tenant the host has not enabled yet *@
+        <div class="setup-next">
+            <LucideIcon Name="lock" Size="20" />
+            <div class="setup-next-body">
+                <div class="setup-next-title">Not ready to send</div>
+                <div class="setup-next-detail">This organization isn't active yet — a host administrator must enable it.</div>
+            </div>
+        </div>
+    }
+    else if (nextAction is not null)
     {
         <div class="setup-next">
             <LucideIcon Name="arrow-right" Size="20" />
@@ -108,13 +119,23 @@ else
             }
         </div>
     }
-    else
+    else if (recDone == recTotal)
     {
         <div class="setup-next setup-next-done">
             <LucideIcon Name="check" Size="20" />
             <div class="setup-next-body">
                 <div class="setup-next-title">You're all set</div>
                 <div class="setup-next-detail">Required setup is complete and the recommended deliverability best practices are in place.</div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="setup-next setup-next-done">
+            <LucideIcon Name="check" Size="20" />
+            <div class="setup-next-body">
+                <div class="setup-next-title">No action needed right now</div>
+                <div class="setup-next-detail">You can send mail. The remaining recommended items are optional for your setup or waiting on a choice you've made (for example, not restricting sender domains).</div>
             </div>
         </div>
     }
@@ -182,23 +203,25 @@ else
         </BbCardContent>
     </BbCard>
 
-    <div class="setup-group-label">Verify delivery</div>
-    <BbCard>
-        <BbCardContent>
-            <div class="setup-row" style="border:none;">
-                <span class="setup-row-icon s-done"><LucideIcon Name="send" Size="18" /></span>
-                <div class="setup-row-main">
-                    <div class="setup-row-title">Send a test message</div>
-                    <div class="setup-row-detail">Queue a message through the relay to confirm outbound delivery works end-to-end (MX lookup, TLS, DKIM). Send it to an address you control, then watch the result under Journal.</div>
+    <AuthorizeView Policy="@AuthorizationPolicies.AdminFull">
+        <div class="setup-group-label">Verify delivery</div>
+        <BbCard>
+            <BbCardContent>
+                <div class="setup-row" style="border:none;">
+                    <span class="setup-row-icon s-done"><LucideIcon Name="send" Size="18" /></span>
+                    <div class="setup-row-main">
+                        <div class="setup-row-title">Send a test message</div>
+                        <div class="setup-row-detail">Queue a message through the relay to confirm outbound delivery works end-to-end (MX lookup, TLS, DKIM). Send it to an address you control, then watch the result under Journal.</div>
+                    </div>
+                    <div class="setup-row-action">
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="OpenTestDialogAsync">
+                            <LucideIcon Name="send" Size="14" /> Send test
+                        </BbButton>
+                    </div>
                 </div>
-                <div class="setup-row-action">
-                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="OpenTestDialogAsync">
-                        <LucideIcon Name="send" Size="14" /> Send test
-                    </BbButton>
-                </div>
-            </div>
-        </BbCardContent>
-    </BbCard>
+            </BbCardContent>
+        </BbCard>
+    </AuthorizeView>
 }
 
 <BbDialog @bind-Open="showHelp">
