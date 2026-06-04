@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using WinSmtpRelay.Core.Configuration;
+using WinSmtpRelay.Core.Models;
 using WinSmtpRelay.Security;
 
 namespace WinSmtpRelay.Security.Tests;
@@ -32,7 +33,7 @@ public class DkimSigningServiceTests
         message.Subject = "Test";
         message.Body = new TextPart("plain") { Text = "Hello" };
 
-        service.Sign(message);
+        service.Sign(message, TenantDefaults.DefaultTenantId, null);
 
         // No DKIM-Signature header should be added
         Assert.IsNull(message.Headers[HeaderId.DkimSignature]);
@@ -68,7 +69,7 @@ public class DkimSigningServiceTests
             message.MessageId = MimeKit.Utils.MimeUtils.GenerateMessageId();
             message.Body = new TextPart("plain") { Text = "Hello World" };
 
-            service.Sign(message);
+            service.Sign(message, TenantDefaults.DefaultTenantId, null);
 
             var dkimHeader = message.Headers[HeaderId.DkimSignature];
             Assert.IsNotNull(dkimHeader, "DKIM-Signature header should be present");
@@ -109,7 +110,71 @@ public class DkimSigningServiceTests
             message.Subject = "Test";
             message.Body = new TextPart("plain") { Text = "Hello" };
 
-            service.Sign(message);
+            service.Sign(message, TenantDefaults.DefaultTenantId, null);
+
+            Assert.IsNull(message.Headers[HeaderId.DkimSignature]);
+        }
+        finally
+        {
+            File.Delete(keyPath);
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Sign_WithTenantDkimKey_SignsUsingThatKey()
+    {
+        var keyPath = CreateTestRsaKey();
+        try
+        {
+            // Config DKIM disabled — signing comes purely from the tenant's DB key.
+            var service = new DkimSigningService(Options.Create(new DkimOptions { Enabled = false }), NullLogger<DkimSigningService>.Instance);
+            var dkim = new DkimDomain { Domain = "tenant5.example", Selector = "t5", PrivateKeyPath = keyPath, TenantId = 5 };
+
+            var message = new MimeMessage();
+            message.From.Add(new MailboxAddress("T5", "user@tenant5.example"));
+            message.To.Add(new MailboxAddress("R", "r@other.com"));
+            message.Subject = "Hi";
+            message.Date = DateTimeOffset.UtcNow;
+            message.MessageId = MimeKit.Utils.MimeUtils.GenerateMessageId();
+            message.Body = new TextPart("plain") { Text = "Body" };
+
+            service.Sign(message, 5, dkim);
+
+            var dkimHeader = message.Headers[HeaderId.DkimSignature];
+            Assert.IsNotNull(dkimHeader);
+            Assert.IsTrue(dkimHeader.Contains("d=tenant5.example"));
+            Assert.IsTrue(dkimHeader.Contains("s=t5"));
+        }
+        finally
+        {
+            File.Delete(keyPath);
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Sign_NonDefaultTenantWithoutKey_DoesNotUseDefaultTenantConfigSigner()
+    {
+        var keyPath = CreateTestRsaKey();
+        try
+        {
+            // example.com is configured for the DEFAULT tenant via config.
+            var service = new DkimSigningService(Options.Create(new DkimOptions
+            {
+                Enabled = true,
+                Domains = [new DkimDomainConfig { Domain = "example.com", Selector = "test", PrivateKeyPath = keyPath }]
+            }), NullLogger<DkimSigningService>.Instance);
+
+            var message = new MimeMessage();
+            message.From.Add(new MailboxAddress("Intruder", "user@example.com"));
+            message.To.Add(new MailboxAddress("R", "r@other.com"));
+            message.Subject = "Hi";
+            message.Body = new TextPart("plain") { Text = "Body" };
+
+            // Tenant 5 (not the default tenant) with no DKIM key of its own MUST NOT sign with the
+            // default tenant's config key — no cross-tenant signing.
+            service.Sign(message, tenantId: 5, tenantDkim: null);
 
             Assert.IsNull(message.Headers[HeaderId.DkimSignature]);
         }

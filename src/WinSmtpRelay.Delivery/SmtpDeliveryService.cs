@@ -16,6 +16,7 @@ public class SmtpDeliveryService : IDeliveryService
     private readonly DeliveryOptions _config;
     private readonly IRuntimeConfigCache _configCache;
     private readonly DkimSigningService _dkimSigner;
+    private readonly IDkimDomainService _dkimDomains;
     private readonly ILogger<SmtpDeliveryService> _logger;
 
     public SmtpDeliveryService(
@@ -23,12 +24,14 @@ public class SmtpDeliveryService : IDeliveryService
         IOptions<DeliveryOptions> options,
         IRuntimeConfigCache configCache,
         DkimSigningService dkimSigner,
+        IDkimDomainService dkimDomains,
         ILogger<SmtpDeliveryService> logger)
     {
         _mxResolver = mxResolver;
         _config = options.Value;
         _configCache = configCache;
         _dkimSigner = dkimSigner;
+        _dkimDomains = dkimDomains;
         _logger = logger;
     }
 
@@ -36,8 +39,13 @@ public class SmtpDeliveryService : IDeliveryService
     {
         var mimeMessage = await MimeMessage.LoadAsync(new MemoryStream(message.RawMessage), cancellationToken);
 
-        // DKIM-sign before sending (no-op if not configured for sender domain)
-        _dkimSigner.Sign(mimeMessage);
+        // DKIM-sign before sending, scoped to the message's tenant so a tenant can only sign with
+        // its own key (no-op if the tenant has no DKIM key for the sender domain).
+        var senderDomain = mimeMessage.From.Mailboxes.FirstOrDefault()?.Domain;
+        var tenantDkim = senderDomain is null
+            ? null
+            : await _dkimDomains.GetForSigningAsync(message.TenantId, senderDomain, cancellationToken);
+        _dkimSigner.Sign(mimeMessage, message.TenantId, tenantDkim);
 
         var recipients = message.Recipients.Split(';', StringSplitOptions.RemoveEmptyEntries);
         var results = new List<DeliveryResult>();

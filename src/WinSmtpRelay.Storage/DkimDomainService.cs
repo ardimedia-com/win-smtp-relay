@@ -17,6 +17,13 @@ public class DkimDomainService(RelayDbContext db) : IDkimDomainService
             .SingleOrDefaultAsync(d => d.Domain == domain, ct);
     }
 
+    public async Task<DkimDomain?> GetForSigningAsync(int tenantId, string domain, CancellationToken ct = default)
+    {
+        // Explicit tenant filter so the delivery signer never picks up another tenant's key.
+        return await db.DkimDomains.AsNoTracking()
+            .FirstOrDefaultAsync(d => d.TenantId == tenantId && d.Domain == domain && d.IsEnabled, ct);
+    }
+
     public async Task<DkimDomain> CreateAsync(DkimDomain dkim, CancellationToken ct = default)
     {
         db.DkimDomains.Add(dkim);

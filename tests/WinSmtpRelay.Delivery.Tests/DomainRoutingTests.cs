@@ -25,6 +25,7 @@ public class DomainRoutingTests
             Options.Create(new DeliveryOptions()),
             cache,
             dkimSigner,
+            new StubDkimDomainService(),
             NullLogger<SmtpDeliveryService>.Instance);
     }
 
