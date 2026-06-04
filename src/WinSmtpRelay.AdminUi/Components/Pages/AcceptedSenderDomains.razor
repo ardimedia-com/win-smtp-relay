@@ -3,6 +3,7 @@
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
 @inject IRuntimeConfigCache ConfigCache
+@inject IDnsSetupService DnsSetup
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -62,6 +63,7 @@ else
                 <BbTableHeaderCell TData="AcceptedSenderDomain">ID</BbTableHeaderCell>
                 <BbTableHeaderCell TData="AcceptedSenderDomain">Domain</BbTableHeaderCell>
                 <BbTableHeaderCell TData="AcceptedSenderDomain">Added</BbTableHeaderCell>
+                <BbTableHeaderCell TData="AcceptedSenderDomain">Ownership</BbTableHeaderCell>
                 <BbTableHeaderCell TData="AcceptedSenderDomain">Actions</BbTableHeaderCell>
             </BbTableRow>
         </BbTableHeader>
@@ -69,7 +71,7 @@ else
             @if (domains.Count == 0)
             {
                 <BbTableRow TData="AcceptedSenderDomain">
-                    <BbTableCell colspan="4" style="text-align:center;">No accepted sender domains configured &mdash; all sender domains are accepted</BbTableCell>
+                    <BbTableCell colspan="5" style="text-align:center;">No accepted sender domains configured &mdash; all sender domains are accepted</BbTableCell>
                 </BbTableRow>
             }
             @foreach (var d in domains)
@@ -78,6 +80,28 @@ else
                     <BbTableCell>@d.Id</BbTableCell>
                     <BbTableCell>@d.Domain</BbTableCell>
                     <BbTableCell>@d.CreatedUtc.ToString("yyyy-MM-dd")</BbTableCell>
+                    <BbTableCell>
+                        @if (d.VerifiedUtc is not null)
+                        {
+                            <span class="badge-status" title="@($"Verified {d.VerifiedUtc:yyyy-MM-dd}")">Verified</span>
+                        }
+                        else
+                        {
+                            <div style="display:flex;flex-direction:column;gap:0.25rem;">
+                                <div>
+                                    <span class="badge-status badge-muted">Unverified</span>
+                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
+                                            @onclick="() => VerifyAsync(d)" title="Check DNS now">
+                                        <LucideIcon Name="shield-check" /> Verify
+                                    </BbButton>
+                                </div>
+                                <div class="text-muted" style="font-size:0.75rem;">
+                                    Add this TXT record at <span class="mono">@d.Domain</span>:<br />
+                                    <span class="mono">@DnsSetup.BuildOwnershipRecord(d.VerificationToken)</span>
+                                </div>
+                            </div>
+                        }
+                    </BbTableCell>
                     <BbTableCell>
                         <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
                                 @onclick="() => { deleteTargetId = d.Id; showDeleteConfirm = true; }">
@@ -169,6 +193,25 @@ else
         ConfigCache.Invalidate();
         statusMessage = $"Domain '{newDomain}' added";
         newDomain = "";
+        await RefreshAsync();
+    }
+
+    private async Task VerifyAsync(AcceptedSenderDomain d)
+    {
+        statusMessage = $"Checking DNS for {d.Domain}…";
+        StateHasChanged();
+
+        var verified = await DnsSetup.CheckOwnershipAsync(d.Domain, d.VerificationToken);
+        if (verified)
+        {
+            using var scope = ScopeFactory.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>().MarkVerifiedAsync(d.Id);
+            statusMessage = $"Ownership of {d.Domain} verified";
+        }
+        else
+        {
+            statusMessage = $"Verification TXT record for {d.Domain} not found yet (DNS can take time to propagate)";
+        }
         await RefreshAsync();
     }
 

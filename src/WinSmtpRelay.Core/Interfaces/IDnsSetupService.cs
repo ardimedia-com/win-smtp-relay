@@ -19,4 +19,10 @@ public interface IDnsSetupService
 
     /// <summary>The recommended DMARC record value for a domain, built from <see cref="Configuration.DnsOptions"/>.</summary>
     string BuildRecommendedDmarc(string domain);
+
+    /// <summary>The TXT record value a tenant must publish at the domain apex to prove ownership.</summary>
+    string BuildOwnershipRecord(string token);
+
+    /// <summary>True if a TXT record matching <see cref="BuildOwnershipRecord"/> for the token is published at the domain.</summary>
+    Task<bool> CheckOwnershipAsync(string domain, string token, CancellationToken ct = default);
 }

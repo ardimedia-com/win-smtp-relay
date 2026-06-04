@@ -26,6 +26,23 @@ public class DnsSetupServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
+    public void BuildOwnershipRecord_PrefixesToken()
+    {
+        var service = new DnsSetupService(null!, Options.Create(new DnsOptions()), null!, null!, NullLogger<DnsSetupService>.Instance);
+        Assert.AreEqual("winsmtprelay-verification=abc123", service.BuildOwnershipRecord("abc123"));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task CheckOwnershipAsync_EmptyToken_ReturnsFalseWithoutDnsLookup()
+    {
+        // null DNS client — an empty token must short-circuit before any lookup.
+        var service = new DnsSetupService(null!, Options.Create(new DnsOptions()), null!, null!, NullLogger<DnsSetupService>.Instance);
+        Assert.IsFalse(await service.CheckOwnershipAsync("example.com", ""));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
     public void BuildRecommendedSpf_EmitsIpHostnameIncludesAndQualifier()
     {
         var options = new DnsOptions

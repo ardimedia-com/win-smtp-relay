@@ -670,5 +670,30 @@ public class AdminApiTests
         Assert.IsNull(await cache.GetTenantEgressIpAsync(tid), "clearing should remove the egress IP");
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task SenderDomain_GetsVerificationToken_AndCanBeMarkedVerified()
+    {
+        int id;
+        using (var scope = _app.Services.CreateScope())
+        {
+            var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
+            var created = await svc.CreateAsync("verify.example");
+            id = created.Id;
+            Assert.IsFalse(string.IsNullOrWhiteSpace(created.VerificationToken), "a token should be generated on create");
+            Assert.IsNull(created.VerifiedUtc, "a new domain starts unverified");
+        }
+
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>().MarkVerifiedAsync(id);
+
+        using (var scope = _app.Services.CreateScope())
+        {
+            var domain = (await scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>().GetAllAsync())
+                .First(d => d.Id == id);
+            Assert.IsNotNull(domain.VerifiedUtc, "MarkVerified should set VerifiedUtc");
+        }
+    }
+
     private record HealthResponse(string Status);
 }

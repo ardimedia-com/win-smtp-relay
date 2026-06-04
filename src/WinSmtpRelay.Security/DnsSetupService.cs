@@ -127,6 +127,21 @@ public class DnsSetupService(
             match ? "The published DKIM public key matches." : "The published DKIM key differs from the configured key.");
     }
 
+    private const string OwnershipPrefix = "winsmtprelay-verification=";
+
+    public string BuildOwnershipRecord(string token) => OwnershipPrefix + token;
+
+    public async Task<bool> CheckOwnershipAsync(string domain, string token, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return false;
+
+        var expected = BuildOwnershipRecord(token);
+        var found = await ResolveTxtAsync(domain,
+            txt => txt.Trim().Equals(expected, StringComparison.OrdinalIgnoreCase), ct);
+        return found is not null;
+    }
+
     private async Task<string?> ResolveTxtAsync(string name, Func<string, bool> predicate, CancellationToken ct)
     {
         try

@@ -126,6 +126,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             // Globally unique: a sender domain may be claimed by only one tenant.
             entity.HasIndex(e => e.Domain).IsUnique();
             entity.Property(e => e.Domain).HasMaxLength(255);
+            entity.Property(e => e.VerificationToken).HasMaxLength(64);
         });
 
         modelBuilder.Entity<IpAccessRule>(entity =>
