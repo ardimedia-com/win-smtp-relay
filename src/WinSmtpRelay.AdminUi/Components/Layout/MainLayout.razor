@@ -123,6 +123,14 @@
                             <span>Event Log</span>
                         </BbSidebarMenuButton>
                     </BbSidebarMenuItem>
+                    <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="adminAuth">
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="apikeys">
+                                <LucideIcon Name="key-round" />
+                                <span>API Keys</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                    </AuthorizeView>
                     <BbSidebarMenuItem>
                         <BbSidebarMenuButton Href="update">
                             <LucideIcon Name="download" />

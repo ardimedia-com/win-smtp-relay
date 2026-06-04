@@ -38,6 +38,7 @@ public static class AdminEndpoints
         MapServerEndpoints(group);
         MapStatisticsEndpoints(group);
         MapTenantEndpoints(group);
+        MapApiKeyEndpoints(group);
 
         // Configuration endpoints
         MapReceiveConnectorEndpoints(group);
@@ -285,6 +286,55 @@ public static class AdminEndpoints
             {
                 return Results.BadRequest(new { Error = "Tenant still owns data and cannot be deleted." });
             }
+        });
+    }
+
+    private static void MapApiKeyEndpoints(RouteGroupBuilder group)
+    {
+        // API keys are sensitive — require AdminFull for the whole subgroup (incl. listing).
+        var ep = group.MapGroup("/apikeys").RequireAuthorization(AuthorizationPolicies.AdminFull);
+
+        ep.MapGet("/", async (IApiKeyService svc, ICurrentTenant tenant, CancellationToken ct) =>
+        {
+            int? tenantId = tenant.FilterEnabled ? tenant.FilterTenantId : null;
+            var keys = await svc.GetAllAsync(tenantId, ct);
+            return Results.Ok(keys.Select(k => new ApiKeySummary(
+                k.Id, k.TenantId, k.Name, k.KeyPrefix, k.Role, k.IsEnabled, k.CreatedUtc, k.ExpiresUtc, k.LastUsedUtc)));
+        });
+
+        ep.MapPost("/", async (CreateApiKeyRequest req, IApiKeyService svc, ICurrentTenant tenant, CancellationToken ct) =>
+        {
+            if (!RelayRoles.All.Contains(req.Role))
+                return Results.BadRequest(new { Error = "Invalid role" });
+
+            int? tenantId;
+            if (tenant.FilterEnabled)
+            {
+                // Tenant-scoped admins create only within their tenant and cannot mint host keys.
+                if (req.Role == RelayRoles.HostAdmin)
+                    return Results.Forbid();
+                tenantId = tenant.FilterTenantId;
+            }
+            else
+            {
+                tenantId = req.TenantId; // host scope: null = host-level key, or a chosen tenant
+            }
+
+            var (key, plaintext) = await svc.CreateAsync(tenantId, req.Name, req.Role, req.ExpiresUtc, ct);
+            return Results.Ok(new CreatedApiKeyResponse(key.Id, key.Name, key.KeyPrefix, key.Role, key.TenantId, plaintext));
+        });
+
+        ep.MapDelete("/{id:int}", async (int id, IApiKeyService svc, ICurrentTenant tenant, RelayDbContext db, CancellationToken ct) =>
+        {
+            var key = await db.ApiKeys.AsNoTracking().FirstOrDefaultAsync(k => k.Id == id, ct);
+            if (key is null)
+                return Results.NotFound();
+            // Out-of-scope keys are invisible to a tenant-scoped admin.
+            if (tenant.FilterEnabled && key.TenantId != tenant.FilterTenantId)
+                return Results.NotFound();
+
+            await svc.DeleteAsync(id, ct);
+            return Results.Ok(new { Message = "API key revoked" });
         });
     }
 
@@ -598,3 +648,9 @@ public record CreateAcceptedDomainRequest(string Domain);
 public record CreateAcceptedSenderDomainRequest(string Domain);
 public record CreateTenantRequest(string Name, string Slug);
 public record UpdateTenantRequest(string Name, bool IsEnabled);
+
+public record ApiKeySummary(
+    int Id, int? TenantId, string Name, string KeyPrefix, string Role,
+    bool IsEnabled, DateTime CreatedUtc, DateTime? ExpiresUtc, DateTime? LastUsedUtc);
+public record CreateApiKeyRequest(string Name, string Role, int? TenantId, DateTime? ExpiresUtc);
+public record CreatedApiKeyResponse(int Id, string Name, string KeyPrefix, string Role, int? TenantId, string Key);

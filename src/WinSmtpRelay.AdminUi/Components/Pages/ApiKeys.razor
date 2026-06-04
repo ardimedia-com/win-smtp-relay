@@ -1,0 +1,180 @@
+@page "/apikeys"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
+@inject ITenantScopeFactory ScopeFactory
+@inject ICurrentTenant CurrentTenant
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem>
+            <BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink>
+        </BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem>
+            <BbBreadcrumbPage>API Keys</BbBreadcrumbPage>
+        </BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header page-header-row">
+    <div>
+        <h1>API Keys</h1>
+        <p>Keys for programmatic access to the admin API. Send as <code>X-Api-Key</code> or <code>Authorization: Bearer</code>. The secret is shown only once.</p>
+    </div>
+</div>
+
+<div style="max-width:520px;">
+<BbCard Class="mb-1">
+    <BbCardHeader>
+        <BbCardTitle>Create API Key</BbCardTitle>
+    </BbCardHeader>
+    <BbCardContent>
+        <div class="form-group">
+            <BbLabel>Name</BbLabel>
+            <BbInput @bind-Value="newName" Placeholder="ci-pipeline" />
+        </div>
+        <div class="form-group">
+            <BbLabel>Role</BbLabel>
+            <select class="account-input" @bind="newRole">
+                <option value="@RelayRoles.TenantViewer">Viewer (read-only)</option>
+                <option value="@RelayRoles.TenantAdmin">Admin (read/write)</option>
+            </select>
+        </div>
+    </BbCardContent>
+    <BbCardFooter>
+        <BbButton Variant="ButtonVariant.Default" @onclick="CreateAsync" Disabled="@string.IsNullOrWhiteSpace(newName)">
+            <LucideIcon Name="plus" /> Create
+        </BbButton>
+        @if (!string.IsNullOrEmpty(statusMessage))
+        {
+            <span class="text-muted" style="margin-left:1rem">@statusMessage</span>
+        }
+    </BbCardFooter>
+</BbCard>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[200px] w-full" />
+}
+else
+{
+    <BbTable Data="@keys">
+        <BbTableHeader>
+            <BbTableRow TData="ApiKey">
+                <BbTableHeaderCell TData="ApiKey">Name</BbTableHeaderCell>
+                <BbTableHeaderCell TData="ApiKey">Prefix</BbTableHeaderCell>
+                <BbTableHeaderCell TData="ApiKey">Role</BbTableHeaderCell>
+                <BbTableHeaderCell TData="ApiKey">Created</BbTableHeaderCell>
+                <BbTableHeaderCell TData="ApiKey">Last used</BbTableHeaderCell>
+                <BbTableHeaderCell TData="ApiKey">Actions</BbTableHeaderCell>
+            </BbTableRow>
+        </BbTableHeader>
+        <BbTableBody>
+            @if (keys.Count == 0)
+            {
+                <BbTableRow TData="ApiKey">
+                    <BbTableCell colspan="6" style="text-align:center;">No API keys</BbTableCell>
+                </BbTableRow>
+            }
+            @foreach (var k in keys)
+            {
+                <BbTableRow Item="@k">
+                    <BbTableCell>@k.Name</BbTableCell>
+                    <BbTableCell><span class="mono">@k.KeyPrefix…</span></BbTableCell>
+                    <BbTableCell>@k.Role</BbTableCell>
+                    <BbTableCell>@k.CreatedUtc.ToString("yyyy-MM-dd")</BbTableCell>
+                    <BbTableCell>@(k.LastUsedUtc?.ToString("yyyy-MM-dd HH:mm") ?? "—")</BbTableCell>
+                    <BbTableCell>
+                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
+                                @onclick="() => { revokeTargetId = k.Id; showRevoke = true; }" title="Revoke">
+                            <LucideIcon Name="trash-2" />
+                        </BbButton>
+                    </BbTableCell>
+                </BbTableRow>
+            }
+        </BbTableBody>
+    </BbTable>
+}
+
+<BbDialog @bind-Open="showSecret">
+    <BbDialogContent>
+        <BbDialogHeader>
+            <BbDialogTitle>API key created</BbDialogTitle>
+            <BbDialogDescription>Copy it now — it will not be shown again.</BbDialogDescription>
+        </BbDialogHeader>
+        <div class="form-group">
+            <BbInput Value="@createdSecret" ReadOnly="true" />
+        </div>
+        <BbDialogFooter>
+            <BbDialogClose>
+                <BbButton Variant="ButtonVariant.Outline">Done</BbButton>
+            </BbDialogClose>
+        </BbDialogFooter>
+    </BbDialogContent>
+</BbDialog>
+
+<BbAlertDialog @bind-Open="showRevoke">
+    <BbAlertDialogContent>
+        <BbAlertDialogHeader>
+            <BbAlertDialogTitle>Revoke API key</BbAlertDialogTitle>
+            <BbAlertDialogDescription>Clients using this key will immediately lose access.</BbAlertDialogDescription>
+        </BbAlertDialogHeader>
+        <BbAlertDialogFooter>
+            <BbAlertDialogCancel>
+                <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
+            </BbAlertDialogCancel>
+            <BbAlertDialogAction>
+                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmRevokeAsync">Revoke</BbButton>
+            </BbAlertDialogAction>
+        </BbAlertDialogFooter>
+    </BbAlertDialogContent>
+</BbAlertDialog>
+
+@code {
+    private IReadOnlyList<ApiKey> keys = [];
+    private string newName = "";
+    private string newRole = RelayRoles.TenantViewer;
+    private string? statusMessage;
+    private bool isLoading = true;
+    private bool showSecret;
+    private string createdSecret = "";
+    private bool showRevoke;
+    private int revokeTargetId;
+
+    private int? ScopeTenantId => CurrentTenant.FilterEnabled ? CurrentTenant.FilterTenantId : null;
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+        keys = await svc.GetAllAsync(ScopeTenantId);
+        isLoading = false;
+    }
+
+    private async Task CreateAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+        var (_, plaintext) = await svc.CreateAsync(ScopeTenantId, newName.Trim(), newRole, null);
+        createdSecret = plaintext;
+        showSecret = true;
+        statusMessage = $"Key '{newName}' created";
+        newName = "";
+        await RefreshAsync();
+    }
+
+    private async Task ConfirmRevokeAsync()
+    {
+        showRevoke = false;
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+        await svc.DeleteAsync(revokeTargetId);
+        statusMessage = "Key revoked";
+        await RefreshAsync();
+    }
+}
