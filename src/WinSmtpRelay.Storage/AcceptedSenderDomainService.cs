@@ -13,7 +13,14 @@ public class AcceptedSenderDomainService(RelayDbContext db) : IAcceptedSenderDom
 
     public async Task<AcceptedSenderDomain> CreateAsync(string domain, CancellationToken ct = default)
     {
-        var entry = new AcceptedSenderDomain { Domain = domain.ToLowerInvariant().Trim() };
+        var normalized = domain.ToLowerInvariant().Trim();
+
+        // Sender domains are globally unique — guard across all tenants (the page/API pre-check
+        // via ExistsAsync; this is the backstop before the unique index would throw).
+        if (await db.AcceptedSenderDomains.IgnoreQueryFilters().AsNoTracking().AnyAsync(d => d.Domain == normalized, ct))
+            throw new InvalidOperationException($"Domain '{normalized}' is already in use.");
+
+        var entry = new AcceptedSenderDomain { Domain = normalized };
         db.AcceptedSenderDomains.Add(entry);
         await db.SaveChangesAsync(ct);
         return entry;
@@ -26,7 +33,8 @@ public class AcceptedSenderDomainService(RelayDbContext db) : IAcceptedSenderDom
 
     public async Task<bool> ExistsAsync(string domain, CancellationToken ct = default)
     {
-        return await db.AcceptedSenderDomains.AsNoTracking()
+        // Global check (ignore the tenant filter): a domain claimed by any tenant counts as taken.
+        return await db.AcceptedSenderDomains.IgnoreQueryFilters().AsNoTracking()
             .AnyAsync(d => d.Domain == domain.ToLowerInvariant().Trim(), ct);
     }
 }

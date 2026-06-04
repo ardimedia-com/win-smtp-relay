@@ -114,14 +114,16 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
         modelBuilder.Entity<AcceptedDomain>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => new { e.TenantId, e.Domain }).IsUnique();
+            // Globally unique: a recipient domain may be claimed by only one tenant.
+            entity.HasIndex(e => e.Domain).IsUnique();
             entity.Property(e => e.Domain).HasMaxLength(255);
         });
 
         modelBuilder.Entity<AcceptedSenderDomain>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => new { e.TenantId, e.Domain }).IsUnique();
+            // Globally unique: a sender domain may be claimed by only one tenant.
+            entity.HasIndex(e => e.Domain).IsUnique();
             entity.Property(e => e.Domain).HasMaxLength(255);
         });
 

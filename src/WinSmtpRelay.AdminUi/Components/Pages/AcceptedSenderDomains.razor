@@ -153,11 +153,19 @@ else
 
         if (await svc.ExistsAsync(newDomain))
         {
-            statusMessage = $"Domain '{newDomain}' already exists";
+            statusMessage = $"Domain '{newDomain}' is already in use";
             return;
         }
 
-        await svc.CreateAsync(newDomain);
+        try
+        {
+            await svc.CreateAsync(newDomain);
+        }
+        catch (InvalidOperationException ex)
+        {
+            statusMessage = ex.Message;
+            return;
+        }
         ConfigCache.Invalidate();
         statusMessage = $"Domain '{newDomain}' added";
         newDomain = "";

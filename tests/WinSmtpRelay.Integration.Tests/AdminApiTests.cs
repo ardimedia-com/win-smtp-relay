@@ -580,5 +580,30 @@ public class AdminApiTests
         }
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task AcceptedDomain_IsGloballyUnique_AcrossTenants()
+    {
+        int tenantB;
+        using (var scope = _app.Services.CreateScope())
+            tenantB = (await scope.ServiceProvider.GetRequiredService<ITenantService>().CreateAsync("Dom Co", "dom-co")).Id;
+
+        // The default tenant claims the domain.
+        using (var scope = _app.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<ICurrentTenant>().SetTenant(TenantDefaults.DefaultTenantId);
+            await scope.ServiceProvider.GetRequiredService<IAcceptedDomainService>().CreateAsync("shared.example");
+        }
+
+        // Tenant B sees it as taken and cannot claim it.
+        using (var scope = _app.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<ICurrentTenant>().SetTenant(tenantB);
+            var svc = scope.ServiceProvider.GetRequiredService<IAcceptedDomainService>();
+            Assert.IsTrue(await svc.ExistsAsync("shared.example"), "another tenant's domain should be visible as taken");
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => svc.CreateAsync("shared.example"));
+        }
+    }
+
     private record HealthResponse(string Status);
 }
