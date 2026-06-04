@@ -19,6 +19,8 @@ public class RuntimeConfigCache : IRuntimeConfigCache
 
     private volatile IReadOnlyList<string>? _acceptedDomains;
     private volatile IReadOnlyList<string>? _acceptedSenderDomains;
+    private volatile IReadOnlyDictionary<string, int>? _senderDomainOwners;
+    private volatile IReadOnlyDictionary<string, int>? _recipientDomainOwners;
     private volatile IReadOnlyList<IpAccessRule>? _ipAccessRules;
     private volatile IReadOnlyList<DomainRoute>? _domainRoutes;
     private volatile IReadOnlyList<HeaderRewriteEntry>? _headerRewriteRules;
@@ -79,6 +81,46 @@ public class RuntimeConfigCache : IRuntimeConfigCache
             _acceptedSenderDomains = domains;
             _logger.LogDebug("Loaded {Count} accepted sender domains into cache", domains.Count);
             return domains;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task<int?> GetTenantForSenderDomainAsync(string domain, CancellationToken ct = default)
+    {
+        var map = _senderDomainOwners ?? await LoadDomainOwnersAsync(sender: true, ct);
+        return map.TryGetValue(domain, out var tenantId) ? tenantId : null;
+    }
+
+    public async Task<int?> GetTenantForRecipientDomainAsync(string domain, CancellationToken ct = default)
+    {
+        var map = _recipientDomainOwners ?? await LoadDomainOwnersAsync(sender: false, ct);
+        return map.TryGetValue(domain, out var tenantId) ? tenantId : null;
+    }
+
+    private async Task<IReadOnlyDictionary<string, int>> LoadDomainOwnersAsync(bool sender, CancellationToken ct)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (sender && _senderDomainOwners is { } s) return s;
+            if (!sender && _recipientDomainOwners is { } r) return r;
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var rows = sender
+                ? await db.AcceptedSenderDomains.AsNoTracking().Select(d => new { d.Domain, d.TenantId }).ToListAsync(ct)
+                : await db.AcceptedDomains.AsNoTracking().Select(d => new { d.Domain, d.TenantId }).ToListAsync(ct);
+
+            // First-writer wins on the rare duplicate (same domain claimed by two tenants).
+            var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows)
+                map.TryAdd(row.Domain, row.TenantId);
+
+            if (sender) _senderDomainOwners = map; else _recipientDomainOwners = map;
+            return map;
         }
         finally
         {
@@ -205,6 +247,8 @@ public class RuntimeConfigCache : IRuntimeConfigCache
     {
         _acceptedDomains = null;
         _acceptedSenderDomains = null;
+        _senderDomainOwners = null;
+        _recipientDomainOwners = null;
         _ipAccessRules = null;
         _domainRoutes = null;
         _headerRewriteRules = null;

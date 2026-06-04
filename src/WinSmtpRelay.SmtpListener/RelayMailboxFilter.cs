@@ -57,6 +57,16 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         var remoteEndPoint = context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep) ? ep as IPEndPoint : null;
         var clientIp = remoteEndPoint?.Address.ToString();
 
+        // Resolve the owning tenant for this message. Authenticated sessions set it at AUTH time;
+        // otherwise resolve by sender domain (falls back to the default tenant). Stamped onto the
+        // queued message in RelayMessageStore.
+        if (!context.Properties.ContainsKey("TenantId"))
+        {
+            var ownerTenant = await _configCache.GetTenantForSenderDomainAsync(
+                GetDomainFromAddress(from.AsAddress()), cancellationToken);
+            context.Properties["TenantId"] = ownerTenant ?? Core.Models.TenantDefaults.DefaultTenantId;
+        }
+
         // Check if IP is auto-banned (failed auth)
         if (clientIp is not null && _rateLimiter.IsIpBanned(clientIp))
         {

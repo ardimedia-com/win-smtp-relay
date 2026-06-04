@@ -14,6 +14,12 @@ public interface IRuntimeConfigCache
     /// <summary>IP access rules ordered by <see cref="IpAccessRule.SortOrder"/> (authoritative relay IP policy).</summary>
     Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default);
 
+    /// <summary>The tenant that owns an accepted sender domain, or null if no tenant claims it.</summary>
+    Task<int?> GetTenantForSenderDomainAsync(string domain, CancellationToken ct = default);
+
+    /// <summary>The tenant that owns an accepted recipient domain, or null if no tenant claims it.</summary>
+    Task<int?> GetTenantForRecipientDomainAsync(string domain, CancellationToken ct = default);
+
     Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<HeaderRewriteEntry>> GetHeaderRewriteRulesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<SenderRewriteEntry>> GetSenderRewriteRulesAsync(CancellationToken ct = default);

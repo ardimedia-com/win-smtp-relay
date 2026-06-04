@@ -50,6 +50,12 @@ public class RelayUserAuthenticator : UserAuthenticator, IUserAuthenticator
         if (result)
         {
             context.Properties["AuthenticatedUser"] = user;
+
+            // Bind the session to the authenticated user's tenant (submission path).
+            var relayUser = await userService.GetByUsernameAsync(user, cancellationToken);
+            if (relayUser is not null)
+                context.Properties["TenantId"] = relayUser.TenantId;
+
             _logger.LogInformation("SMTP AUTH successful for user {User}", user);
 
             // Clear failed auth counter on success

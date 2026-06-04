@@ -48,6 +48,10 @@ public class RelayMessageStore : MessageStore
         var recipients = string.Join(";", transaction.To.Select(m => m.AsAddress()));
         var messageId = ExtractMessageId(rawMessage) ?? $"<{Guid.NewGuid()}@winsmtprelay>";
 
+        var tenantId = context.Properties.TryGetValue("TenantId", out var tenantObj) && tenantObj is int resolvedTenant
+            ? resolvedTenant
+            : TenantDefaults.DefaultTenantId;
+
         var remoteEndPoint = context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep)
             ? ep as IPEndPoint
             : null;
@@ -89,6 +93,7 @@ public class RelayMessageStore : MessageStore
             RawMessage = rawMessage,
             SizeBytes = rawMessage.Length,
             SourceIp = sourceIp,
+            TenantId = tenantId,
             NextRetryUtc = DateTime.UtcNow
         };
 
