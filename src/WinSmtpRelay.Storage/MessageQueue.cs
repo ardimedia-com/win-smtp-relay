@@ -35,7 +35,7 @@ public class MessageQueue(RelayDbContext db) : IMessageQueue
 
     public async Task<QueuedMessage?> GetByIdAsync(long messageId, CancellationToken cancellationToken = default)
     {
-        return await db.QueuedMessages.FindAsync([messageId], cancellationToken);
+        return await db.QueuedMessages.FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
     }
 
     public async Task<int> GetQueueDepthAsync(CancellationToken cancellationToken = default)

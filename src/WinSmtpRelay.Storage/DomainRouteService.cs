@@ -24,7 +24,7 @@ public class DomainRouteService(RelayDbContext db) : IDomainRouteService
 
     public async Task UpdateAsync(DomainRoute route, CancellationToken ct = default)
     {
-        var existing = await db.DomainRoutes.FindAsync([route.Id], ct);
+        var existing = await db.DomainRoutes.FirstOrDefaultAsync(r => r.Id == route.Id, ct);
         if (existing is null) return;
 
         existing.DomainPattern = route.DomainPattern;

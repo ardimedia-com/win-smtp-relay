@@ -22,7 +22,7 @@ public class MessageFilterService(RelayDbContext db) : IMessageFilterService
 
     public async Task UpdateHeaderRuleAsync(HeaderRewriteEntry rule, CancellationToken ct = default)
     {
-        var existing = await db.HeaderRewriteEntries.FindAsync([rule.Id], ct);
+        var existing = await db.HeaderRewriteEntries.FirstOrDefaultAsync(r => r.Id == rule.Id, ct);
         if (existing is null) return;
 
         existing.HeaderName = rule.HeaderName;
@@ -56,7 +56,7 @@ public class MessageFilterService(RelayDbContext db) : IMessageFilterService
 
     public async Task UpdateSenderRuleAsync(SenderRewriteEntry rule, CancellationToken ct = default)
     {
-        var existing = await db.SenderRewriteEntries.FindAsync([rule.Id], ct);
+        var existing = await db.SenderRewriteEntries.FirstOrDefaultAsync(r => r.Id == rule.Id, ct);
         if (existing is null) return;
 
         existing.FromPattern = rule.FromPattern;

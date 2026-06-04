@@ -31,3 +31,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Closed the unauthenticated admin surface: the entire REST API and Blazor admin UI were previously reachable without credentials on `0.0.0.0:8025`, including user creation, configuration changes, and DKIM private-key generation.
+- Closed a cross-tenant access path (IDOR): admin services/endpoints that loaded an entity by primary key used EF `Find`, which bypasses the tenant query filter. These now use filtered lookups, so a tenant administrator cannot read or modify another tenant's user, connector, domain route, DKIM domain, IP rule, message-filter rule, or queued message by guessing its id. (Blazor pages that open their own DI scope still need the ambient tenant propagated — addressed with the tenant-management UI.)

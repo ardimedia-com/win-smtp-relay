@@ -322,5 +322,43 @@ public class AdminApiTests
         Assert.IsTrue(hostUsers.Any(u => u.Username == "bob_t2"));
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task TenantAdmin_CannotAccessAnotherTenantsUserById()
+    {
+        using (var scope = _app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            db.Tenants.Add(new Tenant { Id = 2, Name = "Tenant Two", Slug = "tenant-two" });
+            await db.SaveChangesAsync();
+        }
+
+        string tenant2Key;
+        using (var scope = _app.Services.CreateScope())
+        {
+            var keys = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+            (_, tenant2Key) = await keys.CreateAsync(2, "tenant2-admin", RelayRoles.TenantAdmin, null, default);
+        }
+
+        using var t2 = new HttpClient { BaseAddress = _client.BaseAddress };
+        t2.DefaultRequestHeaders.Add(ApiKeyDefaults.HeaderName, tenant2Key);
+
+        // Host creates a user that belongs to the default tenant.
+        await _client.PostAsJsonAsync("/api/users", new CreateUserRequest("alice_t1", "P@ssw0rd!"));
+        var hostUsers = await _client.GetFromJsonAsync<UserSummary[]>("/api/users");
+        var aliceId = hostUsers!.Single(u => u.Username == "alice_t1").Id;
+
+        // Tenant-2 admin cannot update alice by id (the filtered lookup yields nothing -> 404),
+        // proving Find-by-id no longer bypasses the tenant filter.
+        var put = await t2.PutAsJsonAsync($"/api/users/{aliceId}",
+            new UpdateUserRequest(false, null, null, null));
+        Assert.AreEqual(HttpStatusCode.NotFound, put.StatusCode);
+
+        // Tenant-2 admin's delete is a tenant-scoped no-op: alice still exists for the host.
+        await t2.DeleteAsync($"/api/users/{aliceId}");
+        var afterDelete = await _client.GetFromJsonAsync<UserSummary[]>("/api/users");
+        Assert.IsTrue(afterDelete!.Any(u => u.Id == aliceId));
+    }
+
     private record HealthResponse(string Status);
 }

@@ -25,7 +25,7 @@ public class ReceiveConnectorService(RelayDbContext db) : IReceiveConnectorServi
 
     public async Task UpdateAsync(ReceiveConnector connector, CancellationToken ct = default)
     {
-        var existing = await db.ReceiveConnectors.FindAsync([connector.Id], ct);
+        var existing = await db.ReceiveConnectors.FirstOrDefaultAsync(c => c.Id == connector.Id, ct);
         if (existing is null) return;
 
         existing.Name = connector.Name;

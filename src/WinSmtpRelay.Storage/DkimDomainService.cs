@@ -26,7 +26,7 @@ public class DkimDomainService(RelayDbContext db) : IDkimDomainService
 
     public async Task UpdateAsync(DkimDomain dkim, CancellationToken ct = default)
     {
-        var existing = await db.DkimDomains.FindAsync([dkim.Id], ct);
+        var existing = await db.DkimDomains.FirstOrDefaultAsync(d => d.Id == dkim.Id, ct);
         if (existing is null) return;
 
         existing.Domain = dkim.Domain;

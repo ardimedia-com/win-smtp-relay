@@ -30,7 +30,7 @@ public class SendConnectorService(RelayDbContext db) : ISendConnectorService
 
     public async Task UpdateAsync(SendConnector connector, CancellationToken ct = default)
     {
-        var existing = await db.SendConnectors.FindAsync([connector.Id], ct);
+        var existing = await db.SendConnectors.FirstOrDefaultAsync(c => c.Id == connector.Id, ct);
         if (existing is null) return;
 
         existing.Name = connector.Name;

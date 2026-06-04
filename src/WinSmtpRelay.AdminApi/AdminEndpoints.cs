@@ -156,7 +156,7 @@ public static class AdminEndpoints
 
         users.MapPut("/{id:int}", async (int id, UpdateUserRequest req, RelayDbContext db, CancellationToken ct) =>
         {
-            var user = await db.RelayUsers.FindAsync([id], ct);
+            var user = await db.RelayUsers.FirstOrDefaultAsync(u => u.Id == id, ct);
             if (user is null) return Results.NotFound();
 
             user.AllowedSenderAddresses = req.AllowedSenderAddresses;

@@ -20,7 +20,7 @@ public class IpAccessRuleService(RelayDbContext db) : IIpAccessRuleService
 
     public async Task UpdateAsync(IpAccessRule rule, CancellationToken ct = default)
     {
-        var existing = await db.IpAccessRules.FindAsync([rule.Id], ct);
+        var existing = await db.IpAccessRules.FirstOrDefaultAsync(r => r.Id == rule.Id, ct);
         if (existing is null) return;
 
         existing.Network = rule.Network;
