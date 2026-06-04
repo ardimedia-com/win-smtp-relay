@@ -1,4 +1,5 @@
 @page "/setup"
+@using WinSmtpRelay.AdminUi.Components.Account
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
@@ -180,6 +181,24 @@ else
             @foreach (var item in readiness.Optional) { @row(item) }
         </BbCardContent>
     </BbCard>
+
+    <div class="setup-group-label">Verify delivery</div>
+    <BbCard>
+        <BbCardContent>
+            <div class="setup-row" style="border:none;">
+                <span class="setup-row-icon s-done"><LucideIcon Name="send" Size="18" /></span>
+                <div class="setup-row-main">
+                    <div class="setup-row-title">Send a test message</div>
+                    <div class="setup-row-detail">Queue a message through the relay to confirm outbound delivery works end-to-end (MX lookup, TLS, DKIM). Send it to an address you control, then watch the result under Journal.</div>
+                </div>
+                <div class="setup-row-action">
+                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="OpenTestDialogAsync">
+                        <LucideIcon Name="send" Size="14" /> Send test
+                    </BbButton>
+                </div>
+            </div>
+        </BbCardContent>
+    </BbCard>
 }
 
 <BbDialog @bind-Open="showHelp">
@@ -207,6 +226,37 @@ else
         </div>
         <BbDialogFooter>
             <BbDialogClose><BbButton Variant="ButtonVariant.Outline">Close</BbButton></BbDialogClose>
+        </BbDialogFooter>
+    </BbDialogContent>
+</BbDialog>
+
+<BbDialog @bind-Open="showTestDialog">
+    <BbDialogContent>
+        <BbDialogHeader>
+            <BbDialogTitle>Send a test message</BbDialogTitle>
+            <BbDialogDescription>Queues a message through the relay's own delivery pipeline.</BbDialogDescription>
+        </BbDialogHeader>
+        <div class="form-group">
+            <BbLabel>From</BbLabel>
+            <BbInput @bind-Value="testFrom" Placeholder="test@your-domain.com" />
+        </div>
+        <div class="form-group">
+            <BbLabel>To</BbLabel>
+            <BbInput @bind-Value="testTo" Placeholder="you@example.com" />
+        </div>
+        @if (!string.IsNullOrEmpty(testError))
+        {
+            <p class="text-danger" style="font-size:0.8rem;margin:0.25rem 0 0;">@testError</p>
+        }
+        @if (!string.IsNullOrEmpty(testResult))
+        {
+            <p style="font-size:0.8rem;color:var(--primary);margin:0.25rem 0 0;">@testResult</p>
+        }
+        <BbDialogFooter>
+            <BbDialogClose><BbButton Variant="ButtonVariant.Outline">Close</BbButton></BbDialogClose>
+            <BbButton Variant="ButtonVariant.Default" @onclick="SendTestAsync" Disabled="@testSending">
+                <LucideIcon Name="send" /> @(testSending ? "Sending…" : "Send")
+            </BbButton>
         </BbDialogFooter>
     </BbDialogContent>
 </BbDialog>
@@ -334,6 +384,70 @@ else
     }
 
     private async Task CopyAsync(string value) => await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+
+    // ----- Test message -----
+    private bool showTestDialog;
+    private string testFrom = "";
+    private string testTo = "";
+    private bool testSending;
+    private string? testResult;
+    private string? testError;
+
+    private async Task OpenTestDialogAsync()
+    {
+        testResult = null;
+        testError = null;
+        if (string.IsNullOrWhiteSpace(testFrom))
+        {
+            try
+            {
+                using var scope = ScopeFactory.CreateScope();
+                var senders = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
+                var domains = await senders.GetAllAsync();
+                if (domains.Count > 0)
+                    testFrom = $"test@{domains[0].Domain}";
+            }
+            catch { /* prefill is best-effort */ }
+        }
+        showTestDialog = true;
+    }
+
+    private async Task SendTestAsync()
+    {
+        testResult = null;
+        testError = null;
+        var from = testFrom.Trim();
+        var to = testTo.Trim();
+        if (!IsEmail(from)) { testError = "Enter a valid From address."; return; }
+        if (!IsEmail(to)) { testError = "Enter a valid recipient address."; return; }
+        if (readiness?.TenantId is not { } tenantId) { testError = "No tenant in scope."; return; }
+
+        testSending = true;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
+            var body = "This is a test message from the WinSmtpRelay Setup & Health page, " +
+                       "sent to verify that outbound delivery works.\r\n";
+            await AccountEmail.EnqueueAsync(
+                queue, from, to, "WinSmtpRelay test message", body, tenantId);
+            testResult = $"Queued for delivery to {to}. Watch the result under Journal.";
+        }
+        catch (Exception ex)
+        {
+            testError = $"Could not queue the test message: {ex.Message}";
+        }
+        finally
+        {
+            testSending = false;
+        }
+    }
+
+    private static bool IsEmail(string v)
+    {
+        var at = v.IndexOf('@');
+        return at > 0 && at < v.Length - 1 && !v.Contains(' ') && v.IndexOf('@', at + 1) < 0;
+    }
 
     private static string DnsBadgeClass(DnsRecordStatus status) => status switch
     {
