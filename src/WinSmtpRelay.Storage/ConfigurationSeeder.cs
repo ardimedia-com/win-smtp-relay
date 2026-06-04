@@ -22,6 +22,7 @@ public class ConfigurationSeeder(
     IOptions<AdminUiOptions> adminUiOpts,
     IOptions<EmailAuthenticationOptions> emailAuthOpts,
     IOptions<BackupMxOptions> backupMxOpts,
+    IOptions<StatisticsOptions> statisticsOpts,
     ILogger<ConfigurationSeeder> logger) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -38,6 +39,7 @@ public class ConfigurationSeeder(
         await SeedPortalSettingsAsync(db, cancellationToken);
         await SeedEmailAuthSettingsAsync(db, cancellationToken);
         await SeedBackupMxSettingsAsync(db, cancellationToken);
+        await SeedStatisticsRetentionSettingsAsync(db, cancellationToken);
         await SeedMessageFiltersAsync(db, cancellationToken);
     }
 
@@ -250,6 +252,22 @@ public class ConfigurationSeeder(
         // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied backup-MX settings from appsettings (row not yet edited)");
+    }
+
+    private async Task SeedStatisticsRetentionSettingsAsync(RelayDbContext db, CancellationToken ct)
+    {
+        var existing = await db.StatisticsRetentionSettings.FindAsync([1], ct);
+        if (existing is null) return; // seeded by EF HasData
+
+        if (existing.UpdatedUtc != SeedSentinel)
+            return; // edited via UI — DB authoritative
+
+        var opts = statisticsOpts.Value;
+        existing.RetentionDays = opts.RetentionDays;
+        existing.AggregationTimeUtc = opts.AggregationTimeUtc;
+        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Applied statistics retention settings from appsettings (row not yet edited)");
     }
 
     private async Task SeedMessageFiltersAsync(RelayDbContext db, CancellationToken ct)

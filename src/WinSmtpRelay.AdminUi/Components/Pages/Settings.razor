@@ -138,6 +138,32 @@ else
             }
         </BbCardContent>
     </BbCard>
+
+    <BbCard Class="mt-1">
+        <BbCardHeader>
+            <BbCardTitle>Statistics retention</BbCardTitle>
+        </BbCardHeader>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel>Retention (days)</BbLabel>
+                <BbInput Type="InputType.Number" @bind-Value="statRetentionDays" />
+            </div>
+            <div class="form-group" style="margin-top:0.75rem;">
+                <BbLabel>Daily aggregation time (UTC, HH:mm)</BbLabel>
+                <BbInput @bind-Value="statAggTime" Placeholder="00:00" />
+            </div>
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveStatisticsAsync" Class="mt-1">
+                <LucideIcon Name="save" /> Save
+            </BbButton>
+            <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;">
+                Daily statistics older than the retention window are purged by the background aggregator, which runs at the configured UTC time.
+            </p>
+            @if (!string.IsNullOrEmpty(statisticsStatus))
+            {
+                <p class="text-muted" style="margin-top:0.5rem;">@statisticsStatus</p>
+            }
+        </BbCardContent>
+    </BbCard>
     </div>
 }
 
@@ -159,6 +185,10 @@ else
     private string bmMaxHold = "168";
     private string? backupMxStatus;
 
+    private string statRetentionDays = "90";
+    private string statAggTime = "00:00";
+    private string? statisticsStatus;
+
     protected override async Task OnInitializedAsync()
     {
         using var scope = ScopeFactory.CreateScope();
@@ -179,6 +209,10 @@ else
         bmDomains = backupMx.Domains;
         bmRetryInterval = backupMx.RetryIntervalMinutes.ToString();
         bmMaxHold = backupMx.MaxHoldHours.ToString();
+
+        var stats = await sp.GetRequiredService<IStatisticsRetentionSettingsService>().GetAsync();
+        statRetentionDays = stats.RetentionDays.ToString();
+        statAggTime = stats.AggregationTimeUtc;
 
         isLoading = false;
     }
@@ -203,6 +237,18 @@ else
         backupMxStatus = bmEnabled
             ? $"Backup MX enabled for: {(string.IsNullOrWhiteSpace(bmDomains) ? "(no domains set)" : bmDomains)}."
             : "Backup MX disabled.";
+    }
+
+    private async Task SaveStatisticsAsync()
+    {
+        var days = int.TryParse(statRetentionDays, out var d) ? Math.Max(1, d) : 90;
+        var time = TimeOnly.TryParse(statAggTime, out var t) ? t.ToString("HH:mm") : "00:00";
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IStatisticsRetentionSettingsService>()
+            .UpdateAsync(days, time);
+        statRetentionDays = days.ToString();
+        statAggTime = time;
+        statisticsStatus = $"Statistics retention set to {days} days; aggregation at {time} UTC.";
     }
 
     private async Task OnToggleAsync(bool value)

@@ -33,6 +33,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<PortalSettings> PortalSettings => Set<PortalSettings>();
     public DbSet<EmailAuthSettings> EmailAuthSettings => Set<EmailAuthSettings>();
     public DbSet<BackupMxSettings> BackupMxSettings => Set<BackupMxSettings>();
+    public DbSet<StatisticsRetentionSettings> StatisticsRetentionSettings => Set<StatisticsRetentionSettings>();
     public DbSet<HeaderRewriteEntry> HeaderRewriteEntries => Set<HeaderRewriteEntry>();
     public DbSet<SenderRewriteEntry> SenderRewriteEntries => Set<SenderRewriteEntry>();
 
@@ -215,6 +216,19 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 Domains = "",
                 RetryIntervalMinutes = 15,
                 MaxHoldHours = 168,
+                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            });
+        });
+
+        modelBuilder.Entity<StatisticsRetentionSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.AggregationTimeUtc).HasMaxLength(5);
+            entity.HasData(new StatisticsRetentionSettings
+            {
+                Id = 1,
+                RetentionDays = 90,
+                AggregationTimeUtc = "00:00",
                 UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             });
         });

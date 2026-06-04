@@ -797,5 +797,32 @@ public class AdminApiTests
         CollectionAssert.AreEquivalent(new[] { "example.com", "example.net" }, after.DomainList.ToArray());
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task StatisticsRetentionSettings_UpdatePersists_AndClamps()
+    {
+        using (var scope = _app.Services.CreateScope())
+        {
+            var svc = scope.ServiceProvider.GetRequiredService<IStatisticsRetentionSettingsService>();
+            var d = await svc.GetAsync();
+            Assert.AreEqual(90, d.RetentionDays, "default retention is 90 days");
+            Assert.AreEqual("00:00", d.AggregationTimeUtc);
+            await svc.UpdateAsync(retentionDays: 30, aggregationTimeUtc: "02:30");
+        }
+
+        using (var scope = _app.Services.CreateScope())
+        {
+            var d = await scope.ServiceProvider.GetRequiredService<IStatisticsRetentionSettingsService>().GetAsync();
+            Assert.AreEqual(30, d.RetentionDays);
+            Assert.AreEqual("02:30", d.AggregationTimeUtc);
+        }
+
+        // Retention clamps to >= 1.
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<IStatisticsRetentionSettingsService>().UpdateAsync(0, "00:00");
+        using (var scope = _app.Services.CreateScope())
+            Assert.AreEqual(1, (await scope.ServiceProvider.GetRequiredService<IStatisticsRetentionSettingsService>().GetAsync()).RetentionDays);
+    }
+
     private record HealthResponse(string Status);
 }

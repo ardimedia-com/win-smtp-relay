@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Statistics retention (how many days of daily statistics to keep) and the daily aggregation time are now runtime settings on the **Settings** page; the background aggregator reads them each cycle, so changes apply without a restart. Stored in `StatisticsRetentionSettings`, seeded once from the appsettings `Statistics` section.
 - Backup-MX behaviour (enabled, the held domains, retry interval, and max hold time) is now a runtime setting on the **Settings** page, applied immediately with no restart. It is stored in the database (`BackupMxSettings`, domains as a delimited list), cached on the SMTP/delivery path, and seeded once from the appsettings `BackupMx` section.
 - Inbound email authentication (SPF/DMARC enabled + the failure enforcement mode: log-only / reject / quarantine) is now a runtime setting on the **Settings** page, applied immediately with no restart. It is stored in the database (`EmailAuthSettings`), cached on the SMTP path, and seeded once from the appsettings `EmailAuthentication` section.
 - Rate limits (per-IP connections, per-sender messages, failed-auth auto-ban) are now read live from the database, so edits on the Rate Limits admin page take effect immediately. The limiter previously read the static appsettings values and ignored the database. The appsettings `RateLimit` section now only provides the initial values, applied until the settings are first edited in the UI. Per-user limits remain on the relay user.

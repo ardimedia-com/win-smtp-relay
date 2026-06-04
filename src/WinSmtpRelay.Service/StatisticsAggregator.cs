@@ -9,11 +9,8 @@ namespace WinSmtpRelay.Service;
 
 public class StatisticsAggregator(
     IServiceScopeFactory scopeFactory,
-    IOptions<StatisticsOptions> options,
     ILogger<StatisticsAggregator> logger) : BackgroundService
 {
-    private readonly StatisticsOptions _options = options.Value;
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Backfill historical data on first run
@@ -39,7 +36,10 @@ public class StatisticsAggregator(
         // Daily aggregation loop
         while (!stoppingToken.IsCancellationRequested)
         {
-            var delay = CalculateDelayUntilNextRun();
+            // Read the current retention settings each cycle so UI edits take effect without a restart.
+            var settings = await GetRetentionSettingsAsync(stoppingToken);
+
+            var delay = CalculateDelayUntilNextRun(settings.AggregationTimeUtc);
             logger.LogInformation("Next statistics aggregation in {Delay}", delay);
 
             try
@@ -58,9 +58,11 @@ public class StatisticsAggregator(
 
                 using var scope = scopeFactory.CreateScope();
                 var stats = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
+                var retentionDays = (await scope.ServiceProvider
+                    .GetRequiredService<IStatisticsRetentionSettingsService>().GetAsync(stoppingToken)).RetentionDays;
 
                 await stats.AggregateDayAsync(yesterday, stoppingToken);
-                await stats.PurgeOldStatisticsAsync(_options.RetentionDays, stoppingToken);
+                await stats.PurgeOldStatisticsAsync(retentionDays, stoppingToken);
 
                 logger.LogInformation("Statistics aggregation complete for {Date}", yesterday);
             }
@@ -75,9 +77,15 @@ public class StatisticsAggregator(
         }
     }
 
-    private TimeSpan CalculateDelayUntilNextRun()
+    private async Task<WinSmtpRelay.Core.Models.StatisticsRetentionSettings> GetRetentionSettingsAsync(CancellationToken ct)
     {
-        if (!TimeOnly.TryParse(_options.AggregationTimeUtc, out var targetTime))
+        using var scope = scopeFactory.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IStatisticsRetentionSettingsService>().GetAsync(ct);
+    }
+
+    private static TimeSpan CalculateDelayUntilNextRun(string aggregationTimeUtc)
+    {
+        if (!TimeOnly.TryParse(aggregationTimeUtc, out var targetTime))
             targetTime = new TimeOnly(0, 0);
 
         var now = DateTime.UtcNow;
