@@ -125,6 +125,12 @@
                     </BbSidebarMenuItem>
                     <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="adminAuth">
                         <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="adminusers">
+                                <LucideIcon Name="user-cog" />
+                                <span>Admin Users</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
                             <BbSidebarMenuButton Href="apikeys">
                                 <LucideIcon Name="key-round" />
                                 <span>API Keys</span>

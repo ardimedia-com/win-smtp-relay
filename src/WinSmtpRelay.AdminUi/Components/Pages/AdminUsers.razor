@@ -1,0 +1,269 @@
+@page "/adminusers"
+@using System.Security.Claims
+@using System.Security.Cryptography
+@using Microsoft.EntityFrameworkCore
+@using WinSmtpRelay.Core.Interfaces
+@attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
+@inject IServiceScopeFactory ScopeFactory
+@inject ICurrentTenant CurrentTenant
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>Admin Users</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header page-header-row">
+    <div>
+        <h1>Admin Users</h1>
+        <p>
+            Web-admin login accounts (separate from SMTP relay users).
+            @if (CurrentTenant.FilterEnabled)
+            {
+                <text>Managing tenant <strong>#@CurrentTenant.FilterTenantId</strong>.</text>
+            }
+            else
+            {
+                <text>Managing <strong>host administrators</strong>. Switch to a tenant to manage its admins.</text>
+            }
+        </p>
+    </div>
+</div>
+
+<div style="max-width:520px;">
+<BbCard Class="mb-1">
+    <BbCardHeader><BbCardTitle>Add @(CurrentTenant.FilterEnabled ? "Tenant" : "Host") Admin</BbCardTitle></BbCardHeader>
+    <BbCardContent>
+        <div class="form-group">
+            <BbLabel>Email</BbLabel>
+            <BbInput @bind-Value="newEmail" Placeholder="admin@tenant.example" />
+        </div>
+        @if (CurrentTenant.FilterEnabled)
+        {
+            <div class="form-group">
+                <BbLabel>Role</BbLabel>
+                <select class="account-input" @bind="newRole">
+                    <option value="@RelayRoles.TenantAdmin">Tenant Admin (read/write)</option>
+                    <option value="@RelayRoles.TenantViewer">Tenant Viewer (read-only)</option>
+                </select>
+            </div>
+        }
+    </BbCardContent>
+    <BbCardFooter>
+        <BbButton Variant="ButtonVariant.Default" @onclick="CreateAsync" Disabled="@string.IsNullOrWhiteSpace(newEmail)">
+            <LucideIcon Name="user-plus" /> Add
+        </BbButton>
+        @if (!string.IsNullOrEmpty(statusMessage))
+        {
+            <span class="text-muted" style="margin-left:1rem">@statusMessage</span>
+        }
+    </BbCardFooter>
+</BbCard>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[200px] w-full" />
+}
+else
+{
+    <BbTable Data="@rows">
+        <BbTableHeader>
+            <BbTableRow TData="Row">
+                <BbTableHeaderCell TData="Row">Email</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Role</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Tenant</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Status</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Actions</BbTableHeaderCell>
+            </BbTableRow>
+        </BbTableHeader>
+        <BbTableBody>
+            @if (rows.Count == 0)
+            {
+                <BbTableRow TData="Row"><BbTableCell colspan="5" style="text-align:center;">No admin users</BbTableCell></BbTableRow>
+            }
+            @foreach (var r in rows)
+            {
+                <BbTableRow Item="@r">
+                    <BbTableCell>@r.Email</BbTableCell>
+                    <BbTableCell>@r.Role</BbTableCell>
+                    <BbTableCell>@(r.TenantId?.ToString() ?? "host")</BbTableCell>
+                    <BbTableCell><span class="badge-status @(r.Enabled ? "" : "badge-muted")">@(r.Enabled ? "Enabled" : "Disabled")</span></BbTableCell>
+                    <BbTableCell>
+                        @if (!r.IsSelf)
+                        {
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
+                                    @onclick="() => ToggleAsync(r.Id)" title="@(r.Enabled ? "Disable" : "Enable")">
+                                <LucideIcon Name="@(r.Enabled ? "pause" : "play")" />
+                            </BbButton>
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
+                                    @onclick="() => { deleteTargetId = r.Id; showDelete = true; }" title="Delete">
+                                <LucideIcon Name="trash-2" />
+                            </BbButton>
+                        }
+                        else
+                        {
+                            <span class="text-muted" style="font-size:0.75rem;">you</span>
+                        }
+                    </BbTableCell>
+                </BbTableRow>
+            }
+        </BbTableBody>
+    </BbTable>
+}
+
+<BbDialog @bind-Open="showSecret">
+    <BbDialogContent>
+        <BbDialogHeader>
+            <BbDialogTitle>Admin created</BbDialogTitle>
+            <BbDialogDescription>Share this one-time password securely. The user must change it on first sign-in.</BbDialogDescription>
+        </BbDialogHeader>
+        <div class="form-group"><BbInput Value="@createdPassword" ReadOnly="true" /></div>
+        <BbDialogFooter><BbDialogClose><BbButton Variant="ButtonVariant.Outline">Done</BbButton></BbDialogClose></BbDialogFooter>
+    </BbDialogContent>
+</BbDialog>
+
+<BbAlertDialog @bind-Open="showDelete">
+    <BbAlertDialogContent>
+        <BbAlertDialogHeader>
+            <BbAlertDialogTitle>Delete admin user</BbAlertDialogTitle>
+            <BbAlertDialogDescription>This permanently removes the login account.</BbAlertDialogDescription>
+        </BbAlertDialogHeader>
+        <BbAlertDialogFooter>
+            <BbAlertDialogCancel><BbButton Variant="ButtonVariant.Outline">Cancel</BbButton></BbAlertDialogCancel>
+            <BbAlertDialogAction><BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteAsync">Delete</BbButton></BbAlertDialogAction>
+        </BbAlertDialogFooter>
+    </BbAlertDialogContent>
+</BbAlertDialog>
+
+@code {
+    private sealed record Row(int Id, string Email, string Role, int? TenantId, bool Enabled, bool IsSelf);
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private List<Row> rows = [];
+    private string newEmail = "";
+    private string newRole = RelayRoles.TenantAdmin;
+    private string? statusMessage;
+    private bool isLoading = true;
+    private bool showSecret;
+    private string createdPassword = "";
+    private bool showDelete;
+    private int deleteTargetId;
+    private int currentUserId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is not null)
+        {
+            var idVal = (await AuthState).User.FindFirstValue(ClaimTypes.NameIdentifier);
+            int.TryParse(idVal, out currentUserId);
+        }
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        using var scope = ScopeFactory.CreateScope();
+        var um = scope.ServiceProvider.GetRequiredService<UserManager<AdminUser>>();
+
+        var query = um.Users.AsQueryable();
+        if (CurrentTenant.FilterEnabled)
+        {
+            var tid = CurrentTenant.FilterTenantId;
+            query = query.Where(u => u.TenantId == tid);
+        }
+        var users = await query.OrderBy(u => u.Email).ToListAsync();
+
+        rows = [];
+        foreach (var u in users)
+        {
+            var roles = await um.GetRolesAsync(u);
+            var enabled = u.LockoutEnd is null || u.LockoutEnd <= DateTimeOffset.UtcNow;
+            rows.Add(new Row(u.Id, u.Email ?? u.UserName ?? "", string.Join(", ", roles), u.TenantId, enabled, u.Id == currentUserId));
+        }
+        isLoading = false;
+    }
+
+    private async Task CreateAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var um = scope.ServiceProvider.GetRequiredService<UserManager<AdminUser>>();
+
+        var scoped = CurrentTenant.FilterEnabled;
+        var role = scoped ? newRole : RelayRoles.HostAdmin;
+        var user = new AdminUser
+        {
+            UserName = newEmail.Trim(),
+            Email = newEmail.Trim(),
+            EmailConfirmed = true,
+            TenantId = scoped ? CurrentTenant.FilterTenantId : null,
+            IsHostAdmin = !scoped,
+            MustChangePassword = true,
+            CreatedUtc = DateTime.UtcNow
+        };
+
+        var password = GenerateTempPassword();
+        var result = await um.CreateAsync(user, password);
+        if (!result.Succeeded)
+        {
+            statusMessage = string.Join(" ", result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        await um.AddToRoleAsync(user, role);
+        createdPassword = password;
+        showSecret = true;
+        statusMessage = $"Admin '{user.Email}' created";
+        newEmail = "";
+        await RefreshAsync();
+    }
+
+    private async Task ToggleAsync(int id)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var um = scope.ServiceProvider.GetRequiredService<UserManager<AdminUser>>();
+        var user = await um.Users.FirstOrDefaultAsync(u => u.Id == id);
+        if (user is null || !InScope(user)) return;
+
+        var enabled = user.LockoutEnd is null || user.LockoutEnd <= DateTimeOffset.UtcNow;
+        await um.SetLockoutEnabledAsync(user, true);
+        await um.SetLockoutEndDateAsync(user, enabled ? DateTimeOffset.MaxValue : null);
+        await RefreshAsync();
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        showDelete = false;
+        using var scope = ScopeFactory.CreateScope();
+        var um = scope.ServiceProvider.GetRequiredService<UserManager<AdminUser>>();
+        var user = await um.Users.FirstOrDefaultAsync(u => u.Id == deleteTargetId);
+        if (user is not null && user.Id != currentUserId && InScope(user))
+        {
+            await um.DeleteAsync(user);
+            statusMessage = "Admin deleted";
+        }
+        await RefreshAsync();
+    }
+
+    // Enforce tenant scope (AdminUser is not query-filtered).
+    private bool InScope(AdminUser user)
+        => !CurrentTenant.FilterEnabled || user.TenantId == CurrentTenant.FilterTenantId;
+
+    private static string GenerateTempPassword()
+    {
+        const string upper = "ABCDEFGHJKLMNPQRSTUVWXYZ", lower = "abcdefghijkmnpqrstuvwxyz", digits = "23456789", symbols = "!@#$%^&*-_=+";
+        const string all = upper + lower + digits + symbols;
+        Span<char> b = stackalloc char[20];
+        b[0] = upper[RandomNumberGenerator.GetInt32(upper.Length)];
+        b[1] = lower[RandomNumberGenerator.GetInt32(lower.Length)];
+        b[2] = digits[RandomNumberGenerator.GetInt32(digits.Length)];
+        b[3] = symbols[RandomNumberGenerator.GetInt32(symbols.Length)];
+        for (var i = 4; i < b.Length; i++) b[i] = all[RandomNumberGenerator.GetInt32(all.Length)];
+        for (var i = b.Length - 1; i > 0; i--) { var j = RandomNumberGenerator.GetInt32(i + 1); (b[i], b[j]) = (b[j], b[i]); }
+        return new string(b);
+    }
+}
