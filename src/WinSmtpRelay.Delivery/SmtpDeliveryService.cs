@@ -1,3 +1,4 @@
+using System.Net;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Logging;
@@ -47,6 +48,9 @@ public class SmtpDeliveryService : IDeliveryService
             : await _dkimDomains.GetForSigningAsync(message.TenantId, senderDomain, cancellationToken);
         _dkimSigner.Sign(mimeMessage, message.TenantId, tenantDkim);
 
+        // Optional per-tenant outbound source IP (null = OS default).
+        var egressEndPoint = ParseEgressEndPoint(await _configCache.GetTenantEgressIpAsync(message.TenantId, cancellationToken));
+
         var recipients = message.Recipients.Split(';', StringSplitOptions.RemoveEmptyEntries);
         var results = new List<DeliveryResult>();
 
@@ -58,7 +62,7 @@ public class SmtpDeliveryService : IDeliveryService
             var domain = domainGroup.Key;
             var domainRecipients = domainGroup.ToList();
 
-            var domainResults = await DeliverToDomainAsync(mimeMessage, message.Sender, domainRecipients, domain, message.TenantId, cancellationToken);
+            var domainResults = await DeliverToDomainAsync(mimeMessage, message.Sender, domainRecipients, domain, message.TenantId, egressEndPoint, cancellationToken);
             results.AddRange(domainResults);
         }
 
@@ -80,6 +84,7 @@ public class SmtpDeliveryService : IDeliveryService
         List<string> recipients,
         string domain,
         int tenantId,
+        IPEndPoint? egressEndPoint,
         CancellationToken cancellationToken)
     {
         // 1. Per-domain route takes highest priority (scoped to the message's tenant so a tenant
@@ -96,6 +101,7 @@ public class SmtpDeliveryService : IDeliveryService
                 connector.Username, connector.EncryptedPassword,
                 connector.OpportunisticTls,
                 connector.ConnectTimeoutSeconds,
+                egressEndPoint,
                 cancellationToken);
         }
 
@@ -108,6 +114,7 @@ public class SmtpDeliveryService : IDeliveryService
                 _config.SmartHostUsername, _config.SmartHostPassword,
                 _config.OpportunisticTls,
                 _config.ConnectTimeoutSeconds,
+                egressEndPoint,
                 cancellationToken);
         }
 
@@ -120,7 +127,7 @@ public class SmtpDeliveryService : IDeliveryService
             try
             {
                 return await SendViaSmtpAsync(mimeMessage, sender, recipients, mxHost, 25, null, null,
-                    _config.OpportunisticTls, _config.ConnectTimeoutSeconds, cancellationToken);
+                    _config.OpportunisticTls, _config.ConnectTimeoutSeconds, egressEndPoint, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -139,6 +146,16 @@ public class SmtpDeliveryService : IDeliveryService
             StatusMessage = $"All MX hosts exhausted for domain {domain}: {errorMessage}",
             RemoteServer = mxHosts.FirstOrDefault()
         }).ToList();
+    }
+
+    /// <summary>Parses a configured egress IP into a bindable local endpoint (port 0), or null if unset/invalid.</summary>
+    internal static IPEndPoint? ParseEgressEndPoint(string? egressIp)
+    {
+        if (string.IsNullOrWhiteSpace(egressIp))
+            return null;
+        return IPAddress.TryParse(egressIp.Trim(), out var address)
+            ? new IPEndPoint(address, 0)
+            : null;
     }
 
     internal async Task<DomainRoute?> FindDomainRouteAsync(string domain, int tenantId, CancellationToken ct = default)
@@ -176,10 +193,18 @@ public class SmtpDeliveryService : IDeliveryService
         string? password,
         bool opportunisticTls,
         int connectTimeoutSeconds,
+        IPEndPoint? egressEndPoint,
         CancellationToken cancellationToken)
     {
         using var client = new SmtpClient(new MailKitProtocolLogger(_logger));
         client.Timeout = connectTimeoutSeconds * 1000;
+
+        // Bind outbound connections to the tenant's source IP when configured.
+        if (egressEndPoint is not null)
+        {
+            client.LocalEndPoint = egressEndPoint;
+            _logger.LogDebug("Binding outbound delivery to source IP {EgressIp}", egressEndPoint.Address);
+        }
 
         var tlsOption = opportunisticTls
             ? SecureSocketOptions.StartTlsWhenAvailable

@@ -43,6 +43,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.HasIndex(e => e.Slug).IsUnique();
             entity.Property(e => e.Name).HasMaxLength(200);
             entity.Property(e => e.Slug).HasMaxLength(100);
+            entity.Property(e => e.EgressIpAddress).HasMaxLength(45);
             entity.HasData(new Tenant
             {
                 Id = TenantDefaults.DefaultTenantId,

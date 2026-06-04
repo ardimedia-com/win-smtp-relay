@@ -646,5 +646,29 @@ public class AdminApiTests
             () => scope.ServiceProvider.GetRequiredService<ITenantService>().PurgeAndDeleteAsync(TenantDefaults.DefaultTenantId));
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task TenantEgressIp_PersistsAndCacheReflects_InvalidRejected()
+    {
+        int tid;
+        using (var scope = _app.Services.CreateScope())
+            tid = (await scope.ServiceProvider.GetRequiredService<ITenantService>().CreateAsync("Egress Co", "egress-co")).Id;
+
+        var cache = _app.Services.GetRequiredService<IRuntimeConfigCache>();
+        Assert.IsNull(await cache.GetTenantEgressIpAsync(tid));
+
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<ITenantService>().SetEgressIpAsync(tid, "203.0.113.7");
+        Assert.AreEqual("203.0.113.7", await cache.GetTenantEgressIpAsync(tid), "cache should reflect the set egress IP");
+
+        using (var scope = _app.Services.CreateScope())
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                () => scope.ServiceProvider.GetRequiredService<ITenantService>().SetEgressIpAsync(tid, "not-an-ip"));
+
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<ITenantService>().SetEgressIpAsync(tid, "");
+        Assert.IsNull(await cache.GetTenantEgressIpAsync(tid), "clearing should remove the egress IP");
+    }
+
     private record HealthResponse(string Status);
 }

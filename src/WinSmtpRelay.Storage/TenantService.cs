@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -51,6 +52,23 @@ public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITena
         // The SMTP/API path caches the enabled-tenant set; refresh it when that changes.
         if (enabledChanged)
             cache.Invalidate();
+    }
+
+    public async Task SetEgressIpAsync(int id, string? egressIp, CancellationToken cancellationToken = default)
+    {
+        var normalized = string.IsNullOrWhiteSpace(egressIp) ? null : egressIp.Trim();
+        if (normalized is not null && !IPAddress.TryParse(normalized, out _))
+            throw new InvalidOperationException($"'{normalized}' is not a valid IP address.");
+
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+        if (tenant is null)
+            return;
+
+        tenant.EgressIpAddress = normalized;
+        await db.SaveChangesAsync(cancellationToken);
+
+        // The delivery hot path caches tenant egress IPs — refresh on change.
+        cache.Invalidate();
     }
 
     public async Task DeleteAsync(int id, CancellationToken cancellationToken = default)

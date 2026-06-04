@@ -26,6 +26,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
     private volatile IReadOnlyList<HeaderRewriteEntry>? _headerRewriteRules;
     private volatile IReadOnlyList<SenderRewriteEntry>? _senderRewriteRules;
     private volatile IReadOnlySet<int>? _enabledTenants;
+    private volatile IReadOnlyDictionary<int, string>? _tenantEgressIps;
     private volatile RateLimitSettings? _rateLimitSettings;
 
     public RuntimeConfigCache(IServiceScopeFactory scopeFactory, ILogger<RuntimeConfigCache> logger)
@@ -159,6 +160,37 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         }
 
         return set.Contains(tenantId);
+    }
+
+    public async Task<string?> GetTenantEgressIpAsync(int tenantId, CancellationToken ct = default)
+    {
+        var map = _tenantEgressIps;
+        if (map is null)
+        {
+            await _lock.WaitAsync(ct);
+            try
+            {
+                if (_tenantEgressIps is null)
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+                    var rows = await db.Tenants
+                        .AsNoTracking()
+                        .Where(t => t.EgressIpAddress != null)
+                        .Select(t => new { t.Id, t.EgressIpAddress })
+                        .ToListAsync(ct);
+                    _tenantEgressIps = rows.ToDictionary(r => r.Id, r => r.EgressIpAddress!);
+                    _logger.LogDebug("Loaded {Count} tenant egress IP(s) into cache", _tenantEgressIps.Count);
+                }
+                map = _tenantEgressIps;
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        return map.TryGetValue(tenantId, out var ip) ? ip : null;
     }
 
     public async Task<RateLimitSettings> GetRateLimitSettingsAsync(CancellationToken ct = default)
@@ -313,6 +345,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         _headerRewriteRules = null;
         _senderRewriteRules = null;
         _enabledTenants = null;
+        _tenantEgressIps = null;
         _rateLimitSettings = null;
         _logger.LogInformation("Runtime configuration cache invalidated");
     }

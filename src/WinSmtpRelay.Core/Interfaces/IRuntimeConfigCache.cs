@@ -23,6 +23,9 @@ public interface IRuntimeConfigCache
     /// <summary>True if the tenant exists and is enabled. Used to gate the SMTP path for disabled tenants.</summary>
     Task<bool> IsTenantEnabledAsync(int tenantId, CancellationToken ct = default);
 
+    /// <summary>The tenant's configured outbound source IP, or null to use the OS default.</summary>
+    Task<string?> GetTenantEgressIpAsync(int tenantId, CancellationToken ct = default);
+
     /// <summary>The host-level rate-limit settings (single row), cached for the SMTP hot path.</summary>
     Task<RateLimitSettings> GetRateLimitSettingsAsync(CancellationToken ct = default);
 

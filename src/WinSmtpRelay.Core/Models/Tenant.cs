@@ -18,6 +18,12 @@ public class Tenant
 
     public bool IsEnabled { get; set; } = true;
 
+    /// <summary>
+    /// Optional source IP for this tenant's outbound SMTP delivery. When set, the delivery client
+    /// binds its local socket to this address (the host must own the IP). Null uses the OS default.
+    /// </summary>
+    public string? EgressIpAddress { get; set; }
+
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 }
 

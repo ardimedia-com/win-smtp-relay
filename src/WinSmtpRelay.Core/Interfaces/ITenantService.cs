@@ -15,6 +15,9 @@ public interface ITenantService
 
     Task UpdateAsync(int id, string name, bool isEnabled, CancellationToken cancellationToken = default);
 
+    /// <summary>Sets the tenant's outbound source IP (null/empty clears it). Throws if the value is not a valid IP.</summary>
+    Task SetEgressIpAsync(int id, string? egressIp, CancellationToken cancellationToken = default);
+
     /// <summary>Deletes a tenant. The default tenant cannot be deleted; deletion fails if the tenant still owns data.</summary>
     Task DeleteAsync(int id, CancellationToken cancellationToken = default);
 

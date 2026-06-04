@@ -65,6 +65,7 @@ else
                 <BbTableHeaderCell TData="Tenant">Slug</BbTableHeaderCell>
                 <BbTableHeaderCell TData="Tenant">Status</BbTableHeaderCell>
                 <BbTableHeaderCell TData="Tenant">Created</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Tenant">Egress IP</BbTableHeaderCell>
                 <BbTableHeaderCell TData="Tenant">Actions</BbTableHeaderCell>
             </BbTableRow>
         </BbTableHeader>
@@ -79,6 +80,15 @@ else
                         <span class="badge-status @(t.IsEnabled ? "" : "badge-muted")">@(t.IsEnabled ? "Enabled" : "Disabled")</span>
                     </BbTableCell>
                     <BbTableCell>@t.CreatedUtc.ToString("yyyy-MM-dd")</BbTableCell>
+                    <BbTableCell>
+                        <div style="display:flex;gap:0.25rem;align-items:center;">
+                            <BbInput @bind-Value="egressEdits[t.Id]" Placeholder="(OS default)" />
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
+                                    @onclick="() => SaveEgressAsync(t)" title="Save egress IP">
+                                <LucideIcon Name="save" />
+                            </BbButton>
+                        </div>
+                    </BbTableCell>
                     <BbTableCell>
                         @if (t.Id != TenantDefaults.DefaultTenantId || !t.IsEnabled)
                         {
@@ -126,6 +136,7 @@ else
     private bool isLoading = true;
     private bool showDeleteConfirm;
     private int deleteTargetId;
+    private Dictionary<int, string> egressEdits = new();
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();
 
@@ -135,7 +146,27 @@ else
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
         tenants = await svc.GetAllAsync();
+        egressEdits = tenants.ToDictionary(t => t.Id, t => t.EgressIpAddress ?? "");
         isLoading = false;
+    }
+
+    private async Task SaveEgressAsync(Tenant t)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
+        try
+        {
+            var value = egressEdits.TryGetValue(t.Id, out var v) ? v : null;
+            await svc.SetEgressIpAsync(t.Id, value);
+            statusMessage = string.IsNullOrWhiteSpace(value)
+                ? $"Egress IP cleared for '{t.Name}'"
+                : $"Egress IP set for '{t.Name}'";
+        }
+        catch (InvalidOperationException ex)
+        {
+            statusMessage = ex.Message;
+        }
+        await RefreshAsync();
     }
 
     private async Task CreateAsync()
