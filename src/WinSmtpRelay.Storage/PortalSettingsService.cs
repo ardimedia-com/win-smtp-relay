@@ -38,4 +38,18 @@ public class PortalSettingsService(RelayDbContext db) : IPortalSettingsService
         settings.UpdatedUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
     }
+
+    public async Task SetSignupMaxAttemptsPerIpPerHourAsync(int maxPerHour, CancellationToken ct = default)
+    {
+        var settings = await db.PortalSettings.FirstOrDefaultAsync(ct);
+        if (settings is null)
+        {
+            settings = new PortalSettings { Id = 1 };
+            db.PortalSettings.Add(settings);
+        }
+
+        settings.SignupMaxAttemptsPerIpPerHour = Math.Max(0, maxPerHour);
+        settings.UpdatedUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
 }

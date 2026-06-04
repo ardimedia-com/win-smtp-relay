@@ -207,6 +207,7 @@ public class ConfigurationSeeder(
             return;
 
         existing.SelfServiceSignupEnabled = adminUiOpts.Value.SelfServiceSignupEnabled;
+        existing.SignupMaxAttemptsPerIpPerHour = adminUiOpts.Value.SignupMaxAttemptsPerIpPerHour;
         // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied portal settings from appsettings (row not yet edited)");

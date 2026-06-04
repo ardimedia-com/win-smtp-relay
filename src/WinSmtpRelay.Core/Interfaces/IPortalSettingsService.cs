@@ -11,4 +11,7 @@ public interface IPortalSettingsService
 
     /// <summary>Sets the signup/reset email from-address (null/blank clears it, falling back to appsettings).</summary>
     Task SetSignupFromAddressAsync(string? fromAddress, CancellationToken ct = default);
+
+    /// <summary>Sets the per-IP-per-hour signup attempt limit (clamped to >= 0; 0 disables the throttle).</summary>
+    Task SetSignupMaxAttemptsPerIpPerHourAsync(int maxPerHour, CancellationToken ct = default);
 }

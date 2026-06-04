@@ -56,6 +56,19 @@ else
                 </p>
             </div>
 
+            <div class="form-group" style="margin-top:1.25rem;">
+                <BbLabel>Signup attempts per IP per hour</BbLabel>
+                <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <BbInput Type="InputType.Number" @bind-Value="signupMaxPerHour" />
+                    <BbButton Variant="ButtonVariant.Default" @onclick="SaveThrottleAsync">
+                        <LucideIcon Name="save" /> Save
+                    </BbButton>
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;">
+                    Abuse limit on the anonymous signup page, per client IP. Set to <span class="mono">0</span> to disable the throttle.
+                </p>
+            </div>
+
             @if (!string.IsNullOrEmpty(statusMessage))
             {
                 <p class="text-muted" style="margin-top:0.5rem;">@statusMessage</p>
@@ -68,6 +81,7 @@ else
 @code {
     private bool signupEnabled;
     private string? signupFromAddress;
+    private string signupMaxPerHour = "5";
     private bool isLoading = true;
     private string? statusMessage;
 
@@ -77,6 +91,7 @@ else
         var settings = await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync();
         signupEnabled = settings.SelfServiceSignupEnabled;
         signupFromAddress = settings.SignupFromAddress;
+        signupMaxPerHour = settings.SignupMaxAttemptsPerIpPerHour.ToString();
         isLoading = false;
     }
 
@@ -95,5 +110,16 @@ else
         statusMessage = string.IsNullOrWhiteSpace(signupFromAddress)
             ? "From-address cleared (using the appsettings value)."
             : $"From-address set to {signupFromAddress.Trim()}.";
+    }
+
+    private async Task SaveThrottleAsync()
+    {
+        var max = int.TryParse(signupMaxPerHour, out var v) ? Math.Max(0, v) : 0;
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSignupMaxAttemptsPerIpPerHourAsync(max);
+        signupMaxPerHour = max.ToString();
+        statusMessage = max == 0
+            ? "Signup throttle disabled."
+            : $"Signup throttle set to {max}/hour per IP.";
     }
 }

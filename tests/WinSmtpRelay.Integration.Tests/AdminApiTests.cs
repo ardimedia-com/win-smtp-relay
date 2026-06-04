@@ -740,5 +740,25 @@ public class AdminApiTests
             Assert.IsNull((await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync()).SignupFromAddress);
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task PortalSettings_SignupThrottle_PersistsAndClamps()
+    {
+        using (var scope = _app.Services.CreateScope())
+        {
+            var svc = scope.ServiceProvider.GetRequiredService<IPortalSettingsService>();
+            Assert.AreEqual(5, (await svc.GetAsync()).SignupMaxAttemptsPerIpPerHour, "default seed is 5");
+            await svc.SetSignupMaxAttemptsPerIpPerHourAsync(12);
+        }
+        using (var scope = _app.Services.CreateScope())
+            Assert.AreEqual(12, (await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync()).SignupMaxAttemptsPerIpPerHour);
+
+        // Negative clamps to 0 (disabled).
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSignupMaxAttemptsPerIpPerHourAsync(-3);
+        using (var scope = _app.Services.CreateScope())
+            Assert.AreEqual(0, (await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync()).SignupMaxAttemptsPerIpPerHour);
+    }
+
     private record HealthResponse(string Status);
 }

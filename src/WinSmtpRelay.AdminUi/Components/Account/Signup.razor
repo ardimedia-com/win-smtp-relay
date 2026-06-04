@@ -113,7 +113,7 @@ else
             return;
 
         // Throttle abuse by client IP before creating anything.
-        if (!SignupRateLimiter.TryRegister(HttpContext.Connection.RemoteIpAddress?.ToString()))
+        if (!SignupRateLimiter.TryRegister(HttpContext.Connection.RemoteIpAddress?.ToString(), portal.SignupMaxAttemptsPerIpPerHour))
         {
             errorMessage = "Too many signup attempts from your network. Please try again later.";
             Logger.LogWarning("Signup throttled for IP {Ip}", HttpContext.Connection.RemoteIpAddress);

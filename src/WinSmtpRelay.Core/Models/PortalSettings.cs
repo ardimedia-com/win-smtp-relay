@@ -18,5 +18,8 @@ public class PortalSettings
     /// </summary>
     public string? SignupFromAddress { get; set; }
 
+    /// <summary>Maximum self-service signup attempts per client IP per hour (0 disables the throttle).</summary>
+    public int SignupMaxAttemptsPerIpPerHour { get; set; } = 5;
+
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
 }
