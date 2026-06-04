@@ -51,6 +51,11 @@ internal class StubRuntimeConfigCache : IRuntimeConfigCache
     public Task<EmailAuthSettings> GetEmailAuthSettingsAsync(CancellationToken ct = default)
         => Task.FromResult(EmailAuthSettings);
 
+    public BackupMxSettings BackupMxSettings { get; set; } = new();
+
+    public Task<BackupMxSettings> GetBackupMxSettingsAsync(CancellationToken ct = default)
+        => Task.FromResult(BackupMxSettings);
+
     public Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<DomainRoute>>(DomainRoutes);
 

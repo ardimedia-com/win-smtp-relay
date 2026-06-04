@@ -779,5 +779,23 @@ public class AdminApiTests
         Assert.AreEqual(WinSmtpRelay.Core.Configuration.EnforcementMode.Reject, after.Enforcement);
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task BackupMxSettings_UpdatePersists_CacheReflects_AndParsesDomains()
+    {
+        var cache = _app.Services.GetRequiredService<IRuntimeConfigCache>();
+        Assert.IsFalse((await cache.GetBackupMxSettingsAsync()).Enabled, "backup MX defaults off");
+
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<IBackupMxSettingsService>()
+                .UpdateAsync(enabled: true, domains: "example.com; example.net", retryIntervalMinutes: 10, maxHoldHours: 72);
+
+        var after = await cache.GetBackupMxSettingsAsync();
+        Assert.IsTrue(after.Enabled, "cache should reflect the enable after invalidation");
+        Assert.AreEqual(10, after.RetryIntervalMinutes);
+        Assert.AreEqual(72, after.MaxHoldHours);
+        CollectionAssert.AreEquivalent(new[] { "example.com", "example.net" }, after.DomainList.ToArray());
+    }
+
     private record HealthResponse(string Status);
 }

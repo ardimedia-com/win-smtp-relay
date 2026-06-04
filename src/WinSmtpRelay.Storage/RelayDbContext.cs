@@ -32,6 +32,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<RateLimitSettings> RateLimitSettings => Set<RateLimitSettings>();
     public DbSet<PortalSettings> PortalSettings => Set<PortalSettings>();
     public DbSet<EmailAuthSettings> EmailAuthSettings => Set<EmailAuthSettings>();
+    public DbSet<BackupMxSettings> BackupMxSettings => Set<BackupMxSettings>();
     public DbSet<HeaderRewriteEntry> HeaderRewriteEntries => Set<HeaderRewriteEntry>();
     public DbSet<SenderRewriteEntry> SenderRewriteEntries => Set<SenderRewriteEntry>();
 
@@ -199,6 +200,21 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 SpfEnabled = false,
                 DmarcEnabled = false,
                 Enforcement = WinSmtpRelay.Core.Configuration.EnforcementMode.LogOnly,
+                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            });
+        });
+
+        modelBuilder.Entity<BackupMxSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Domains).HasMaxLength(2000);
+            entity.HasData(new BackupMxSettings
+            {
+                Id = 1,
+                Enabled = false,
+                Domains = "",
+                RetryIntervalMinutes = 15,
+                MaxHoldHours = 168,
                 UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             });
         });

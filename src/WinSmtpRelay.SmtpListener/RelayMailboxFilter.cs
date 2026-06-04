@@ -15,7 +15,6 @@ namespace WinSmtpRelay.SmtpListener;
 public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
 {
     private readonly SmtpListenerOptions _options;
-    private readonly BackupMxOptions _backupMxOptions;
     private readonly EmailAuthenticationService _emailAuth;
     private readonly RateLimiter _rateLimiter;
     private readonly IRuntimeConfigCache _configCache;
@@ -24,7 +23,6 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
 
     public RelayMailboxFilter(
         IOptions<SmtpListenerOptions> options,
-        IOptions<BackupMxOptions> backupMxOptions,
         EmailAuthenticationService emailAuth,
         RateLimiter rateLimiter,
         IRuntimeConfigCache configCache,
@@ -32,7 +30,6 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         ILogger<RelayMailboxFilter> logger)
     {
         _options = options.Value;
-        _backupMxOptions = backupMxOptions.Value;
         _emailAuth = emailAuth;
         _rateLimiter = rateLimiter;
         _configCache = configCache;
@@ -192,9 +189,10 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
     {
         var recipientDomain = to.Host;
 
-        // Always accept mail for backup MX domains
-        if (_backupMxOptions.Enabled &&
-            _backupMxOptions.Domains.Any(d => string.Equals(d, recipientDomain, StringComparison.OrdinalIgnoreCase)))
+        // Always accept mail for backup MX domains (read live from the runtime config cache)
+        var backupMx = await _configCache.GetBackupMxSettingsAsync(cancellationToken);
+        if (backupMx.Enabled &&
+            backupMx.DomainList.Any(d => string.Equals(d, recipientDomain, StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }

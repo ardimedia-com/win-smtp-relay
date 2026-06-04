@@ -32,6 +32,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRateLimitSettingsService, RateLimitSettingsService>();
         services.AddScoped<IPortalSettingsService, PortalSettingsService>();
         services.AddScoped<IEmailAuthSettingsService, EmailAuthSettingsService>();
+        services.AddScoped<IBackupMxSettingsService, BackupMxSettingsService>();
         services.AddScoped<IMessageFilterService, MessageFilterService>();
 
         // Singleton cache for runtime-editable config (invalidated by Admin API)

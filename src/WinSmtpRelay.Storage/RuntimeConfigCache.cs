@@ -29,6 +29,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
     private volatile IReadOnlyDictionary<int, string>? _tenantEgressIps;
     private volatile RateLimitSettings? _rateLimitSettings;
     private volatile EmailAuthSettings? _emailAuthSettings;
+    private volatile BackupMxSettings? _backupMxSettings;
 
     public RuntimeConfigCache(IServiceScopeFactory scopeFactory, ILogger<RuntimeConfigCache> logger)
     {
@@ -246,6 +247,32 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         }
     }
 
+    public async Task<BackupMxSettings> GetBackupMxSettingsAsync(CancellationToken ct = default)
+    {
+        if (_backupMxSettings is { } cached)
+            return cached;
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (_backupMxSettings is { } cached2)
+                return cached2;
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var settings = await db.BackupMxSettings.AsNoTracking().FirstOrDefaultAsync(ct)
+                ?? new BackupMxSettings();
+
+            _backupMxSettings = settings;
+            _logger.LogDebug("Loaded backup-MX settings into cache");
+            return settings;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default)
     {
         if (_ipAccessRules is { } cached)
@@ -375,6 +402,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         _tenantEgressIps = null;
         _rateLimitSettings = null;
         _emailAuthSettings = null;
+        _backupMxSettings = null;
         _logger.LogInformation("Runtime configuration cache invalidated");
     }
 }

@@ -21,6 +21,7 @@ public class ConfigurationSeeder(
     IOptions<MessageFilterOptions> filterOpts,
     IOptions<AdminUiOptions> adminUiOpts,
     IOptions<EmailAuthenticationOptions> emailAuthOpts,
+    IOptions<BackupMxOptions> backupMxOpts,
     ILogger<ConfigurationSeeder> logger) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -36,6 +37,7 @@ public class ConfigurationSeeder(
         await SeedRateLimitSettingsAsync(db, cancellationToken);
         await SeedPortalSettingsAsync(db, cancellationToken);
         await SeedEmailAuthSettingsAsync(db, cancellationToken);
+        await SeedBackupMxSettingsAsync(db, cancellationToken);
         await SeedMessageFiltersAsync(db, cancellationToken);
     }
 
@@ -230,6 +232,24 @@ public class ConfigurationSeeder(
         // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied email-authentication settings from appsettings (row not yet edited)");
+    }
+
+    private async Task SeedBackupMxSettingsAsync(RelayDbContext db, CancellationToken ct)
+    {
+        var existing = await db.BackupMxSettings.FindAsync([1], ct);
+        if (existing is null) return; // seeded by EF HasData
+
+        if (existing.UpdatedUtc != SeedSentinel)
+            return; // edited via UI — DB authoritative
+
+        var opts = backupMxOpts.Value;
+        existing.Enabled = opts.Enabled;
+        existing.Domains = string.Join(";", opts.Domains);
+        existing.RetryIntervalMinutes = opts.RetryIntervalMinutes;
+        existing.MaxHoldHours = opts.MaxHoldHours;
+        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Applied backup-MX settings from appsettings (row not yet edited)");
     }
 
     private async Task SeedMessageFiltersAsync(RelayDbContext db, CancellationToken ct)

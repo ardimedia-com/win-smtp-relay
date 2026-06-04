@@ -32,6 +32,9 @@ public interface IRuntimeConfigCache
     /// <summary>The host-level inbound email-authentication policy (single row), cached for the SMTP hot path.</summary>
     Task<EmailAuthSettings> GetEmailAuthSettingsAsync(CancellationToken ct = default);
 
+    /// <summary>The host-level backup-MX settings (single row), cached for the SMTP/delivery hot path.</summary>
+    Task<BackupMxSettings> GetBackupMxSettingsAsync(CancellationToken ct = default);
+
     Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<HeaderRewriteEntry>> GetHeaderRewriteRulesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<SenderRewriteEntry>> GetSenderRewriteRulesAsync(CancellationToken ct = default);

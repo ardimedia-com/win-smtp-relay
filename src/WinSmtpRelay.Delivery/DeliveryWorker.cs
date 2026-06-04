@@ -13,7 +13,7 @@ public class DeliveryWorker(
     IServiceScopeFactory scopeFactory,
     IActivityNotifier activityNotifier,
     IOptions<DeliveryOptions> options,
-    IOptions<BackupMxOptions> backupMxOptions,
+    IRuntimeConfigCache configCache,
     ILogger<DeliveryWorker> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
@@ -177,9 +177,9 @@ public class DeliveryWorker(
             message.RetryCount++;
             message.LastError = ex.Message;
 
-            // Use extended hold time for backup MX domains
+            // Use extended hold time for backup MX domains (read live from the runtime config cache)
             var effectiveConfig = config;
-            var backupMx = backupMxOptions.Value;
+            var backupMx = await configCache.GetBackupMxSettingsAsync(cancellationToken);
             if (backupMx.Enabled && IsBackupMxMessage(message, backupMx))
             {
                 effectiveConfig = new DeliveryOptions
@@ -246,14 +246,14 @@ public class DeliveryWorker(
         return DateTime.UtcNow.AddMinutes(delayMinutes);
     }
 
-    private static bool IsBackupMxMessage(QueuedMessage message, BackupMxOptions backupMx)
+    private static bool IsBackupMxMessage(QueuedMessage message, BackupMxSettings backupMx)
     {
         var recipientDomains = message.Recipients
             .Split(';', StringSplitOptions.RemoveEmptyEntries)
             .Select(r => r.Split('@').Last());
 
         return recipientDomains.Any(domain =>
-            backupMx.Domains.Any(d => string.Equals(d, domain, StringComparison.OrdinalIgnoreCase)));
+            backupMx.DomainList.Any(d => string.Equals(d, domain, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static bool IsPermanentFailure(Exception ex)

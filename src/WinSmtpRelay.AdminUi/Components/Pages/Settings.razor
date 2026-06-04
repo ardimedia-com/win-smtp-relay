@@ -107,6 +107,37 @@ else
             }
         </BbCardContent>
     </BbCard>
+
+    <BbCard Class="mt-1">
+        <BbCardHeader>
+            <BbCardTitle>Backup MX</BbCardTitle>
+        </BbCardHeader>
+        <BbCardContent>
+            <div style="display:flex;align-items:center;gap:0.75rem;">
+                <BbSwitch Checked="bmEnabled" CheckedChanged="(bool v) => bmEnabled = v" id="backupmx-toggle" />
+                <span>Accept and hold mail for backup-MX domains when the primary is unreachable</span>
+            </div>
+            <div class="form-group" style="margin-top:1rem;">
+                <BbLabel>Backup-MX domains</BbLabel>
+                <BbInput @bind-Value="bmDomains" Placeholder="example.com; example.net" />
+            </div>
+            <div class="form-group" style="margin-top:0.75rem;">
+                <BbLabel>Retry interval (minutes)</BbLabel>
+                <BbInput Type="InputType.Number" @bind-Value="bmRetryInterval" />
+            </div>
+            <div class="form-group" style="margin-top:0.75rem;">
+                <BbLabel>Max hold time (hours)</BbLabel>
+                <BbInput Type="InputType.Number" @bind-Value="bmMaxHold" />
+            </div>
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveBackupMxAsync" Class="mt-1">
+                <LucideIcon Name="save" /> Save
+            </BbButton>
+            @if (!string.IsNullOrEmpty(backupMxStatus))
+            {
+                <p class="text-muted" style="margin-top:0.5rem;">@backupMxStatus</p>
+            }
+        </BbCardContent>
+    </BbCard>
     </div>
 }
 
@@ -121,6 +152,12 @@ else
     private bool dmarcEnabled;
     private EnforcementMode enforcement = EnforcementMode.LogOnly;
     private string? emailAuthStatus;
+
+    private bool bmEnabled;
+    private string? bmDomains;
+    private string bmRetryInterval = "15";
+    private string bmMaxHold = "168";
+    private string? backupMxStatus;
 
     protected override async Task OnInitializedAsync()
     {
@@ -137,6 +174,12 @@ else
         dmarcEnabled = emailAuth.DmarcEnabled;
         enforcement = emailAuth.Enforcement;
 
+        var backupMx = await sp.GetRequiredService<IBackupMxSettingsService>().GetAsync();
+        bmEnabled = backupMx.Enabled;
+        bmDomains = backupMx.Domains;
+        bmRetryInterval = backupMx.RetryIntervalMinutes.ToString();
+        bmMaxHold = backupMx.MaxHoldHours.ToString();
+
         isLoading = false;
     }
 
@@ -146,6 +189,20 @@ else
         await scope.ServiceProvider.GetRequiredService<IEmailAuthSettingsService>()
             .UpdateAsync(spfEnabled, dmarcEnabled, enforcement);
         emailAuthStatus = $"Email authentication saved (SPF {(spfEnabled ? "on" : "off")}, DMARC {(dmarcEnabled ? "on" : "off")}, enforcement {enforcement}).";
+    }
+
+    private async Task SaveBackupMxAsync()
+    {
+        var retry = int.TryParse(bmRetryInterval, out var r) ? Math.Max(1, r) : 15;
+        var hold = int.TryParse(bmMaxHold, out var h) ? Math.Max(1, h) : 168;
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IBackupMxSettingsService>()
+            .UpdateAsync(bmEnabled, bmDomains, retry, hold);
+        bmRetryInterval = retry.ToString();
+        bmMaxHold = hold.ToString();
+        backupMxStatus = bmEnabled
+            ? $"Backup MX enabled for: {(string.IsNullOrWhiteSpace(bmDomains) ? "(no domains set)" : bmDomains)}."
+            : "Backup MX disabled.";
     }
 
     private async Task OnToggleAsync(bool value)
