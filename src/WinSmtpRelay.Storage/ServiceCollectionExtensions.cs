@@ -37,6 +37,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDnsSettingsService, DnsSettingsService>();
         services.AddScoped<IMessageFilterService, MessageFilterService>();
 
+        // Setup readiness (live checklist) for the current tenant
+        services.AddScoped<ITenantReadinessService, TenantReadinessService>();
+
         // Singleton cache for runtime-editable config (invalidated by Admin API)
         services.AddSingleton<IRuntimeConfigCache, RuntimeConfigCache>();
 
