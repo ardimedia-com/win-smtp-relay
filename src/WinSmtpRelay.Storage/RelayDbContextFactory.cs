@@ -17,6 +17,7 @@ public class RelayDbContextFactory : IDesignTimeDbContextFactory<RelayDbContext>
                 sqlite => sqlite.MigrationsAssembly("WinSmtpRelay.Storage"))
             .Options;
 
-        return new RelayDbContext(options);
+        // Design-time only: no tenant scope (filtering does not affect schema/migrations).
+        return new RelayDbContext(options, new CurrentTenant());
     }
 }

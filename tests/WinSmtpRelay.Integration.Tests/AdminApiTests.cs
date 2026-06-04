@@ -47,6 +47,7 @@ public class AdminApiTests
 
         _app.UseAuthentication();
         _app.UseAuthorization();
+        _app.UseRelayTenantContext();
         _app.MapAdminApi();
 
         await _app.StartAsync();
@@ -280,6 +281,45 @@ public class AdminApiTests
         var write = await _viewerClient.PostAsJsonAsync("/api/users",
             new CreateUserRequest("blocked", "P@ssw0rd!"));
         Assert.AreEqual(HttpStatusCode.Forbidden, write.StatusCode);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task ApiKey_TenantScope_IsolatesData()
+    {
+        // Seed a second tenant and a tenant-scoped admin key for it.
+        using (var scope = _app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            db.Tenants.Add(new Tenant { Id = 2, Name = "Tenant Two", Slug = "tenant-two" });
+            await db.SaveChangesAsync();
+        }
+
+        string tenant2Key;
+        using (var scope = _app.Services.CreateScope())
+        {
+            var keys = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+            (_, tenant2Key) = await keys.CreateAsync(2, "tenant2-admin", RelayRoles.TenantAdmin, null, default);
+        }
+
+        using var t2 = new HttpClient { BaseAddress = _client.BaseAddress };
+        t2.DefaultRequestHeaders.Add(ApiKeyDefaults.HeaderName, tenant2Key);
+
+        // Host admin creates a user (default tenant); tenant-2 admin creates a user (stamped tenant 2).
+        var created1 = await _client.PostAsJsonAsync("/api/users", new CreateUserRequest("alice_t1", "P@ssw0rd!"));
+        Assert.AreEqual(HttpStatusCode.Created, created1.StatusCode);
+        var created2 = await t2.PostAsJsonAsync("/api/users", new CreateUserRequest("bob_t2", "P@ssw0rd!"));
+        Assert.AreEqual(HttpStatusCode.Created, created2.StatusCode);
+
+        // Tenant-2 admin sees only its own tenant's user.
+        var t2Users = await t2.GetFromJsonAsync<UserSummary[]>("/api/users");
+        Assert.AreEqual(1, t2Users!.Length);
+        Assert.AreEqual("bob_t2", t2Users[0].Username);
+
+        // Host admin (all-tenants scope) sees both.
+        var hostUsers = await _client.GetFromJsonAsync<UserSummary[]>("/api/users");
+        Assert.IsTrue(hostUsers!.Any(u => u.Username == "alice_t1"));
+        Assert.IsTrue(hostUsers.Any(u => u.Username == "bob_t2"));
     }
 
     private record HealthResponse(string Status);

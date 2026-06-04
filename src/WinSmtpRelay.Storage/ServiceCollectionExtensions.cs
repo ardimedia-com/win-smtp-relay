@@ -8,6 +8,9 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddRelayStorage(this IServiceCollection services, string connectionString)
     {
+        // Ambient tenant for query filtering (set per request/circuit; unset = no filter).
+        services.AddScoped<ICurrentTenant, CurrentTenant>();
+
         services.AddDbContext<RelayDbContext>(options =>
             options.UseSqlite(connectionString, sqlite => sqlite.MigrationsAssembly("WinSmtpRelay.Storage")));
 

@@ -17,7 +17,7 @@ public class MessageQueueStorageTests
             .UseSqlite("Data Source=:memory:")
             .Options;
 
-        _db = new RelayDbContext(options);
+        _db = new RelayDbContext(options, new CurrentTenant());
         _db.Database.OpenConnection();
         _db.Database.EnsureCreated();
         _queue = new MessageQueue(_db);

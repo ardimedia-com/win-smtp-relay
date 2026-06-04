@@ -114,6 +114,7 @@ if (adminUiConfig.Enabled)
 {
     app.UseAuthentication();
     app.UseAuthorization();
+    app.UseRelayTenantContext();
     app.UseAntiforgery();
 
     // Admin REST API (authorized inside MapAdminApi; /api/health is anonymous)

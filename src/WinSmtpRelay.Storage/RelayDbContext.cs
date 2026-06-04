@@ -1,13 +1,17 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 using WinSmtpRelay.Storage.Identity;
 
 namespace WinSmtpRelay.Storage;
 
-public class RelayDbContext(DbContextOptions<RelayDbContext> options)
+public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTenant currentTenant)
     : IdentityDbContext<AdminUser, AdminRole, int>(options)
 {
+    private readonly ICurrentTenant _currentTenant = currentTenant;
+
     public DbSet<QueuedMessage> QueuedMessages => Set<QueuedMessage>();
     public DbSet<DeliveryLog> DeliveryLogs => Set<DeliveryLog>();
     public DbSet<RelayUser> RelayUsers => Set<RelayUser>();
@@ -190,6 +194,8 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options)
         var tenantOwned = modelBuilder.Model.GetEntityTypes()
             .Where(t => typeof(ITenantOwned).IsAssignableFrom(t.ClrType))
             .ToList();
+        var applyFilter = typeof(RelayDbContext)
+            .GetMethod(nameof(ApplyTenantQueryFilter), BindingFlags.NonPublic | BindingFlags.Instance)!;
         foreach (var entityType in tenantOwned)
         {
             var builder = modelBuilder.Entity(entityType.ClrType);
@@ -198,6 +204,43 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options)
                 .WithMany()
                 .HasForeignKey(nameof(ITenantOwned.TenantId))
                 .OnDelete(DeleteBehavior.Restrict);
+
+            applyFilter.MakeGenericMethod(entityType.ClrType).Invoke(this, [modelBuilder]);
+        }
+    }
+
+    // Tenant query filter: a no-op when filtering is disabled (host/background scope), so the
+    // caller sees all tenants. Referencing the injected service instance makes EF re-evaluate
+    // the parameters per query rather than baking them into the cached model.
+    private void ApplyTenantQueryFilter<TEntity>(ModelBuilder modelBuilder) where TEntity : class, ITenantOwned
+    {
+        modelBuilder.Entity<TEntity>().HasQueryFilter(
+            e => !_currentTenant.FilterEnabled || e.TenantId == _currentTenant.FilterTenantId);
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        StampTenantOnInsert();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        StampTenantOnInsert();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    // When a tenant scope is active, force new tenant-owned rows to that tenant so a tenant
+    // admin cannot create data in another tenant. Host/background scope leaves TenantId as set.
+    private void StampTenantOnInsert()
+    {
+        if (!_currentTenant.FilterEnabled)
+            return;
+
+        foreach (var entry in ChangeTracker.Entries<ITenantOwned>())
+        {
+            if (entry.State == EntityState.Added)
+                entry.Entity.TenantId = _currentTenant.FilterTenantId;
         }
     }
 }
