@@ -27,7 +27,10 @@
     </div>
     <div class="account-field">
         <label for="password">Password</label>
-        <InputText id="password" type="password" @bind-Value="Input.Password" autocomplete="current-password" class="account-input" />
+        <div class="password-field">
+            <InputText id="password" type="password" @bind-Value="Input.Password" autocomplete="current-password" class="account-input" />
+            <PasswordToggle />
+        </div>
         <ValidationMessage For="() => Input.Password" />
     </div>
     <label class="account-checkbox">

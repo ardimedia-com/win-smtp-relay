@@ -67,12 +67,18 @@ else
         </div>
         <div class="account-field">
             <label for="password">Password</label>
-            <InputText id="password" type="password" @bind-Value="Input.Password" autocomplete="new-password" class="account-input" />
+            <div class="password-field">
+                <InputText id="password" type="password" @bind-Value="Input.Password" autocomplete="new-password" class="account-input" />
+                <PasswordToggle />
+            </div>
             <ValidationMessage For="() => Input.Password" />
         </div>
         <div class="account-field">
             <label for="confirm">Confirm password</label>
-            <InputText id="confirm" type="password" @bind-Value="Input.ConfirmPassword" autocomplete="new-password" class="account-input" />
+            <div class="password-field">
+                <InputText id="confirm" type="password" @bind-Value="Input.ConfirmPassword" autocomplete="new-password" class="account-input" />
+                <PasswordToggle />
+            </div>
             <ValidationMessage For="() => Input.ConfirmPassword" />
         </div>
         <button type="submit" class="account-button">Create organization</button>
