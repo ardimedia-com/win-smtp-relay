@@ -94,10 +94,20 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
     {
         var cutoff = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-30);
 
+        // Sum per date so the result holds whether the caller is scoped to one tenant (its own
+        // rows) or unscoped/host with "All tenants" selected (the query filter is off, so multiple
+        // tenant rows per date are summed into the host-wide total).
         var rows = await db.DailyStatistics
             .AsNoTracking()
             .Where(d => d.Date >= cutoff)
-            .OrderBy(d => d.Date)
+            .GroupBy(d => d.Date)
+            .Select(g => new
+            {
+                Date = g.Key,
+                Sent = g.Sum(x => x.TotalSent),
+                Failed = g.Sum(x => x.TotalFailed),
+                Bounced = g.Sum(x => x.TotalBounced)
+            })
             .ToListAsync(ct);
 
         // Zero-fill missing days
@@ -108,9 +118,9 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
             var match = rows.FirstOrDefault(r => r.Date == date);
             results.Add(new DailyBucketResult(
                 date.ToString("yyyy-MM-dd"),
-                match?.TotalSent ?? 0,
-                match?.TotalFailed ?? 0,
-                match?.TotalBounced ?? 0));
+                match?.Sent ?? 0,
+                match?.Failed ?? 0,
+                match?.Bounced ?? 0));
         }
 
         return results;
@@ -121,57 +131,63 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
         var startUtc = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
         var endUtc = startUtc.AddDays(1);
 
+        // Runs unscoped from the background aggregator, so the query filter is off and this sees
+        // every tenant's logs; rows are then aggregated per tenant.
         var logs = await db.DeliveryLogs
             .AsNoTracking()
             .Where(l => l.TimestampUtc >= startUtc && l.TimestampUtc < endUtc)
-            .Select(l => new { l.StatusCode, l.QueuedMessageId, l.TimestampUtc })
+            .Select(l => new { l.TenantId, l.StatusCode, l.QueuedMessageId, l.TimestampUtc })
             .ToListAsync(ct);
 
-        var sent = logs.Count(l => l.StatusCode == "250");
-        var failed = logs.Count(l => l.StatusCode.StartsWith('5'));
-        var bounced = logs.Count(l => l.StatusCode.StartsWith('4'));
-
-        // Calculate average delivery time by joining with QueuedMessages
-        var avgDeliveryMs = 0.0;
+        // Load message creation times once for the day to compute delivery latency.
         var messageIds = logs.Select(l => l.QueuedMessageId).Distinct().ToList();
-        if (messageIds.Count > 0)
-        {
-            var messages = await db.QueuedMessages
+        var createdById = messageIds.Count == 0
+            ? new Dictionary<long, DateTime>()
+            : (await db.QueuedMessages
                 .AsNoTracking()
                 .Where(m => messageIds.Contains(m.Id))
                 .Select(m => new { m.Id, m.CreatedUtc })
-                .ToListAsync(ct);
+                .ToListAsync(ct))
+                .ToDictionary(m => m.Id, m => m.CreatedUtc);
 
-            var deliveryTimes = logs
-                .Join(messages, l => l.QueuedMessageId, m => m.Id,
-                    (l, m) => (l.TimestampUtc - m.CreatedUtc).TotalMilliseconds)
+        var now = DateTime.UtcNow;
+        foreach (var group in logs.GroupBy(l => l.TenantId))
+        {
+            var tenantId = group.Key;
+            var sent = group.Count(l => l.StatusCode == "250");
+            var failed = group.Count(l => l.StatusCode.StartsWith('5'));
+            var bounced = group.Count(l => l.StatusCode.StartsWith('4'));
+
+            var deliveryTimes = group
+                .Select(l => createdById.TryGetValue(l.QueuedMessageId, out var created)
+                    ? (l.TimestampUtc - created).TotalMilliseconds
+                    : 0)
                 .Where(ms => ms > 0)
                 .ToList();
+            var avgDeliveryMs = deliveryTimes.Count > 0 ? deliveryTimes.Average() : 0.0;
 
-            if (deliveryTimes.Count > 0)
-                avgDeliveryMs = deliveryTimes.Average();
-        }
-
-        var existing = await db.DailyStatistics.FindAsync([date], ct);
-        if (existing is not null)
-        {
-            existing.TotalSent = sent;
-            existing.TotalFailed = failed;
-            existing.TotalBounced = bounced;
-            existing.AverageDeliveryTimeMs = avgDeliveryMs;
-            existing.ComputedAtUtc = DateTime.UtcNow;
-        }
-        else
-        {
-            db.DailyStatistics.Add(new DailyStatistics
+            var existing = await db.DailyStatistics.FindAsync([tenantId, date], ct);
+            if (existing is not null)
             {
-                Date = date,
-                TotalSent = sent,
-                TotalFailed = failed,
-                TotalBounced = bounced,
-                AverageDeliveryTimeMs = avgDeliveryMs,
-                ComputedAtUtc = DateTime.UtcNow
-            });
+                existing.TotalSent = sent;
+                existing.TotalFailed = failed;
+                existing.TotalBounced = bounced;
+                existing.AverageDeliveryTimeMs = avgDeliveryMs;
+                existing.ComputedAtUtc = now;
+            }
+            else
+            {
+                db.DailyStatistics.Add(new DailyStatistics
+                {
+                    TenantId = tenantId,
+                    Date = date,
+                    TotalSent = sent,
+                    TotalFailed = failed,
+                    TotalBounced = bounced,
+                    AverageDeliveryTimeMs = avgDeliveryMs,
+                    ComputedAtUtc = now
+                });
+            }
         }
 
         await db.SaveChangesAsync(ct);

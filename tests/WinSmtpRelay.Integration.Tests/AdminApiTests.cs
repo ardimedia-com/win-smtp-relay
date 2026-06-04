@@ -534,5 +534,51 @@ public class AdminApiTests
             "the cache should reflect the persisted update after invalidation");
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Statistics_AreAggregatedAndScopedPerTenant()
+    {
+        var date = new DateOnly(2026, 5, 1);
+        var stamp = date.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc);
+        var tenantA = TenantDefaults.DefaultTenantId;
+        int tenantB;
+
+        using (var scope = _app.Services.CreateScope())
+        {
+            tenantB = (await scope.ServiceProvider.GetRequiredService<ITenantService>().CreateAsync("Stats Co", "stats-co")).Id;
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            // Two delivered for tenant A, one for tenant B, on the same day.
+            db.DeliveryLogs.Add(new DeliveryLog { TenantId = tenantA, Recipient = "a1@x", StatusCode = "250", StatusMessage = "ok", TimestampUtc = stamp });
+            db.DeliveryLogs.Add(new DeliveryLog { TenantId = tenantA, Recipient = "a2@x", StatusCode = "250", StatusMessage = "ok", TimestampUtc = stamp });
+            db.DeliveryLogs.Add(new DeliveryLog { TenantId = tenantB, Recipient = "b1@y", StatusCode = "250", StatusMessage = "ok", TimestampUtc = stamp });
+            await db.SaveChangesAsync();
+        }
+
+        // Aggregate with background (unscoped) semantics — sees all tenants.
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<IStatisticsService>().AggregateDayAsync(date);
+
+        // A separate per-tenant row is produced for each tenant.
+        using (var scope = _app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var a = await db.DailyStatistics.AsNoTracking().FirstAsync(s => s.TenantId == tenantA && s.Date == date);
+            var b = await db.DailyStatistics.AsNoTracking().FirstAsync(s => s.TenantId == tenantB && s.Date == date);
+            Assert.AreEqual(2, a.TotalSent);
+            Assert.AreEqual(1, b.TotalSent);
+        }
+
+        // The tenant query filter scopes DailyStatistics: tenant B sees only its own row.
+        using (var scope = _app.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<ICurrentTenant>().SetTenant(tenantB);
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var rows = await db.DailyStatistics.AsNoTracking().Where(s => s.Date == date).ToListAsync();
+            Assert.AreEqual(1, rows.Count);
+            Assert.AreEqual(tenantB, rows[0].TenantId);
+            Assert.AreEqual(1, rows[0].TotalSent);
+        }
+    }
+
     private record HealthResponse(string Status);
 }

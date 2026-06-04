@@ -99,7 +99,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
 
         modelBuilder.Entity<DailyStatistics>(entity =>
         {
-            entity.HasKey(e => e.Date);
+            entity.HasKey(e => new { e.TenantId, e.Date });
         });
 
         // Configuration entities
