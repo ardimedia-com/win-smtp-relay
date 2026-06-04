@@ -357,7 +357,8 @@ public static class AdminEndpoints
 
     private static void MapReceiveConnectorEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/connectors/receive");
+        // Receive connectors define the host's listening sockets — host-level infrastructure.
+        var ep = group.MapGroup("/connectors/receive").RequireAuthorization(AuthorizationPolicies.HostAdmin);
 
         ep.MapGet("/", async (IReceiveConnectorService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));

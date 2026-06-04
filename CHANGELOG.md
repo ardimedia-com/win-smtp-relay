@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The SMTP listener now binds its endpoints from the enabled, host-level receive connectors stored in the database (the source of truth once seeded from appsettings), instead of reading the appsettings endpoints directly. Edits made on the Receive Connectors page therefore take effect on the next service restart; previously they had no effect. If the database has no enabled connectors, the listener falls back to the appsettings endpoints. Receive connectors define the host's shared listening sockets, so they are not per-tenant — the Receive Connectors page and `/api/connectors/receive` are now restricted to host administrators.
 - The admin UI now binds to loopback (`127.0.0.1`) by default and serves over HTTPS (the ASP.NET Core development certificate in Development; configurable via `AdminUi:CertificatePath` / `AdminUi:CertificatePassword` for production). It previously bound `0.0.0.0` over plain HTTP.
 - IP access rules stored in the database are now the authoritative source for relay IP authorization, evaluated with first-match Allow/Deny semantics by sort order. `Deny` rules are now honored (previously they were never evaluated), and edits made in the admin UI take effect immediately (cache invalidation). The static `SmtpListener:AllowedNetworks` list is used only as a fallback when no database rules exist.
 

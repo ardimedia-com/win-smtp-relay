@@ -1,6 +1,7 @@
 @page "/connectors/receive"
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject ITenantScopeFactory ScopeFactory
 
 <BbBreadcrumb>

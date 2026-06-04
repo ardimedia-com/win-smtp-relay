@@ -52,12 +52,14 @@
             <BbSidebarGroup>
                 <BbSidebarGroupLabel>Configuration</BbSidebarGroupLabel>
                 <BbSidebarMenu>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="connectors/receive">
-                            <LucideIcon Name="plug" />
-                            <span>Receive Connectors</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
+                    <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin" Context="rcAuth">
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="connectors/receive">
+                                <LucideIcon Name="plug" />
+                                <span>Receive Connectors</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                    </AuthorizeView>
                     <BbSidebarMenuItem>
                         <BbSidebarMenuButton Href="connectors/send">
                             <LucideIcon Name="send" />
