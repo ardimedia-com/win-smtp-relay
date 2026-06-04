@@ -15,4 +15,7 @@ public static class RelayClaimTypes
 
     /// <summary>"true" when the user must change their password before normal use (e.g. seeded account).</summary>
     public const string MustChangePassword = "must_change_password";
+
+    /// <summary>For a host admin: the tenant they are currently viewing/acting within (the switcher selection). Absent = all tenants.</summary>
+    public const string ActiveTenant = "active_tenant";
 }

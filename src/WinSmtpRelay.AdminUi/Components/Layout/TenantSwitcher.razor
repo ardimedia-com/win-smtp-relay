@@ -1,0 +1,46 @@
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject IServiceScopeFactory ScopeFactory
+
+<AuthorizeView Policy="@AuthorizationPolicies.HostAdmin">
+    <Authorized>
+        <form action="/account/switch-tenant" method="post" style="margin:0;">
+            <AntiforgeryToken />
+            <label class="tenant-switcher">
+                <LucideIcon Name="building-2" Size="14" />
+                <select name="tenant" onchange="this.form.submit()">
+                    <option value="all" selected="@(activeTenantId is null)">All tenants</option>
+                    @foreach (var t in tenants)
+                    {
+                        <option value="@t.Id" selected="@(activeTenantId == t.Id)">@t.Name</option>
+                    }
+                </select>
+            </label>
+        </form>
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthState { get; set; }
+
+    private IReadOnlyList<Tenant> tenants = [];
+    private int? activeTenantId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is null)
+            return;
+
+        var user = (await AuthState).User;
+        if (!user.HasClaim(RelayClaimTypes.IsHostAdmin, "true"))
+            return;
+
+        if (int.TryParse(user.FindFirst(RelayClaimTypes.ActiveTenant)?.Value, out var id))
+            activeTenantId = id;
+
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
+        tenants = await svc.GetAllAsync();
+    }
+}

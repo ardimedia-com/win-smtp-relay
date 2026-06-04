@@ -352,3 +352,23 @@ nav[aria-label="breadcrumb"] {
     font-size: 0.85rem;
 }
 .must-change-banner a { color: inherit; font-weight: 600; }
+
+/* Host tenant switcher */
+.tenant-switcher {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    color: var(--muted-foreground);
+    font-size: 0.8rem;
+}
+.tenant-switcher select {
+    border: none;
+    background: transparent;
+    color: var(--foreground);
+    font-size: 0.8rem;
+    cursor: pointer;
+    outline: none;
+}

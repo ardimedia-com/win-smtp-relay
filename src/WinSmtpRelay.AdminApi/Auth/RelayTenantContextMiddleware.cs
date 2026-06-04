@@ -17,16 +17,10 @@ public static class RelayTenantContextMiddleware
     public static IApplicationBuilder UseRelayTenantContext(this IApplicationBuilder app)
         => app.Use(async (ctx, next) =>
         {
-            var user = ctx.User;
-            if (user.Identity?.IsAuthenticated == true)
+            if (ctx.User.Identity?.IsAuthenticated == true)
             {
                 var current = ctx.RequestServices.GetRequiredService<ICurrentTenant>();
-                if (user.HasClaim(RelayClaimTypes.IsHostAdmin, "true"))
-                    current.SetHostScope();
-                else if (int.TryParse(user.FindFirst(RelayClaimTypes.TenantId)?.Value, out var tenantId))
-                    current.SetTenant(tenantId);
-                else
-                    current.SetTenant(-1);
+                TenantContextResolver.Apply(ctx.User, current);
             }
 
             await next();

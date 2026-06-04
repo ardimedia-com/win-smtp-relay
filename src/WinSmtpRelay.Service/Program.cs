@@ -1,12 +1,17 @@
+using System.Security.Claims;
 using BlazorBlueprint.Components;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.AdminApi;
 using WinSmtpRelay.AdminApi.Auth;
 using WinSmtpRelay.AdminUi.Authentication;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Configuration;
+using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Delivery;
 using WinSmtpRelay.SmtpListener;
 using WinSmtpRelay.Storage;
@@ -129,6 +134,20 @@ if (adminUiConfig.Enabled)
         await signInManager.SignOutAsync();
         return Results.LocalRedirect("/account/login");
     });
+
+    // Host-admin tenant switcher: re-issues the cookie with an updated active_tenant claim.
+    app.MapPost("/account/switch-tenant", async (HttpContext ctx, [FromForm] string tenant, ITenantService tenants) =>
+    {
+        var identity = new ClaimsIdentity(
+            ctx.User.Claims.Where(c => c.Type != RelayClaimTypes.ActiveTenant),
+            ctx.User.Identity!.AuthenticationType);
+
+        if (tenant != "all" && int.TryParse(tenant, out var tenantId) && await tenants.GetByIdAsync(tenantId) is not null)
+            identity.AddClaim(new Claim(RelayClaimTypes.ActiveTenant, tenantId.ToString()));
+
+        await ctx.SignInAsync(IdentityConstants.ApplicationScheme, new ClaimsPrincipal(identity));
+        return Results.LocalRedirect("/");
+    }).RequireAuthorization(AuthorizationPolicies.HostAdmin);
 
     // Static assets (fingerprinted CSS/JS from RCLs)
     app.MapStaticAssets();

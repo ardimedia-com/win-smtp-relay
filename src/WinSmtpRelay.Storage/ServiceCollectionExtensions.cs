@@ -10,6 +10,7 @@ public static class ServiceCollectionExtensions
     {
         // Ambient tenant for query filtering (set per request/circuit; unset = no filter).
         services.AddScoped<ICurrentTenant, CurrentTenant>();
+        services.AddScoped<ITenantScopeFactory, TenantScopeFactory>();
 
         services.AddDbContext<RelayDbContext>(options =>
             options.UseSqlite(connectionString, sqlite => sqlite.MigrationsAssembly("WinSmtpRelay.Storage")));

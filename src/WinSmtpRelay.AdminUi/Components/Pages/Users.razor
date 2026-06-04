@@ -1,9 +1,8 @@
 @page "/smtpusers"
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
-@using WinSmtpRelay.Storage
 @using Microsoft.EntityFrameworkCore
-@inject IServiceScopeFactory ScopeFactory
+@inject ITenantScopeFactory ScopeFactory
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -280,7 +279,7 @@ else
 
         using var scope = ScopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
-        var user = await db.RelayUsers.FindAsync(editingUser.Id);
+        var user = await db.RelayUsers.FirstOrDefaultAsync(u => u.Id == editingUser.Id);
         if (user is null) return;
 
         user.IsEnabled = editEnabled == "true";

@@ -16,15 +16,6 @@ public class TenantCircuitHandler(AuthenticationStateProvider authStateProvider,
     public override async Task OnCircuitOpenedAsync(Circuit circuit, CancellationToken cancellationToken)
     {
         var state = await authStateProvider.GetAuthenticationStateAsync();
-        var user = state.User;
-        if (user.Identity?.IsAuthenticated != true)
-            return;
-
-        if (user.HasClaim(RelayClaimTypes.IsHostAdmin, "true"))
-            currentTenant.SetHostScope();
-        else if (int.TryParse(user.FindFirst(RelayClaimTypes.TenantId)?.Value, out var tenantId))
-            currentTenant.SetTenant(tenantId);
-        else
-            currentTenant.SetTenant(-1);
+        TenantContextResolver.Apply(state.User, currentTenant);
     }
 }
