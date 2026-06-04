@@ -198,7 +198,8 @@ public class ConfigurationSeeder(
         existing.MaxMessagesPerSenderPerDay = opts.MaxMessagesPerSenderPerDay;
         existing.FailedAuthBanThreshold = opts.FailedAuthBanThreshold;
         existing.FailedAuthBanMinutes = opts.FailedAuthBanMinutes;
-        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        // Keep UpdatedUtc at the sentinel (explicitly) so appsettings remains the source until a UI edit.
+        existing.UpdatedUtc = SeedSentinel;
 
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied rate limit settings from appsettings (row not yet edited)");
@@ -216,7 +217,10 @@ public class ConfigurationSeeder(
 
         existing.SelfServiceSignupEnabled = adminUiOpts.Value.SelfServiceSignupEnabled;
         existing.SignupMaxAttemptsPerIpPerHour = adminUiOpts.Value.SignupMaxAttemptsPerIpPerHour;
-        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        // SignupFromAddress is intentionally NOT seeded: it stays null and the sign-up/forgot-password
+        // pages fall back to the appsettings AdminUi:SignupFromAddress value when the DB value is blank.
+        // Keep UpdatedUtc at the sentinel (explicitly) so appsettings remains the source until a UI edit.
+        existing.UpdatedUtc = SeedSentinel;
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied portal settings from appsettings (row not yet edited)");
     }
@@ -233,7 +237,8 @@ public class ConfigurationSeeder(
         existing.SpfEnabled = opts.SpfEnabled;
         existing.DmarcEnabled = opts.DmarcEnabled;
         existing.Enforcement = opts.Enforcement;
-        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        // Keep UpdatedUtc at the sentinel (explicitly) so appsettings remains the source until a UI edit.
+        existing.UpdatedUtc = SeedSentinel;
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied email-authentication settings from appsettings (row not yet edited)");
     }
@@ -251,7 +256,8 @@ public class ConfigurationSeeder(
         existing.Domains = string.Join(";", opts.Domains);
         existing.RetryIntervalMinutes = opts.RetryIntervalMinutes;
         existing.MaxHoldHours = opts.MaxHoldHours;
-        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        // Keep UpdatedUtc at the sentinel (explicitly) so appsettings remains the source until a UI edit.
+        existing.UpdatedUtc = SeedSentinel;
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied backup-MX settings from appsettings (row not yet edited)");
     }
@@ -267,7 +273,8 @@ public class ConfigurationSeeder(
         var opts = statisticsOpts.Value;
         existing.RetentionDays = opts.RetentionDays;
         existing.AggregationTimeUtc = opts.AggregationTimeUtc;
-        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        // Keep UpdatedUtc at the sentinel (explicitly) so appsettings remains the source until a UI edit.
+        existing.UpdatedUtc = SeedSentinel;
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied statistics retention settings from appsettings (row not yet edited)");
     }
@@ -288,7 +295,8 @@ public class ConfigurationSeeder(
         existing.DmarcReportEmail = opts.DmarcReportEmail;
         existing.DmarcPolicy = opts.DmarcPolicy;
         existing.DmarcPercentage = opts.DmarcPercentage;
-        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        // Keep UpdatedUtc at the sentinel (explicitly) so appsettings remains the source until a UI edit.
+        existing.UpdatedUtc = SeedSentinel;
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied DNS recommendation settings from appsettings (row not yet edited)");
     }
