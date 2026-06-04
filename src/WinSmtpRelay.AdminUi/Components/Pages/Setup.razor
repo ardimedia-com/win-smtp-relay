@@ -1,0 +1,236 @@
+@page "/setup"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject ITenantScopeFactory ScopeFactory
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>Setup &amp; Health</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header page-header-row">
+    <div>
+        <h1>Setup &amp; Health</h1>
+        <p>A live checklist of what your organization needs to send mail — and the best practices that get it into the inbox.</p>
+    </div>
+    <div class="flex gap-1 items-center">
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="RefreshAsync" Disabled="@isLoading">
+            <LucideIcon Name="refresh-cw" /> Re-check
+        </BbButton>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
+            <LucideIcon Name="info" /> About
+        </BbButton>
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[120px] w-full mb-1" />
+    <BbSkeleton Class="h-[260px] w-full" />
+}
+else if (readiness is null || readiness.IsHostScope)
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="setup-row" style="border:none;">
+                <span class="setup-row-icon s-blocked"><LucideIcon Name="building-2" Size="18" /></span>
+                <div class="setup-row-main">
+                    <div class="setup-row-title">Pick an organization</div>
+                    <div class="setup-row-detail">Setup readiness is shown per organization. Use the tenant switcher at the top right to select one, then return here.</div>
+                </div>
+            </div>
+        </BbCardContent>
+    </BbCard>
+}
+else
+{
+    @* Inline row template, reused by every group *@
+    RenderFragment<SetupItem> row = item =>
+        @<div class="setup-row">
+            <span class="setup-row-icon @StatusIconClass(item.Status)"><LucideIcon Name="@StatusIcon(item.Status)" Size="18" /></span>
+            <div class="setup-row-main">
+                <div class="setup-row-title">
+                    @item.Title
+                    <span class="badge-status @StatusBadge(item.Status)">@StatusText(item.Status)</span>
+                </div>
+                <div class="setup-row-detail">@item.Detail</div>
+            </div>
+            @if (!string.IsNullOrEmpty(item.ActionUrl))
+            {
+                <div class="setup-row-action">
+                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => Nav.NavigateTo(item.ActionUrl)">
+                        @item.ActionLabel <LucideIcon Name="chevron-right" Size="14" />
+                    </BbButton>
+                </div>
+            }
+        </div>;
+
+    <div class="setup-summary">
+        <div class="setup-tile">
+            <div class="setup-tile-icon @(readiness.CanSend ? "setup-tile-ok" : "setup-tile-bad")">
+                <LucideIcon Name="@(readiness.CanSend ? "check" : "x")" Size="20" />
+            </div>
+            <div>
+                <div class="setup-tile-label">Mail relay</div>
+                <div class="setup-tile-value">@(readiness.CanSend ? "Can send mail" : "Not ready to send")</div>
+            </div>
+        </div>
+        <div class="setup-tile">
+            <div class="setup-tile-icon @(recDone == recTotal ? "setup-tile-ok" : "setup-tile-warn")">
+                <LucideIcon Name="shield-check" Size="20" />
+            </div>
+            <div>
+                <div class="setup-tile-label">Deliverability</div>
+                <div class="setup-tile-value">@recDone of @recTotal best practices</div>
+            </div>
+        </div>
+    </div>
+
+    @if (nextAction is not null)
+    {
+        <div class="setup-next">
+            <LucideIcon Name="arrow-right" Size="20" />
+            <div class="setup-next-body">
+                <div class="setup-next-title">Next: @nextAction.Title</div>
+                <div class="setup-next-detail">@nextAction.Detail</div>
+            </div>
+            @if (!string.IsNullOrEmpty(nextAction.ActionUrl))
+            {
+                <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="() => Nav.NavigateTo(nextAction.ActionUrl)">
+                    @nextAction.ActionLabel
+                </BbButton>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="setup-next setup-next-done">
+            <LucideIcon Name="check" Size="20" />
+            <div class="setup-next-body">
+                <div class="setup-next-title">You're all set</div>
+                <div class="setup-next-detail">Required setup is complete and the recommended deliverability best practices are in place.</div>
+            </div>
+        </div>
+    }
+
+    <div class="setup-group-label">Required <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— needed before any mail can flow</span></div>
+    <BbCard>
+        <BbCardContent>
+            @foreach (var item in readiness.Required) { @row(item) }
+        </BbCardContent>
+    </BbCard>
+
+    <div class="setup-group-label">Recommended <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— so your mail reaches the inbox</span></div>
+    <BbCard>
+        <BbCardContent>
+            @foreach (var item in recommendedItems) { @row(item) }
+        </BbCardContent>
+    </BbCard>
+
+    <div class="setup-group-label">Optional <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— sensible defaults already apply; tune these as needed</span></div>
+    <BbCard>
+        <BbCardContent>
+            @foreach (var item in readiness.Optional) { @row(item) }
+        </BbCardContent>
+    </BbCard>
+}
+
+<BbDialog @bind-Open="showHelp">
+    <BbDialogContent>
+        <BbDialogHeader>
+            <BbDialogTitle>About Setup &amp; Health</BbDialogTitle>
+            <BbDialogDescription>How to read this page</BbDialogDescription>
+        </BbDialogHeader>
+        <div style="font-size:0.875rem;line-height:1.6;">
+            <p>This page checks your organization's configuration in real time and groups it into three tiers:</p>
+            <ul style="padding-left:1.25rem;">
+                <li><strong>Required</strong> — the minimum to relay mail at all. When these are done the <em>Can send mail</em> tile turns green.</li>
+                <li><strong>Recommended</strong> — deliverability best practice (verified domains, DKIM, published DNS). Mail flows without them, but may land in spam.</li>
+                <li><strong>Optional</strong> — refinements with a sensible default; an empty list usually means "allow all", shown as <em>Default</em>.</li>
+            </ul>
+            <h4 style="margin-top:1rem;">Status badges</h4>
+            <ul style="padding-left:1.25rem;">
+                <li><strong>Done</strong> — configured and valid.</li>
+                <li><strong>In progress</strong> — started but incomplete (e.g. some domains verified).</li>
+                <li><strong>To do</strong> — not configured yet.</li>
+                <li><strong>Blocked</strong> — waiting on a prerequisite (e.g. add a sender domain before verifying it).</li>
+                <li><strong>Default</strong> — an intentional permissive default applies.</li>
+            </ul>
+            <p class="text-muted">Use <strong>Re-check</strong> after making changes to refresh the status.</p>
+        </div>
+        <BbDialogFooter>
+            <BbDialogClose><BbButton Variant="ButtonVariant.Outline">Close</BbButton></BbDialogClose>
+        </BbDialogFooter>
+    </BbDialogContent>
+</BbDialog>
+
+@code {
+    private TenantReadiness? readiness;
+    private List<SetupItem> recommendedItems = [];
+    private SetupItem? nextAction;
+    private int recDone;
+    private int recTotal;
+    private bool isLoading = true;
+    private bool showHelp;
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        using (var scope = ScopeFactory.CreateScope())
+        {
+            var svc = scope.ServiceProvider.GetRequiredService<ITenantReadinessService>();
+            readiness = await svc.GetAsync();
+        }
+
+        if (readiness is not null && !readiness.IsHostScope)
+        {
+            // The DNS item is appended here in phase 2 (it needs a live lookup).
+            recommendedItems = [.. readiness.Recommended];
+            recTotal = recommendedItems.Count;
+            recDone = recommendedItems.Count(i => i.Status == SetupStatus.Done);
+            nextAction = readiness.Required.FirstOrDefault(i => i.NeedsAttention)
+                         ?? recommendedItems.FirstOrDefault(i => i.NeedsAttention);
+        }
+        isLoading = false;
+    }
+
+    private static string StatusIcon(SetupStatus s) => s switch
+    {
+        SetupStatus.Done => "check",
+        SetupStatus.Partial => "clock",
+        SetupStatus.Todo => "circle",
+        SetupStatus.Blocked => "lock",
+        _ => "info"
+    };
+
+    private static string StatusIconClass(SetupStatus s) => s switch
+    {
+        SetupStatus.Done => "s-done",
+        SetupStatus.Partial => "s-partial",
+        SetupStatus.Todo => "s-todo",
+        SetupStatus.Blocked => "s-blocked",
+        _ => "s-permissive"
+    };
+
+    private static string StatusBadge(SetupStatus s) => s switch
+    {
+        SetupStatus.Done => "badge-success",
+        SetupStatus.Partial or SetupStatus.Todo => "badge-warning",
+        _ => "badge-muted"
+    };
+
+    private static string StatusText(SetupStatus s) => s switch
+    {
+        SetupStatus.Done => "Done",
+        SetupStatus.Partial => "In progress",
+        SetupStatus.Todo => "To do",
+        SetupStatus.Blocked => "Blocked",
+        _ => "Default"
+    };
+}

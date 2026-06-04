@@ -407,3 +407,81 @@ nav[aria-label="breadcrumb"] {
 .dns-record-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.35rem; }
 .dns-record-label { flex: 0 0 5rem; font-size: 0.75rem; color: var(--muted-foreground); }
 .dns-record-value { flex: 1; word-break: break-all; font-size: 0.8rem; }
+
+/* Setup & Health page */
+.setup-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+.setup-tile {
+    flex: 1 1 220px;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card);
+}
+.setup-tile-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 999px;
+    flex: 0 0 auto;
+}
+.setup-tile-ok { background: color-mix(in oklch, var(--primary) 14%, transparent); color: var(--primary); }
+.setup-tile-warn { background: color-mix(in oklch, var(--chart-3, orange) 14%, transparent); color: var(--chart-3, orange); }
+.setup-tile-bad { background: color-mix(in oklch, var(--destructive) 14%, transparent); color: var(--destructive); }
+.setup-tile-label { font-size: 0.75rem; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.04em; }
+.setup-tile-value { font-size: 1.05rem; font-weight: 600; line-height: 1.2; }
+
+/* Next-best-action banner */
+.setup-next {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid color-mix(in oklch, var(--chart-3, orange) 35%, transparent);
+    border-left-width: 4px;
+    border-radius: var(--radius);
+    background: color-mix(in oklch, var(--chart-3, orange) 8%, transparent);
+}
+.setup-next.setup-next-done {
+    border-color: color-mix(in oklch, var(--primary) 35%, transparent);
+    background: color-mix(in oklch, var(--primary) 8%, transparent);
+}
+.setup-next-body { flex: 1; }
+.setup-next-title { font-weight: 600; font-size: 0.9rem; }
+.setup-next-detail { font-size: 0.8rem; color: var(--muted-foreground); margin-top: 0.1rem; }
+
+/* Checklist rows */
+.setup-group-label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 1.5rem 0 0.25rem;
+}
+.setup-group-hint { font-size: 0.8rem; color: var(--muted-foreground); margin: 0 0 0.5rem; }
+.setup-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--border);
+}
+.setup-row:first-child { border-top: none; }
+.setup-row-icon { flex: 0 0 auto; margin-top: 0.1rem; }
+.setup-row-icon.s-done { color: var(--primary); }
+.setup-row-icon.s-todo { color: var(--chart-3, orange); }
+.setup-row-icon.s-partial { color: var(--chart-3, orange); }
+.setup-row-icon.s-blocked { color: var(--muted-foreground); }
+.setup-row-icon.s-permissive { color: var(--muted-foreground); }
+.setup-row-main { flex: 1; min-width: 0; }
+.setup-row-title { font-weight: 500; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.setup-row-detail { font-size: 0.8rem; color: var(--muted-foreground); margin-top: 0.1rem; }
+.setup-row-action { flex: 0 0 auto; }
