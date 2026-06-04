@@ -1,8 +1,9 @@
 namespace WinSmtpRelay.Core.Models;
 
-public class QueuedMessage
+public class QueuedMessage : ITenantOwned
 {
     public long Id { get; set; }
+    public int TenantId { get; set; } = TenantDefaults.DefaultTenantId;
     public required string MessageId { get; set; }
     public required string Sender { get; set; }
     public required string Recipients { get; set; }

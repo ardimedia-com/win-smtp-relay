@@ -1,8 +1,9 @@
 namespace WinSmtpRelay.Core.Models;
 
-public class IpAccessRule
+public class IpAccessRule : ITenantOwned
 {
     public int Id { get; set; }
+    public int TenantId { get; set; } = TenantDefaults.DefaultTenantId;
     public required string Network { get; set; }
     public IpAccessAction Action { get; set; } = IpAccessAction.Allow;
     public int SortOrder { get; set; }

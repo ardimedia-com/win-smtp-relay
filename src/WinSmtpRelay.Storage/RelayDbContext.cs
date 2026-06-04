@@ -89,7 +89,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options)
         modelBuilder.Entity<RelayUser>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => e.Username).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.Username }).IsUnique();
             entity.Property(e => e.Username).HasMaxLength(255);
         });
 
@@ -110,14 +110,14 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options)
         modelBuilder.Entity<AcceptedDomain>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => e.Domain).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.Domain }).IsUnique();
             entity.Property(e => e.Domain).HasMaxLength(255);
         });
 
         modelBuilder.Entity<AcceptedSenderDomain>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => e.Domain).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.Domain }).IsUnique();
             entity.Property(e => e.Domain).HasMaxLength(255);
         });
 
@@ -152,7 +152,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options)
         modelBuilder.Entity<DkimDomain>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => e.Domain).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.Domain }).IsUnique();
             entity.Property(e => e.Domain).HasMaxLength(255);
             entity.Property(e => e.Selector).HasMaxLength(100);
             entity.Property(e => e.PrivateKeyPath).HasMaxLength(500);
@@ -183,5 +183,21 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options)
             entity.Property(e => e.FromPattern).HasMaxLength(320);
             entity.Property(e => e.ToAddress).HasMaxLength(320);
         });
+
+        // Tenant partitioning: every ITenantOwned entity defaults to the Default tenant and
+        // gets a restricted FK to Tenant (which also indexes TenantId). Tenant-scoped query
+        // filters are applied in a later phase.
+        var tenantOwned = modelBuilder.Model.GetEntityTypes()
+            .Where(t => typeof(ITenantOwned).IsAssignableFrom(t.ClrType))
+            .ToList();
+        foreach (var entityType in tenantOwned)
+        {
+            var builder = modelBuilder.Entity(entityType.ClrType);
+            builder.Property(nameof(ITenantOwned.TenantId)).HasDefaultValue(TenantDefaults.DefaultTenantId);
+            builder.HasOne(typeof(Tenant))
+                .WithMany()
+                .HasForeignKey(nameof(ITenantOwned.TenantId))
+                .OnDelete(DeleteBehavior.Restrict);
+        }
     }
 }

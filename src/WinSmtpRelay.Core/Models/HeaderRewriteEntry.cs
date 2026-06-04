@@ -1,8 +1,9 @@
 namespace WinSmtpRelay.Core.Models;
 
-public class HeaderRewriteEntry
+public class HeaderRewriteEntry : ITenantOwned
 {
     public int Id { get; set; }
+    public int TenantId { get; set; } = TenantDefaults.DefaultTenantId;
     public string HeaderName { get; set; } = "";
     public string? MatchValue { get; set; }
     public string Action { get; set; } = "Set";

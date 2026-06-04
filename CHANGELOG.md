@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial host administrator (`admin@local`) is seeded on first run with a one-time random password written to the log (Event Log + console); the account must change its password on first sign-in.
 - `Tenant` entity and a seeded default tenant; admin users and API keys are tenant-bound (foundation for multi-tenancy).
 - Login, change-password, and access-denied pages plus a sign-out endpoint.
+- `TenantId` on all per-tenant entities (relay users, receive/send connectors, accepted/sender domains, IP access rules, domain routes, DKIM domains, message-filter rules, queued messages, delivery logs) with a foreign key to `Tenant`; existing rows are assigned to the default tenant. Uniqueness for usernames and accepted/sender/DKIM domains is now per-tenant (composite indexes). Tenant-scoped query filtering is applied in a following change. (`RateLimitSettings` and `DailyStatistics` remain global for now — they are consumed in the background SMTP/delivery path before tenant resolution.)
 
 ### Changed
 

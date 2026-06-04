@@ -1,8 +1,9 @@
 namespace WinSmtpRelay.Core.Models;
 
-public class SendConnector
+public class SendConnector : ITenantOwned
 {
     public int Id { get; set; }
+    public int TenantId { get; set; } = TenantDefaults.DefaultTenantId;
     public string Name { get; set; } = "";
     public string? SmartHost { get; set; }
     public int SmartHostPort { get; set; } = 587;
