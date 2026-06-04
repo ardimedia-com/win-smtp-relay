@@ -138,6 +138,7 @@ public class RateLimiterTests
         public Task<int?> GetTenantForRecipientDomainAsync(string domain, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> IsTenantEnabledAsync(int tenantId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<string?> GetTenantEgressIpAsync(int tenantId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<EmailAuthSettings> GetEmailAuthSettingsAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<HeaderRewriteEntry>> GetHeaderRewriteRulesAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<SenderRewriteEntry>> GetSenderRewriteRulesAsync(CancellationToken ct = default) => throw new NotImplementedException();

@@ -28,6 +28,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
     private volatile IReadOnlySet<int>? _enabledTenants;
     private volatile IReadOnlyDictionary<int, string>? _tenantEgressIps;
     private volatile RateLimitSettings? _rateLimitSettings;
+    private volatile EmailAuthSettings? _emailAuthSettings;
 
     public RuntimeConfigCache(IServiceScopeFactory scopeFactory, ILogger<RuntimeConfigCache> logger)
     {
@@ -219,6 +220,32 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         }
     }
 
+    public async Task<EmailAuthSettings> GetEmailAuthSettingsAsync(CancellationToken ct = default)
+    {
+        if (_emailAuthSettings is { } cached)
+            return cached;
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (_emailAuthSettings is { } cached2)
+                return cached2;
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var settings = await db.EmailAuthSettings.AsNoTracking().FirstOrDefaultAsync(ct)
+                ?? new EmailAuthSettings();
+
+            _emailAuthSettings = settings;
+            _logger.LogDebug("Loaded email-auth settings into cache");
+            return settings;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default)
     {
         if (_ipAccessRules is { } cached)
@@ -347,6 +374,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         _enabledTenants = null;
         _tenantEgressIps = null;
         _rateLimitSettings = null;
+        _emailAuthSettings = null;
         _logger.LogInformation("Runtime configuration cache invalidated");
     }
 }

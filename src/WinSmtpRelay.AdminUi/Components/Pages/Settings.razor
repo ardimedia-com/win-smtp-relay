@@ -1,5 +1,6 @@
 @page "/settings"
 @using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Configuration
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
 
@@ -75,6 +76,37 @@ else
             }
         </BbCardContent>
     </BbCard>
+
+    <BbCard Class="mt-1">
+        <BbCardHeader>
+            <BbCardTitle>Inbound email authentication</BbCardTitle>
+        </BbCardHeader>
+        <BbCardContent>
+            <div style="display:flex;align-items:center;gap:0.75rem;">
+                <BbSwitch Checked="spfEnabled" CheckedChanged="(bool v) => spfEnabled = v" id="spf-toggle" />
+                <span>Run SPF checks on inbound mail</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
+                <BbSwitch Checked="dmarcEnabled" CheckedChanged="(bool v) => dmarcEnabled = v" id="dmarc-toggle" />
+                <span>Run DMARC checks on inbound mail</span>
+            </div>
+            <div class="form-group" style="margin-top:1rem;">
+                <BbLabel>Enforcement on failure</BbLabel>
+                <select class="account-input" @bind="enforcement">
+                    <option value="@EnforcementMode.LogOnly">Log only — accept and record the result</option>
+                    <option value="@EnforcementMode.Reject">Reject — return 550 on SPF/DMARC failure</option>
+                    <option value="@EnforcementMode.Quarantine">Quarantine — accept but flag the message</option>
+                </select>
+            </div>
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveEmailAuthAsync" Class="mt-1">
+                <LucideIcon Name="save" /> Save
+            </BbButton>
+            @if (!string.IsNullOrEmpty(emailAuthStatus))
+            {
+                <p class="text-muted" style="margin-top:0.5rem;">@emailAuthStatus</p>
+            }
+        </BbCardContent>
+    </BbCard>
     </div>
 }
 
@@ -85,14 +117,35 @@ else
     private bool isLoading = true;
     private string? statusMessage;
 
+    private bool spfEnabled;
+    private bool dmarcEnabled;
+    private EnforcementMode enforcement = EnforcementMode.LogOnly;
+    private string? emailAuthStatus;
+
     protected override async Task OnInitializedAsync()
     {
         using var scope = ScopeFactory.CreateScope();
-        var settings = await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync();
-        signupEnabled = settings.SelfServiceSignupEnabled;
-        signupFromAddress = settings.SignupFromAddress;
-        signupMaxPerHour = settings.SignupMaxAttemptsPerIpPerHour.ToString();
+        var sp = scope.ServiceProvider;
+
+        var portal = await sp.GetRequiredService<IPortalSettingsService>().GetAsync();
+        signupEnabled = portal.SelfServiceSignupEnabled;
+        signupFromAddress = portal.SignupFromAddress;
+        signupMaxPerHour = portal.SignupMaxAttemptsPerIpPerHour.ToString();
+
+        var emailAuth = await sp.GetRequiredService<IEmailAuthSettingsService>().GetAsync();
+        spfEnabled = emailAuth.SpfEnabled;
+        dmarcEnabled = emailAuth.DmarcEnabled;
+        enforcement = emailAuth.Enforcement;
+
         isLoading = false;
+    }
+
+    private async Task SaveEmailAuthAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IEmailAuthSettingsService>()
+            .UpdateAsync(spfEnabled, dmarcEnabled, enforcement);
+        emailAuthStatus = $"Email authentication saved (SPF {(spfEnabled ? "on" : "off")}, DMARC {(dmarcEnabled ? "on" : "off")}, enforcement {enforcement}).";
     }
 
     private async Task OnToggleAsync(bool value)

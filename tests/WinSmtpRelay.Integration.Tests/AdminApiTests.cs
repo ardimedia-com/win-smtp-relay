@@ -760,5 +760,24 @@ public class AdminApiTests
             Assert.AreEqual(0, (await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync()).SignupMaxAttemptsPerIpPerHour);
     }
 
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task EmailAuthSettings_UpdatePersists_AndCacheReflects()
+    {
+        var cache = _app.Services.GetRequiredService<IRuntimeConfigCache>();
+        var before = await cache.GetEmailAuthSettingsAsync();
+        Assert.IsFalse(before.SpfEnabled, "SPF defaults off");
+        Assert.AreEqual(WinSmtpRelay.Core.Configuration.EnforcementMode.LogOnly, before.Enforcement);
+
+        using (var scope = _app.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<IEmailAuthSettingsService>()
+                .UpdateAsync(spfEnabled: true, dmarcEnabled: true, WinSmtpRelay.Core.Configuration.EnforcementMode.Reject);
+
+        var after = await cache.GetEmailAuthSettingsAsync();
+        Assert.IsTrue(after.SpfEnabled, "cache should reflect the persisted SPF change after invalidation");
+        Assert.IsTrue(after.DmarcEnabled);
+        Assert.AreEqual(WinSmtpRelay.Core.Configuration.EnforcementMode.Reject, after.Enforcement);
+    }
+
     private record HealthResponse(string Status);
 }

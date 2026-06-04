@@ -31,6 +31,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<DkimDomain> DkimDomains => Set<DkimDomain>();
     public DbSet<RateLimitSettings> RateLimitSettings => Set<RateLimitSettings>();
     public DbSet<PortalSettings> PortalSettings => Set<PortalSettings>();
+    public DbSet<EmailAuthSettings> EmailAuthSettings => Set<EmailAuthSettings>();
     public DbSet<HeaderRewriteEntry> HeaderRewriteEntries => Set<HeaderRewriteEntry>();
     public DbSet<SenderRewriteEntry> SenderRewriteEntries => Set<SenderRewriteEntry>();
 
@@ -185,6 +186,19 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             {
                 Id = 1,
                 SelfServiceSignupEnabled = false,
+                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            });
+        });
+
+        modelBuilder.Entity<EmailAuthSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasData(new EmailAuthSettings
+            {
+                Id = 1,
+                SpfEnabled = false,
+                DmarcEnabled = false,
+                Enforcement = WinSmtpRelay.Core.Configuration.EnforcementMode.LogOnly,
                 UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             });
         });

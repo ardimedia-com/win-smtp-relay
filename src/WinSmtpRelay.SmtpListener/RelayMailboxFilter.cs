@@ -169,10 +169,11 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             context.Properties["EnvelopeFromDomain"] = senderDomain;
 
             // In Reject mode, reject on SPF hard fail
+            var spfOnlyResults = new Security.Models.AuthenticationResults(
+                spfResult, new Security.Models.DmarcCheckResult(
+                    Security.Models.DmarcVerdict.None, Security.Models.DmarcPolicy.None, ""));
             if (spfResult.Verdict == Security.Models.SpfVerdict.Fail &&
-                _emailAuth.ShouldReject(new Security.Models.AuthenticationResults(
-                    spfResult, new Security.Models.DmarcCheckResult(
-                        Security.Models.DmarcVerdict.None, Security.Models.DmarcPolicy.None, ""))))
+                await _emailAuth.ShouldRejectAsync(spfOnlyResults, cancellationToken))
             {
                 _logger.LogWarning("Message from {Sender} rejected: SPF fail from {Ip}",
                     from.AsAddress(), remoteEndPoint.Address);

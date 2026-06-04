@@ -71,7 +71,7 @@ public class RelayMessageStore : MessageStore
             cancellationToken);
 
         // Enforce DMARC/SPF policy
-        if (_emailAuth.ShouldReject(authResults))
+        if (await _emailAuth.ShouldRejectAsync(authResults, cancellationToken))
         {
             _logger.LogWarning("Message {MessageId} rejected: DMARC/SPF policy failure (from {Sender})",
                 messageId, sender);

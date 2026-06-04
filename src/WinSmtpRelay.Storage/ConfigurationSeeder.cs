@@ -20,6 +20,7 @@ public class ConfigurationSeeder(
     IOptions<RateLimitOptions> rateLimitOpts,
     IOptions<MessageFilterOptions> filterOpts,
     IOptions<AdminUiOptions> adminUiOpts,
+    IOptions<EmailAuthenticationOptions> emailAuthOpts,
     ILogger<ConfigurationSeeder> logger) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -34,6 +35,7 @@ public class ConfigurationSeeder(
         await SeedDkimDomainsAsync(db, cancellationToken);
         await SeedRateLimitSettingsAsync(db, cancellationToken);
         await SeedPortalSettingsAsync(db, cancellationToken);
+        await SeedEmailAuthSettingsAsync(db, cancellationToken);
         await SeedMessageFiltersAsync(db, cancellationToken);
     }
 
@@ -211,6 +213,23 @@ public class ConfigurationSeeder(
         // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied portal settings from appsettings (row not yet edited)");
+    }
+
+    private async Task SeedEmailAuthSettingsAsync(RelayDbContext db, CancellationToken ct)
+    {
+        var existing = await db.EmailAuthSettings.FindAsync([1], ct);
+        if (existing is null) return; // seeded by EF HasData
+
+        if (existing.UpdatedUtc != SeedSentinel)
+            return; // edited via UI — DB authoritative
+
+        var opts = emailAuthOpts.Value;
+        existing.SpfEnabled = opts.SpfEnabled;
+        existing.DmarcEnabled = opts.DmarcEnabled;
+        existing.Enforcement = opts.Enforcement;
+        // Keep UpdatedUtc at the sentinel so appsettings remains the source until a UI edit.
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Applied email-authentication settings from appsettings (row not yet edited)");
     }
 
     private async Task SeedMessageFiltersAsync(RelayDbContext db, CancellationToken ct)

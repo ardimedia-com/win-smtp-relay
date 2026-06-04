@@ -1,7 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using WinSmtpRelay.Core.Configuration;
+using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Security.Models;
 
 namespace WinSmtpRelay.Security;
@@ -10,18 +10,18 @@ public class EmailAuthenticationService
 {
     private readonly SpfValidator _spf;
     private readonly DmarcValidator _dmarc;
-    private readonly EmailAuthenticationOptions _options;
+    private readonly IRuntimeConfigCache _configCache;
     private readonly ILogger<EmailAuthenticationService> _logger;
 
     public EmailAuthenticationService(
         SpfValidator spf,
         DmarcValidator dmarc,
-        IOptions<EmailAuthenticationOptions> options,
+        IRuntimeConfigCache configCache,
         ILogger<EmailAuthenticationService> logger)
     {
         _spf = spf;
         _dmarc = dmarc;
-        _options = options.Value;
+        _configCache = configCache;
         _logger = logger;
     }
 
@@ -30,7 +30,8 @@ public class EmailAuthenticationService
         string mailFromDomain,
         CancellationToken cancellationToken = default)
     {
-        if (!_options.SpfEnabled)
+        var settings = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);
+        if (!settings.SpfEnabled)
             return new SpfCheckResult(SpfVerdict.None, "SPF checking disabled");
 
         var result = await _spf.CheckAsync(senderIp, mailFromDomain, cancellationToken);
@@ -47,9 +48,10 @@ public class EmailAuthenticationService
         string headerFromDomain,
         CancellationToken cancellationToken = default)
     {
+        var settings = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);
         var spfResult = await CheckSpfAsync(senderIp, envelopeFromDomain, cancellationToken);
 
-        var dmarcResult = _options.DmarcEnabled
+        var dmarcResult = settings.DmarcEnabled
             ? await _dmarc.CheckAsync(headerFromDomain, envelopeFromDomain, spfResult, cancellationToken)
             : new DmarcCheckResult(DmarcVerdict.None, DmarcPolicy.None, "DMARC checking disabled");
 
@@ -62,13 +64,15 @@ public class EmailAuthenticationService
         return new AuthenticationResults(spfResult, dmarcResult);
     }
 
-    public bool ShouldReject(AuthenticationResults results)
+    public async Task<bool> ShouldRejectAsync(AuthenticationResults results, CancellationToken cancellationToken = default)
     {
-        return _options.Enforcement == EnforcementMode.Reject && results.ShouldReject;
+        var settings = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);
+        return settings.Enforcement == EnforcementMode.Reject && results.ShouldReject;
     }
 
-    public bool ShouldQuarantine(AuthenticationResults results)
+    public async Task<bool> ShouldQuarantineAsync(AuthenticationResults results, CancellationToken cancellationToken = default)
     {
-        return _options.Enforcement == EnforcementMode.Quarantine && results.ShouldQuarantine;
+        var settings = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);
+        return settings.Enforcement == EnforcementMode.Quarantine && results.ShouldQuarantine;
     }
 }
