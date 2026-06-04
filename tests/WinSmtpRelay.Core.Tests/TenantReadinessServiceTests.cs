@@ -176,6 +176,21 @@ public class TenantReadinessServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
+    public async Task UnknownTenant_IsReportedNotActive_AndCannotSend()
+    {
+        var ghost = new CurrentTenant();
+        ghost.SetTenant(9999); // a tenant id with no row
+
+        var r = await Build(ghost).GetAsync();
+
+        Assert.AreEqual(9999, r.TenantId);
+        Assert.IsFalse(r.TenantActive);
+        Assert.IsFalse(r.CanSend);
+        Assert.AreEqual(SetupStatus.Blocked, Item(r, "tenant-active").Status);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
     public async Task HostScope_ReturnsEmptyHostScopeResult()
     {
         var host = new CurrentTenant();

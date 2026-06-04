@@ -29,7 +29,9 @@ public class TenantReadinessService(
 
         var tenant = await tenants.GetByIdAsync(tenantId, ct);
         var tenantName = tenant?.Name ?? "";
-        var tenantActive = tenant?.IsEnabled ?? true;
+        // A missing tenant row for a set scope is anomalous (dangling scope); treat it as not active
+        // rather than claiming a non-existent org is enabled.
+        var tenantActive = tenant?.IsEnabled ?? false;
 
         var userList = await users.GetAllUsersAsync(ct);
         var enabledUsers = userList.Count(u => u.IsEnabled);
@@ -66,7 +68,7 @@ public class TenantReadinessService(
                 enabledUsers > 0 ? SetupStatus.Done : SetupStatus.Todo,
                 enabledUsers > 0
                     ? $"{enabledUsers} user{Plural(enabledUsers)} can submit mail"
-                    : "No SMTP users yet — clients need credentials to submit (or allow specific IPs without auth)",
+                    : "No SMTP users yet — clients need credentials to submit mail",
                 "/smtpusers", "Manage users"),
 
             // ----- Recommended: best practice for inbox deliverability -----

@@ -5,6 +5,7 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IAuthorizationService AuthorizationService
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -211,7 +212,7 @@ else
                     <span class="setup-row-icon s-done"><LucideIcon Name="send" Size="18" /></span>
                     <div class="setup-row-main">
                         <div class="setup-row-title">Send a test message</div>
-                        <div class="setup-row-detail">Queue a message through the relay to confirm outbound delivery works end-to-end (MX lookup, TLS, DKIM). Send it to an address you control, then watch the result under Journal.</div>
+                        <div class="setup-row-detail">Queue a message through the relay to confirm outbound delivery works end-to-end (MX lookup, TLS, and DKIM if configured). Send it to an address you control, then watch the result under Journal.</div>
                     </div>
                     <div class="setup-row-action">
                         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="OpenTestDialogAsync">
@@ -285,6 +286,9 @@ else
 </BbDialog>
 
 @code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthState { get; set; }
+
     private TenantReadiness? readiness;
     private List<SetupItem> recommendedItems = [];
     private SetupItem? nextAction;
@@ -318,7 +322,12 @@ else
         if (firstRender && dnsLoading)
         {
             await LoadDnsAsync();
-            await InvokeAsync(StateHasChanged);
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException) { /* circuit gone while the DNS lookup was in flight */ }
+            catch (OperationCanceledException) { /* circuit gone while the DNS lookup was in flight */ }
         }
     }
 
@@ -330,7 +339,9 @@ else
         isLoading = false;
         if (readiness is { IsHostScope: false })
         {
+            // Show the "Checking…" row while the (potentially slow) DNS lookup runs.
             dnsLoading = true;
+            StateHasChanged();
             await LoadDnsAsync();
         }
     }
@@ -406,7 +417,12 @@ else
                      ?? recommendedItems.FirstOrDefault(i => i.NeedsAttention);
     }
 
-    private async Task CopyAsync(string value) => await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+    private async Task CopyAsync(string value)
+    {
+        // clipboard API throws on non-secure origins or when permission is denied.
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); }
+        catch { /* best-effort copy */ }
+    }
 
     // ----- Test message -----
     private bool showTestDialog;
@@ -445,10 +461,38 @@ else
         if (!IsEmail(to)) { testError = "Enter a valid recipient address."; return; }
         if (readiness?.TenantId is not { } tenantId) { testError = "No tenant in scope."; return; }
 
+        // The AuthorizeView around the button only hides UI — the circuit handler must re-check the
+        // policy server-side, otherwise a read-only viewer could invoke it over the circuit.
+        if (AuthState is not null)
+        {
+            var user = (await AuthState).User;
+            if (!(await AuthorizationService.AuthorizeAsync(user, AuthorizationPolicies.AdminFull)).Succeeded)
+            {
+                testError = "You don't have permission to send test messages.";
+                return;
+            }
+        }
+
         testSending = true;
         try
         {
             using var scope = ScopeFactory.CreateScope();
+
+            // Direct queue injection bypasses the SMTP ingress checks (RelayMailboxFilter), so enforce
+            // the sender-domain restriction here: when the tenant lists sender domains, the From must be
+            // one of them. With no sender domains configured the relay accepts any sender, so allow it.
+            var senders = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
+            var domains = await senders.GetAllAsync();
+            if (domains.Count > 0)
+            {
+                var fromDomain = from[(from.IndexOf('@') + 1)..];
+                if (!domains.Any(d => string.Equals(d.Domain, fromDomain, StringComparison.OrdinalIgnoreCase)))
+                {
+                    testError = $"The From domain must be one of your sender domains: {string.Join(", ", domains.Select(d => d.Domain))}.";
+                    return;
+                }
+            }
+
             var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
             var body = "This is a test message from the WinSmtpRelay Setup & Health page, " +
                        "sent to verify that outbound delivery works.\r\n";
@@ -466,11 +510,12 @@ else
         }
     }
 
+    /// <summary>Accepts a single bare email address (no display name, no second address).</summary>
     private static bool IsEmail(string v)
-    {
-        var at = v.IndexOf('@');
-        return at > 0 && at < v.Length - 1 && !v.Contains(' ') && v.IndexOf('@', at + 1) < 0;
-    }
+        => !string.IsNullOrWhiteSpace(v)
+           && !v.Contains(' ')
+           && System.Net.Mail.MailAddress.TryCreate(v, out var addr)
+           && string.Equals(addr.Address, v, StringComparison.OrdinalIgnoreCase);
 
     private static string DnsBadgeClass(DnsRecordStatus status) => status switch
     {
