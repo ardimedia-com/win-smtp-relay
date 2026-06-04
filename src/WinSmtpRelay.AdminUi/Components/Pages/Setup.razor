@@ -3,6 +3,7 @@
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -128,8 +129,50 @@ else
     <BbCard>
         <BbCardContent>
             @foreach (var item in recommendedItems) { @row(item) }
+            @if (dnsLoading)
+            {
+                <div class="setup-row">
+                    <span class="setup-row-icon s-blocked"><LucideIcon Name="loader" Size="18" /></span>
+                    <div class="setup-row-main">
+                        <div class="setup-row-title">Publish SPF / DKIM / DMARC <span class="badge-status badge-muted">Checking…</span></div>
+                        <div class="setup-row-detail">Looking up your published DNS records…</div>
+                    </div>
+                </div>
+            }
         </BbCardContent>
     </BbCard>
+
+    @if (ToPublish.Count > 0)
+    {
+        <div class="setup-group-label">DNS records to publish <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— add these at your DNS provider, then Re-check</span></div>
+        <BbCard>
+            <BbCardContent>
+                @foreach (var entry in ToPublish)
+                {
+                    <div class="dns-record">
+                        <div class="dns-record-head">
+                            <strong>@entry.Record.RecordType</strong>
+                            <span class="text-muted" style="font-size:0.8rem;">@entry.Domain</span>
+                            <span class="badge-status @DnsBadgeClass(entry.Record.Status)">@entry.Record.Status</span>
+                        </div>
+                        <div class="dns-record-name mono text-muted">@entry.Record.RecordName</div>
+                        <div class="dns-record-row">
+                            <span class="dns-record-label">Expected</span>
+                            <code class="mono dns-record-value">@entry.Record.Expected</code>
+                            <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => CopyAsync(entry.Record.Expected)" title="Copy">
+                                <LucideIcon Name="copy" />
+                            </BbButton>
+                        </div>
+                    </div>
+                }
+                <div style="margin-top:0.75rem;">
+                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/dns/setup"))">
+                        Open DNS Setup <LucideIcon Name="chevron-right" Size="14" />
+                    </BbButton>
+                </div>
+            </BbCardContent>
+        </BbCard>
+    }
 
     <div class="setup-group-label">Optional <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— sensible defaults already apply; tune these as needed</span></div>
     <BbCard>
@@ -175,30 +218,130 @@ else
     private int recDone;
     private int recTotal;
     private bool isLoading = true;
+    private bool dnsLoading;
     private bool showHelp;
 
-    protected override async Task OnInitializedAsync() => await RefreshAsync();
+    // DNS is checked separately because the lookup is a live network call.
+    private SetupItem? dnsItem;
+    private List<DomainDnsSetup> dnsResults = [];
 
+    // Records that have an expected value but are not yet correctly published (shown with copy buttons).
+    private List<(string Domain, DnsRecordResult Record)> ToPublish => dnsResults
+        .SelectMany(d => new[] { d.Spf, d.Dkim, d.Dmarc }.Select(r => (d.Domain, Record: r)))
+        .Where(x => x.Record.Status != DnsRecordStatus.Ok && !string.IsNullOrEmpty(x.Record.Expected))
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadBaseAsync();
+        isLoading = false;
+        // DNS is loaded after the first render so the checklist appears instantly.
+        if (readiness is { IsHostScope: false })
+            dnsLoading = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && dnsLoading)
+        {
+            await LoadDnsAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Re-check button: reloads both the base checklist and the live DNS state.</summary>
     private async Task RefreshAsync()
     {
         isLoading = true;
-        using (var scope = ScopeFactory.CreateScope())
-        {
-            var svc = scope.ServiceProvider.GetRequiredService<ITenantReadinessService>();
-            readiness = await svc.GetAsync();
-        }
-
-        if (readiness is not null && !readiness.IsHostScope)
-        {
-            // The DNS item is appended here in phase 2 (it needs a live lookup).
-            recommendedItems = [.. readiness.Recommended];
-            recTotal = recommendedItems.Count;
-            recDone = recommendedItems.Count(i => i.Status == SetupStatus.Done);
-            nextAction = readiness.Required.FirstOrDefault(i => i.NeedsAttention)
-                         ?? recommendedItems.FirstOrDefault(i => i.NeedsAttention);
-        }
+        await LoadBaseAsync();
         isLoading = false;
+        if (readiness is { IsHostScope: false })
+        {
+            dnsLoading = true;
+            await LoadDnsAsync();
+        }
     }
+
+    private async Task LoadBaseAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ITenantReadinessService>();
+        readiness = await svc.GetAsync();
+        Recompute();
+    }
+
+    private async Task LoadDnsAsync()
+    {
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
+            dnsResults = [.. await dns.CheckAllSenderDomainsAsync()];
+            dnsItem = BuildDnsItem(dnsResults);
+        }
+        catch
+        {
+            // A DNS lookup failure should not break the page; show it as unknown.
+            dnsResults = [];
+            dnsItem = new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
+                SetupStatus.Todo, "Could not check DNS just now — try Re-check", "/dns/setup", "DNS Setup");
+        }
+        finally
+        {
+            dnsLoading = false;
+            Recompute();
+        }
+    }
+
+    private static SetupItem BuildDnsItem(List<DomainDnsSetup> results)
+    {
+        if (results.Count == 0)
+            return new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
+                SetupStatus.Blocked, "Add a sender domain first", "/domains/sender", "Sender domains");
+
+        // Only records with an expected value are "publishable"; NotConfigured records (e.g. DKIM not
+        // set up, or no sending IPs configured) have nothing to publish yet and are covered elsewhere.
+        var publishable = results
+            .SelectMany(d => new[] { d.Spf, d.Dkim, d.Dmarc })
+            .Where(r => r.Status != DnsRecordStatus.NotConfigured)
+            .ToList();
+
+        if (publishable.Count == 0)
+            return new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
+                SetupStatus.Todo, "Set up DKIM and the DNS recommendation settings to generate records", "/dns/setup", "DNS Setup");
+
+        var ok = publishable.Count(r => r.Status == DnsRecordStatus.Ok);
+        var total = publishable.Count;
+        var status = ok == total ? SetupStatus.Done : ok > 0 ? SetupStatus.Partial : SetupStatus.Todo;
+        var detail = ok == total
+            ? $"All {total} records published across {results.Count} domain{(results.Count == 1 ? "" : "s")}"
+            : $"{ok} of {total} records published";
+        return new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
+            status, detail, "/dns/setup", "DNS Setup");
+    }
+
+    private void Recompute()
+    {
+        if (readiness is null || readiness.IsHostScope)
+            return;
+        recommendedItems = [.. readiness.Recommended];
+        if (dnsItem is not null)
+            recommendedItems.Add(dnsItem);
+        recTotal = recommendedItems.Count;
+        recDone = recommendedItems.Count(i => i.Status == SetupStatus.Done);
+        nextAction = readiness.Required.FirstOrDefault(i => i.NeedsAttention)
+                     ?? recommendedItems.FirstOrDefault(i => i.NeedsAttention);
+    }
+
+    private async Task CopyAsync(string value) => await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+
+    private static string DnsBadgeClass(DnsRecordStatus status) => status switch
+    {
+        DnsRecordStatus.Ok => "badge-success",
+        DnsRecordStatus.Mismatch => "badge-warning",
+        DnsRecordStatus.Missing => "badge-error",
+        _ => "badge-muted"
+    };
 
     private static string StatusIcon(SetupStatus s) => s switch
     {
