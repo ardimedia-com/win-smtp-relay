@@ -97,7 +97,9 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         if (remoteEndPoint is not null)
         {
             var ipRules = await _configCache.GetIpAccessRulesAsync(cancellationToken);
-            var decision = IpAccessEvaluator.Evaluate(remoteEndPoint.Address, ipRules);
+            // Evaluate only this tenant's rules plus the host baseline — one tenant's rules
+            // must never allow or deny another tenant's traffic on the shared listener.
+            var decision = IpAccessEvaluator.EvaluateForTenant(remoteEndPoint.Address, ipRules, resolvedTenantId);
 
             if (decision is false)
             {

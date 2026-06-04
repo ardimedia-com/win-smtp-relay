@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- IP access rules are now evaluated per tenant on the shared SMTP listener. Once a message's owning tenant is resolved, only that tenant's rules plus the host/default-tenant baseline are evaluated (tenant rules first, then the baseline) — so one tenant's Allow/Deny rules can no longer permit or block another tenant's traffic. Previously all tenants' rules were evaluated as a single global list.
 - The temporary-password change is now hard-enforced: an admin signed in with a one-time/reset password is redirected to the change-password page and cannot reach any other admin page until the password is changed (previously this was only a banner).
 - Disabling a tenant now actually blocks it everywhere. A disabled tenant's admins can no longer sign in to the web admin (the password is still verified first, so a disabled-tenant account is not revealed by a wrong password), its API keys fail authentication, and inbound SMTP from/for that tenant is rejected. The enabled-tenant set is cached for the SMTP/API hot path and refreshed whenever a tenant is enabled, disabled, approved, or deleted. The default tenant can no longer be disabled, since it owns the baseline configuration.
 - Closed the unauthenticated admin surface: the entire REST API and Blazor admin UI were previously reachable without credentials on `0.0.0.0:8025`, including user creation, configuration changes, and DKIM private-key generation.

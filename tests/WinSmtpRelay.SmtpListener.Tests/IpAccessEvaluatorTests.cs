@@ -71,4 +71,54 @@ public class IpAccessEvaluatorTests
     {
         Assert.AreEqual(false, Evaluate("203.0.113.5", Rule("203.0.113.0/24", IpAccessAction.Deny, 0)));
     }
+
+    private static IpAccessRule TRule(int tenantId, string network, IpAccessAction action, int sortOrder)
+        => new() { TenantId = tenantId, Network = network, Action = action, SortOrder = sortOrder };
+
+    private static bool? EvaluateForTenant(string ip, int tenantId, params IpAccessRule[] rules)
+        => IpAccessEvaluator.EvaluateForTenant(IPAddress.Parse(ip), rules, tenantId);
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void EvaluateForTenant_OtherTenantsDeny_IsIgnored()
+    {
+        // Tenant 2 denies 10.1.2.0/24; the host baseline (default tenant) allows 10.0.0.0/8.
+        // For tenant 3, tenant 2's deny must not apply — the host allow permits.
+        var result = EvaluateForTenant("10.1.2.3", tenantId: 3,
+            TRule(2, "10.1.2.0/24", IpAccessAction.Deny, 1),
+            TRule(TenantDefaults.DefaultTenantId, "10.0.0.0/8", IpAccessAction.Allow, 1));
+        Assert.AreEqual(true, result);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void EvaluateForTenant_OwnDeny_Blocks_BeforeHostAllow()
+    {
+        // The tenant's own rules are evaluated before the host baseline.
+        var result = EvaluateForTenant("10.1.2.3", tenantId: 2,
+            TRule(2, "10.1.2.0/24", IpAccessAction.Deny, 1),
+            TRule(TenantDefaults.DefaultTenantId, "10.0.0.0/8", IpAccessAction.Allow, 1));
+        Assert.AreEqual(false, result);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void EvaluateForTenant_HostBaseline_AppliesToEveryTenant()
+    {
+        var rules = new[] { TRule(TenantDefaults.DefaultTenantId, "10.0.0.0/8", IpAccessAction.Allow, 1) };
+        Assert.AreEqual(true, IpAccessEvaluator.EvaluateForTenant(IPAddress.Parse("10.0.0.5"), rules, 7));
+        // Allow-list mode (from the host baseline) blocks an unmatched public IP for any tenant.
+        Assert.AreEqual(false, IpAccessEvaluator.EvaluateForTenant(IPAddress.Parse("203.0.113.1"), rules, 7));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void EvaluateForTenant_DefaultTenant_UsesBaselineOnly()
+    {
+        // Evaluating for the default tenant must ignore other tenants' rules entirely.
+        var result = EvaluateForTenant("10.0.0.5", tenantId: TenantDefaults.DefaultTenantId,
+            TRule(TenantDefaults.DefaultTenantId, "10.0.0.0/8", IpAccessAction.Allow, 1),
+            TRule(2, "10.0.0.0/8", IpAccessAction.Deny, 0));
+        Assert.AreEqual(true, result);
+    }
 }
