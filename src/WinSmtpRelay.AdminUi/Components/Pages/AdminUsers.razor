@@ -195,6 +195,15 @@ else
 
         var scoped = CurrentTenant.FilterEnabled;
         var role = scoped ? newRole : RelayRoles.HostAdmin;
+
+        // Server-side allowlist: a tenant-scoped admin may only assign tenant roles (the <select>
+        // value is client-supplied over the circuit and must not be trusted to gate HostAdmin).
+        if (scoped && role is not (RelayRoles.TenantAdmin or RelayRoles.TenantViewer))
+        {
+            statusMessage = "Invalid role for a tenant admin.";
+            return;
+        }
+
         var user = new AdminUser
         {
             UserName = newEmail.Trim(),

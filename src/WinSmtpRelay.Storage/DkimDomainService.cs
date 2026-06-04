@@ -13,8 +13,9 @@ public class DkimDomainService(RelayDbContext db) : IDkimDomainService
 
     public async Task<DkimDomain?> GetByDomainAsync(string domain, CancellationToken ct = default)
     {
+        // FirstOrDefault: a domain is unique only per tenant now (composite index).
         return await db.DkimDomains.AsNoTracking()
-            .SingleOrDefaultAsync(d => d.Domain == domain, ct);
+            .FirstOrDefaultAsync(d => d.Domain == domain, ct);
     }
 
     public async Task<DkimDomain?> GetForSigningAsync(int tenantId, string domain, CancellationToken ct = default)

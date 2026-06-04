@@ -45,16 +45,15 @@ public class RelayUserAuthenticator : UserAuthenticator, IUserAuthenticator
         using var scope = _scopeFactory.CreateScope();
         var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
 
-        var result = await userService.ValidateCredentialsAsync(user, password, cancellationToken);
+        // Resolve the matching user by password so the correct tenant is bound even when the same
+        // username exists in multiple tenants (usernames are unique only per tenant).
+        var matchedUser = await userService.ValidateAndGetAsync(user, password, cancellationToken);
+        var result = matchedUser is not null;
 
         if (result)
         {
             context.Properties["AuthenticatedUser"] = user;
-
-            // Bind the session to the authenticated user's tenant (submission path).
-            var relayUser = await userService.GetByUsernameAsync(user, cancellationToken);
-            if (relayUser is not null)
-                context.Properties["TenantId"] = relayUser.TenantId;
+            context.Properties["TenantId"] = matchedUser!.TenantId;
 
             _logger.LogInformation("SMTP AUTH successful for user {User}", user);
 

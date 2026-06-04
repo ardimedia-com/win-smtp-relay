@@ -121,7 +121,7 @@ public class DeliveryWorker(
                     var recipients = message.Recipients.Split(';', StringSplitOptions.RemoveEmptyEntries);
                     foreach (var recipient in recipients)
                     {
-                        await LogDeliveryAsync(db, message.Id, recipient, "550", $"Filtered: {result.RejectReason}", null);
+                        await LogDeliveryAsync(db, message.Id, recipient, "550", $"Filtered: {result.RejectReason}", null, message.TenantId);
                         _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, recipient, "550", null);
                     }
 
@@ -142,7 +142,7 @@ public class DeliveryWorker(
             // Log per-recipient delivery results and broadcast via SignalR
             foreach (var dr in deliveryResults)
             {
-                await LogDeliveryAsync(db, message.Id, dr.Recipient, dr.StatusCode, dr.StatusMessage, dr.RemoteServer);
+                await LogDeliveryAsync(db, message.Id, dr.Recipient, dr.StatusCode, dr.StatusMessage, dr.RemoteServer, message.TenantId);
                 _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, dr.Recipient, dr.StatusCode, dr.RemoteServer);
             }
 
@@ -159,7 +159,7 @@ public class DeliveryWorker(
             {
                 foreach (var dr in dex.Results)
                 {
-                    await LogDeliveryAsync(db, message.Id, dr.Recipient, dr.StatusCode, dr.StatusMessage, dr.RemoteServer);
+                    await LogDeliveryAsync(db, message.Id, dr.Recipient, dr.StatusCode, dr.StatusMessage, dr.RemoteServer, message.TenantId);
                     _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, dr.Recipient, dr.StatusCode, dr.RemoteServer);
                 }
             }
@@ -169,7 +169,7 @@ public class DeliveryWorker(
                 var recipients = message.Recipients.Split(';', StringSplitOptions.RemoveEmptyEntries);
                 foreach (var recipient in recipients)
                 {
-                    await LogDeliveryAsync(db, message.Id, recipient, "500", ex.Message, null);
+                    await LogDeliveryAsync(db, message.Id, recipient, "500", ex.Message, null, message.TenantId);
                     _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, recipient, "500", null);
                 }
             }
@@ -208,11 +208,12 @@ public class DeliveryWorker(
 
     private static async Task LogDeliveryAsync(
         RelayDbContext db, long queuedMessageId, string recipient,
-        string statusCode, string statusMessage, string? remoteServer)
+        string statusCode, string statusMessage, string? remoteServer, int tenantId)
     {
         db.DeliveryLogs.Add(new DeliveryLog
         {
             QueuedMessageId = queuedMessageId,
+            TenantId = tenantId,
             Recipient = recipient,
             StatusCode = statusCode,
             StatusMessage = statusMessage,

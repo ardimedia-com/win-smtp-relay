@@ -40,7 +40,7 @@ public class DomainRoutingTests
     public async Task FindDomainRouteAsync_ExactMatch_ReturnsRoute()
     {
         var service = CreateService([CreateRoute("example.com", "relay.sendgrid.net")]);
-        var route = await service.FindDomainRouteAsync("example.com");
+        var route = await service.FindDomainRouteAsync("example.com", TenantDefaults.DefaultTenantId);
 
         Assert.IsNotNull(route);
         Assert.AreEqual("relay.sendgrid.net", route.SendConnector!.SmartHost);
@@ -51,7 +51,7 @@ public class DomainRoutingTests
     public async Task FindDomainRouteAsync_ExactMatch_CaseInsensitive()
     {
         var service = CreateService([CreateRoute("Example.COM", "relay.sendgrid.net")]);
-        var route = await service.FindDomainRouteAsync("example.com");
+        var route = await service.FindDomainRouteAsync("example.com", TenantDefaults.DefaultTenantId);
         Assert.IsNotNull(route);
     }
 
@@ -60,7 +60,7 @@ public class DomainRoutingTests
     public async Task FindDomainRouteAsync_WildcardMatch_Subdomain()
     {
         var service = CreateService([CreateRoute("*.example.com", "smtp.brevo.com")]);
-        var route = await service.FindDomainRouteAsync("sub.example.com");
+        var route = await service.FindDomainRouteAsync("sub.example.com", TenantDefaults.DefaultTenantId);
         Assert.IsNotNull(route);
         Assert.AreEqual("smtp.brevo.com", route.SendConnector!.SmartHost);
     }
@@ -71,7 +71,7 @@ public class DomainRoutingTests
     {
         var service = CreateService([CreateRoute("*.example.com", "smtp.brevo.com")]);
         // *.example.com should also match example.com itself
-        var route = await service.FindDomainRouteAsync("example.com");
+        var route = await service.FindDomainRouteAsync("example.com", TenantDefaults.DefaultTenantId);
         Assert.IsNotNull(route);
     }
 
@@ -80,7 +80,17 @@ public class DomainRoutingTests
     public async Task FindDomainRouteAsync_NoMatch_ReturnsNull()
     {
         var service = CreateService([CreateRoute("example.com", "relay.sendgrid.net")]);
-        var route = await service.FindDomainRouteAsync("other.com");
+        var route = await service.FindDomainRouteAsync("other.com", TenantDefaults.DefaultTenantId);
+        Assert.IsNull(route);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task FindDomainRouteAsync_RouteFromAnotherTenant_DoesNotMatch()
+    {
+        // A route owned by tenant 1 must not capture a tenant-2 message's mail.
+        var service = CreateService([CreateRoute("example.com", "relay.sendgrid.net")]); // TenantId defaults to 1
+        var route = await service.FindDomainRouteAsync("example.com", tenantId: 2);
         Assert.IsNull(route);
     }
 
@@ -89,7 +99,7 @@ public class DomainRoutingTests
     public async Task FindDomainRouteAsync_EmptyRoutes_ReturnsNull()
     {
         var service = CreateService();
-        var route = await service.FindDomainRouteAsync("example.com");
+        var route = await service.FindDomainRouteAsync("example.com", TenantDefaults.DefaultTenantId);
         Assert.IsNull(route);
     }
 
@@ -101,7 +111,7 @@ public class DomainRoutingTests
             CreateRoute("example.com", "first.host"),
             CreateRoute("example.com", "second.host")
         ]);
-        var route = await service.FindDomainRouteAsync("example.com");
+        var route = await service.FindDomainRouteAsync("example.com", TenantDefaults.DefaultTenantId);
         Assert.IsNotNull(route);
         Assert.AreEqual("first.host", route.SendConnector!.SmartHost);
     }

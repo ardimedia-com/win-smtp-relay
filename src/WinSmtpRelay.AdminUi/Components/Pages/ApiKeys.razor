@@ -158,6 +158,13 @@ else
 
     private async Task CreateAsync()
     {
+        // A tenant-scoped admin may only mint tenant-role keys (newRole is client-supplied).
+        if (ScopeTenantId is not null && newRole is not (RelayRoles.TenantAdmin or RelayRoles.TenantViewer))
+        {
+            statusMessage = "Invalid role for a tenant API key.";
+            return;
+        }
+
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
         var (_, plaintext) = await svc.CreateAsync(ScopeTenantId, newName.Trim(), newRole, null);
@@ -171,6 +178,9 @@ else
     private async Task ConfirmRevokeAsync()
     {
         showRevoke = false;
+        // Only revoke keys in the current tenant scope (keys was loaded scoped to ScopeTenantId).
+        if (!keys.Any(k => k.Id == revokeTargetId))
+            return;
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
         await svc.DeleteAsync(revokeTargetId);

@@ -58,7 +58,7 @@ public class SmtpDeliveryService : IDeliveryService
             var domain = domainGroup.Key;
             var domainRecipients = domainGroup.ToList();
 
-            var domainResults = await DeliverToDomainAsync(mimeMessage, message.Sender, domainRecipients, domain, cancellationToken);
+            var domainResults = await DeliverToDomainAsync(mimeMessage, message.Sender, domainRecipients, domain, message.TenantId, cancellationToken);
             results.AddRange(domainResults);
         }
 
@@ -79,10 +79,12 @@ public class SmtpDeliveryService : IDeliveryService
         string sender,
         List<string> recipients,
         string domain,
+        int tenantId,
         CancellationToken cancellationToken)
     {
-        // 1. Per-domain route takes highest priority (from DB cache)
-        var route = await FindDomainRouteAsync(domain, cancellationToken);
+        // 1. Per-domain route takes highest priority (scoped to the message's tenant so a tenant
+        // cannot define a route that captures another tenant's outbound mail)
+        var route = await FindDomainRouteAsync(domain, tenantId, cancellationToken);
         if (route is { SendConnector: not null })
         {
             var connector = route.SendConnector;
@@ -139,11 +141,13 @@ public class SmtpDeliveryService : IDeliveryService
         }).ToList();
     }
 
-    internal async Task<DomainRoute?> FindDomainRouteAsync(string domain, CancellationToken ct = default)
+    internal async Task<DomainRoute?> FindDomainRouteAsync(string domain, int tenantId, CancellationToken ct = default)
     {
         var routes = await _configCache.GetDomainRoutesAsync(ct);
         foreach (var route in routes)
         {
+            if (route.TenantId != tenantId) continue; // only the message's tenant's routes
+
             var pattern = route.DomainPattern;
             if (string.IsNullOrWhiteSpace(pattern)) continue;
 

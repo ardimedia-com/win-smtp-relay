@@ -7,22 +7,26 @@ namespace WinSmtpRelay.Storage;
 public class UserService(RelayDbContext db) : IUserService
 {
     public async Task<bool> ValidateCredentialsAsync(string username, string password, CancellationToken cancellationToken = default)
+        => await ValidateAndGetAsync(username, password, cancellationToken) is not null;
+
+    public async Task<RelayUser?> ValidateAndGetAsync(string username, string password, CancellationToken cancellationToken = default)
     {
-        var user = await db.RelayUsers
+        // The same username can exist in multiple tenants (unique index is (TenantId, Username)),
+        // so load all enabled candidates and let the password select the right one.
+        var candidates = await db.RelayUsers
             .AsNoTracking()
-            .SingleOrDefaultAsync(u => u.Username == username && u.IsEnabled, cancellationToken);
+            .Where(u => u.Username == username && u.IsEnabled)
+            .ToListAsync(cancellationToken);
 
-        if (user == null)
-            return false;
-
-        return BCrypt.Net.BCrypt.Verify(password, user.PasswordHash);
+        return candidates.FirstOrDefault(u => BCrypt.Net.BCrypt.Verify(password, u.PasswordHash));
     }
 
     public async Task<RelayUser?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default)
     {
+        // FirstOrDefault (not Single): usernames are unique only per tenant now.
         return await db.RelayUsers
             .AsNoTracking()
-            .SingleOrDefaultAsync(u => u.Username == username, cancellationToken);
+            .FirstOrDefaultAsync(u => u.Username == username, cancellationToken);
     }
 
     public async Task CreateUserAsync(string username, string password, CancellationToken cancellationToken = default)
