@@ -192,61 +192,67 @@ else
                 These describe the relay's sending identity and drive the recommended records shown on the
                 <a href="/health">Health</a> page. They don't change how mail is processed.
             </p>
-            <div class="settings-subhead settings-subhead-first">Basic</div>
-            <div class="form-group">
-                <BbLabel>Public hostname</BbLabel>
-                <BbInput @bind-Value="dnsPublicHostname" Placeholder="relay.example.com" />
-            </div>
-            <div class="form-group" style="margin-top:0.75rem;">
-                <BbLabel>Sending IP addresses (delimited)</BbLabel>
-                <BbInput @bind-Value="dnsSendingIps" Placeholder="203.0.113.10; 2001:db8::1" />
-                <div style="margin-top:0.35rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;font-size:0.8rem;">
-                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="DetectIpAsync" Disabled="@detectingIp">
-                        <LucideIcon Name="globe" /> @(detectingIp ? "Detecting…" : "Detect public IP")
-                    </BbButton>
-                    @foreach (var ip in detectedIps)
-                    {
-                        var alreadyAdded = SendingIpsContains(ip);
-                        <span class="mono text-muted">@ip</span>
-                        <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => AddDetectedIp(ip)" Disabled="@alreadyAdded">
-                            @(alreadyAdded ? "Added" : "Add")
-                        </BbButton>
-                    }
-                    @if (detectedNone)
-                    {
-                        <span class="text-muted">Could not detect a public IP (no internet, or the lookup was blocked).</span>
-                    }
+            <div class="settings-group">
+                <div class="settings-group-title">Basic</div>
+                <div class="form-group">
+                    <BbLabel>Public hostname</BbLabel>
+                    <BbInput @bind-Value="dnsPublicHostname" Placeholder="relay.example.com" />
                 </div>
-                <p class="text-muted" style="font-size:0.75rem;margin-top:0.25rem;">Detected by asking an external service (api.ipify.org) for this server's public address — a proposal; confirm it's the IP your outbound mail actually uses.</p>
+                <div class="form-group" style="margin-top:0.75rem;">
+                    <BbLabel>Sending IP addresses (delimited)</BbLabel>
+                    <BbInput @bind-Value="dnsSendingIps" Placeholder="203.0.113.10; 2001:db8::1" />
+                    <div style="margin-top:0.35rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;font-size:0.8rem;">
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="DetectIpAsync" Disabled="@detectingIp">
+                            <LucideIcon Name="globe" /> @(detectingIp ? "Detecting…" : "Detect public IP")
+                        </BbButton>
+                        @foreach (var ip in detectedIps)
+                        {
+                            var alreadyAdded = SendingIpsContains(ip);
+                            <span class="mono text-muted">@ip</span>
+                            <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => AddDetectedIp(ip)" Disabled="@alreadyAdded">
+                                @(alreadyAdded ? "Added" : "Add")
+                            </BbButton>
+                        }
+                        @if (detectedNone)
+                        {
+                            <span class="text-muted">Could not detect a public IP (no internet, or the lookup was blocked).</span>
+                        }
+                    </div>
+                    <p class="text-muted" style="font-size:0.75rem;margin-top:0.25rem;">Detected by asking an external service (api.ipify.org) for this server's public address — a proposal; confirm it's the IP your outbound mail actually uses.</p>
+                </div>
             </div>
-            <div class="settings-subhead">SPF</div>
-            <div class="form-group">
-                <BbLabel>SPF includes (delimited)</BbLabel>
-                <BbInput @bind-Value="dnsSpfIncludes" Placeholder="_spf.example.net" />
+            <div class="settings-group">
+                <div class="settings-group-title">SPF</div>
+                <div class="form-group">
+                    <BbLabel>SPF includes (delimited)</BbLabel>
+                    <BbInput @bind-Value="dnsSpfIncludes" Placeholder="_spf.example.net" />
+                </div>
+                <div class="form-group" style="margin-top:0.75rem;">
+                    <BbLabel>SPF "all" qualifier</BbLabel>
+                    <select class="account-input" @bind="dnsSpfAll">
+                        <option value="~all">~all (softfail)</option>
+                        <option value="-all">-all (hardfail)</option>
+                    </select>
+                </div>
             </div>
-            <div class="form-group" style="margin-top:0.75rem;">
-                <BbLabel>SPF "all" qualifier</BbLabel>
-                <select class="account-input" @bind="dnsSpfAll">
-                    <option value="~all">~all (softfail)</option>
-                    <option value="-all">-all (hardfail)</option>
-                </select>
-            </div>
-            <div class="settings-subhead">DMARC</div>
-            <div class="form-group">
-                <BbLabel>DMARC report address (rua)</BbLabel>
-                <BbInput @bind-Value="dnsDmarcEmail" Placeholder="dmarc@example.com" />
-            </div>
-            <div class="form-group" style="margin-top:0.75rem;">
-                <BbLabel>DMARC policy</BbLabel>
-                <select class="account-input" @bind="dnsDmarcPolicy">
-                    <option value="none">none</option>
-                    <option value="quarantine">quarantine</option>
-                    <option value="reject">reject</option>
-                </select>
-            </div>
-            <div class="form-group" style="margin-top:0.75rem;">
-                <BbLabel>DMARC percentage (1-100)</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="dnsDmarcPct" />
+            <div class="settings-group">
+                <div class="settings-group-title">DMARC</div>
+                <div class="form-group">
+                    <BbLabel>DMARC report address (rua)</BbLabel>
+                    <BbInput @bind-Value="dnsDmarcEmail" Placeholder="dmarc@example.com" />
+                </div>
+                <div class="form-group" style="margin-top:0.75rem;">
+                    <BbLabel>DMARC policy</BbLabel>
+                    <select class="account-input" @bind="dnsDmarcPolicy">
+                        <option value="none">none</option>
+                        <option value="quarantine">quarantine</option>
+                        <option value="reject">reject</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-top:0.75rem;">
+                    <BbLabel>DMARC percentage (1-100)</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="dnsDmarcPct" />
+                </div>
             </div>
             <BbButton Variant="ButtonVariant.Default" @onclick="SaveDnsAsync" Class="mt-1">
                 <LucideIcon Name="save" /> Save
