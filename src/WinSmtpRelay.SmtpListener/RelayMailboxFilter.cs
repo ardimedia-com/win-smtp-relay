@@ -177,16 +177,24 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         {
             var senderAddress = from.AsAddress();
 
+            // Resolve the user within the authenticated session's tenant — usernames are unique only
+            // per tenant, so a username-only lookup could load another tenant's user (wrong SendAs /
+            // rate limits). The tenant was bound at AUTH (RelayUserAuthenticator) into "TenantId".
+            var authTenantId = context.Properties.TryGetValue("TenantId", out var atid) && atid is int t
+                ? t
+                : Core.Models.TenantDefaults.DefaultTenantId;
+            var user = await GetUserAsync(authenticatedUser, authTenantId, cancellationToken);
+
             // Check SendAs
-            if (!await IsAllowedSenderAsync(authenticatedUser, senderAddress, cancellationToken))
+            if (!IsAllowedSender(user, senderAddress))
             {
                 _logger.LogWarning("User {User} not allowed to send as {Sender}", authenticatedUser, senderAddress);
                 return false;
             }
 
-            // Check rate limit
-            var user = await GetUserAsync(authenticatedUser, cancellationToken);
-            if (user is not null && !_rateLimiter.IsAllowed(authenticatedUser, user.RateLimitPerMinute, user.RateLimitPerDay))
+            // Check rate limit — keyed by the globally-unique user id so two tenants sharing a
+            // username don't share a bucket.
+            if (user is not null && !_rateLimiter.IsAllowed($"user:{user.Id}", user.RateLimitPerMinute, user.RateLimitPerDay))
             {
                 _logger.LogWarning("Rate limit exceeded for user {User}", authenticatedUser);
                 return false;
@@ -273,9 +281,8 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             : null;
     }
 
-    private async Task<bool> IsAllowedSenderAsync(string username, string senderAddress, CancellationToken cancellationToken)
+    private static bool IsAllowedSender(Core.Models.RelayUser? user, string senderAddress)
     {
-        var user = await GetUserAsync(username, cancellationToken);
         if (user?.AllowedSenderAddresses is null or "")
             return true; // no restriction
 
@@ -283,11 +290,11 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         return allowed.Any(a => string.Equals(a, senderAddress, StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task<Core.Models.RelayUser?> GetUserAsync(string username, CancellationToken cancellationToken)
+    private async Task<Core.Models.RelayUser?> GetUserAsync(string username, int tenantId, CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
-        return await userService.GetByUsernameAsync(username, cancellationToken);
+        return await userService.GetByUsernameAsync(username, tenantId, cancellationToken);
     }
 
     private static string GetDomainFromAddress(string emailAddress)

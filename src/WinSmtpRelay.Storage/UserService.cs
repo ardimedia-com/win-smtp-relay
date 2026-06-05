@@ -29,6 +29,15 @@ public class UserService(RelayDbContext db) : IUserService
             .FirstOrDefaultAsync(u => u.Username == username, cancellationToken);
     }
 
+    public async Task<RelayUser?> GetByUsernameAsync(string username, int tenantId, CancellationToken cancellationToken = default)
+    {
+        // Explicitly tenant-qualified (the SMTP path resolves this in a raw scope where the tenant
+        // query filter is off), so two tenants sharing a username never cross over.
+        return await db.RelayUsers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Username == username && u.TenantId == tenantId, cancellationToken);
+    }
+
     public async Task CreateUserAsync(string username, string password, CancellationToken cancellationToken = default)
     {
         var hash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
