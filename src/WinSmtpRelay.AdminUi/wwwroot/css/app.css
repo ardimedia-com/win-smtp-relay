@@ -461,6 +461,13 @@ h1:focus-visible {
 .dns-record-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.35rem; }
 .dns-record-label { flex: 0 0 5rem; font-size: 0.75rem; color: var(--muted-foreground); }
 .dns-record-value { flex: 1; word-break: break-all; font-size: 0.8rem; }
+/* The merged, ready-to-publish SPF value — highlighted as the value to copy. */
+.dns-record-suggested {
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.3rem 0.45rem;
+}
 
 /* Setup page */
 .setup-summary {

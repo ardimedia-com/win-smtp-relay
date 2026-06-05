@@ -68,6 +68,16 @@ else
                             <span class="dns-record-label">Found</span>
                             <code class="mono dns-record-value">@(string.IsNullOrEmpty(rec.Live) ? "— not found —" : rec.Live)</code>
                         </div>
+                        @if (!string.IsNullOrEmpty(rec.Suggested))
+                        {
+                            <div class="dns-record-row">
+                                <span class="dns-record-label">To publish</span>
+                                <code class="mono dns-record-value dns-record-suggested">@rec.Suggested</code>
+                                <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => CopyAsync(rec.Suggested!)" title="Copy">
+                                    <LucideIcon Name="copy" /> Copy
+                                </BbButton>
+                            </div>
+                        }
                     </div>
                 }
             </BbCardContent>

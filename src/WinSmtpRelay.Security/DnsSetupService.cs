@@ -122,9 +122,16 @@ public class DnsSetupService(
             return new DnsRecordResult("SPF", domain, expected, null, DnsRecordStatus.Missing, "No SPF record is published.");
 
         var covers = SpfCovers(live, expected);
-        return new DnsRecordResult("SPF", domain, expected, live,
-            covers ? DnsRecordStatus.Ok : DnsRecordStatus.Mismatch,
-            covers ? "The published SPF record authorises this relay." : "The published SPF record does not authorise this relay's senders.");
+        if (covers)
+            return new DnsRecordResult("SPF", domain, expected, live, DnsRecordStatus.Ok,
+                "The published SPF record authorises this relay.");
+
+        // A domain may have only ONE SPF record, so the operator must not replace the published one
+        // (that would drop their other senders). Offer a merged record: their record plus the relay's
+        // missing mechanisms, inserted before the trailing "all" — copy this as the single new value.
+        return new DnsRecordResult("SPF", domain, expected, live, DnsRecordStatus.Mismatch,
+            "The published SPF record does not authorise this relay's senders. SPF allows only one record per domain — publish the merged \"To publish\" value below (your record plus the relay's missing parts); do not replace your existing record.",
+            BuildMergedSpf(live, expected));
     }
 
     private async Task<DnsRecordResult> CheckDmarcAsync(string domain, CancellationToken ct)
@@ -437,12 +444,43 @@ public class DnsSetupService(
     private static bool SpfCovers(string live, string expected)
     {
         var liveTokens = Tokenize(live);
-        return Tokenize(expected)
-            .Where(t => !t.Equals("v=spf1", StringComparison.OrdinalIgnoreCase) && !t.EndsWith("all", StringComparison.OrdinalIgnoreCase))
-            .All(liveTokens.Contains);
+        return RelayMechanisms(expected).All(liveTokens.Contains);
 
         static HashSet<string> Tokenize(string record) =>
             new(record.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
+    }
+
+    // The relay's mechanisms from the recommended record (everything but "v=spf1" and the "all" qualifier).
+    private static IEnumerable<string> RelayMechanisms(string expected) =>
+        expected.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(t => !t.Equals("v=spf1", StringComparison.OrdinalIgnoreCase) && !IsAllQualifier(t));
+
+    private static bool IsAllQualifier(string token) =>
+        token.Equals("all", StringComparison.OrdinalIgnoreCase)
+        || (token.Length == 4 && "+-~?".IndexOf(token[0]) >= 0 && token[1..].Equals("all", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Merges the relay's missing mechanisms (from <paramref name="expected"/>) into the already-published
+    /// SPF record (<paramref name="live"/>), keeping the published record's own senders and "all" qualifier
+    /// (policy). The missing mechanisms are inserted just before the trailing "all", since SPF evaluates
+    /// left-to-right and "all" must remain last. Returns the published record unchanged when nothing is missing.
+    /// </summary>
+    public static string BuildMergedSpf(string live, string expected)
+    {
+        var tokens = live.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var present = new HashSet<string>(tokens, StringComparer.OrdinalIgnoreCase);
+
+        var missing = RelayMechanisms(expected).Where(m => !present.Contains(m)).ToList();
+        if (missing.Count == 0)
+            return live;
+
+        var allIndex = tokens.FindLastIndex(IsAllQualifier);
+        if (allIndex >= 0)
+            tokens.InsertRange(allIndex, missing);
+        else
+            tokens.AddRange(missing);
+
+        return string.Join(' ', tokens);
     }
 
     // Compares the whitespace-stripped base64 after p= (providers split long TXT values across quoted chunks).

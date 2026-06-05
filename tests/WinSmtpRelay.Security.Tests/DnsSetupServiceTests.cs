@@ -86,4 +86,67 @@ public class DnsSetupServiceTests
 
         Assert.AreEqual("v=DMARC1; p=none; pct=100", service.BuildRecommendedDmarc("example.com"));
     }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void BuildMergedSpf_InsertsMissingMechanismsBeforeAll_KeepingPublishedSendersAndQualifier()
+    {
+        // The published record already authorises Outlook and Mandrill; merging must keep them (a domain
+        // may have only one SPF record) and add only the relay's missing parts before the "all".
+        var live = "v=spf1 a mx ip4:85.31.156.82 include:spf.protection.outlook.com include:spf.mandrillapp.com ~all";
+        var expected = "v=spf1 ip4:178.197.238.240 a:smtp2.ardimedia.com ~all";
+
+        var merged = DnsSetupService.BuildMergedSpf(live, expected);
+
+        Assert.AreEqual(
+            "v=spf1 a mx ip4:85.31.156.82 include:spf.protection.outlook.com include:spf.mandrillapp.com ip4:178.197.238.240 a:smtp2.ardimedia.com ~all",
+            merged);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void BuildMergedSpf_DoesNotDuplicateMechanismsAlreadyPublished()
+    {
+        var live = "v=spf1 ip4:203.0.113.10 include:_spf.example.net ~all";
+        var expected = "v=spf1 ip4:203.0.113.10 a:relay.example.com include:_spf.example.net ~all";
+
+        var merged = DnsSetupService.BuildMergedSpf(live, expected);
+
+        // Only the missing a: mechanism is added; the shared ip4/include are not repeated.
+        Assert.AreEqual("v=spf1 ip4:203.0.113.10 include:_spf.example.net a:relay.example.com ~all", merged);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void BuildMergedSpf_KeepsPublishedAllQualifier_NotTheRecommendedOne()
+    {
+        var live = "v=spf1 ip4:85.31.156.82 -all";   // published uses hardfail
+        var expected = "v=spf1 ip4:178.197.238.240 ~all"; // recommended uses softfail
+
+        var merged = DnsSetupService.BuildMergedSpf(live, expected);
+
+        Assert.AreEqual("v=spf1 ip4:85.31.156.82 ip4:178.197.238.240 -all", merged);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void BuildMergedSpf_AppendsWhenPublishedRecordHasNoAll()
+    {
+        var live = "v=spf1 ip4:85.31.156.82";   // no terminal "all"
+        var expected = "v=spf1 ip4:178.197.238.240 ~all";
+
+        var merged = DnsSetupService.BuildMergedSpf(live, expected);
+
+        Assert.AreEqual("v=spf1 ip4:85.31.156.82 ip4:178.197.238.240", merged);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void BuildMergedSpf_ReturnsPublishedUnchanged_WhenNothingMissing()
+    {
+        var live = "v=spf1 a mx ip4:178.197.238.240 a:smtp2.ardimedia.com ~all";
+        var expected = "v=spf1 ip4:178.197.238.240 a:smtp2.ardimedia.com ~all";
+
+        Assert.AreEqual(live, DnsSetupService.BuildMergedSpf(live, expected));
+    }
 }
