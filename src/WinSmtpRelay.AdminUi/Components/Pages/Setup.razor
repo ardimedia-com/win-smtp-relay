@@ -178,6 +178,19 @@ else
     <div class="setup-group-label">Basic <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— your organization and the sending identity it relays with</span></div>
     <BbCard>
         <BbCardContent>
+            @* Basic can otherwise read all-green while the org still can't send (no submission path),
+               since Submission access lives under Recommended. Surface that gap right here. *@
+            @if (readiness.TenantActive && !readiness.CanSend)
+            {
+                <div class="setup-cantsend">
+                    <LucideIcon Name="alert-triangle" Size="16" />
+                    <span>
+                        This organization can't send mail yet — set up <strong>Submission access</strong>
+                        (under <em>Recommended</em>): add an <a href="/smtpusers">SMTP user</a>, or allow a
+                        client IP under <a href="/ip-rules">IP access rules</a>.
+                    </span>
+                </div>
+            }
             @foreach (var item in readiness.Required) { @row(item) }
         </BbCardContent>
     </BbCard>
