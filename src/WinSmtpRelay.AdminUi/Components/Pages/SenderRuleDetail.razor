@@ -1,0 +1,129 @@
+@page "/filters/senders/new"
+@page "/filters/senders/{Id:int}"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject ITenantScopeFactory ScopeFactory
+@inject IRuntimeConfigCache ConfigCache
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/filters?tab=senders">Message Filters</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>@(IsNew ? "New sender rule" : "Edit")</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>@(IsNew ? "New sender rule" : "Edit sender rule")</h1>
+    <p>Rewrite the envelope sender (MAIL FROM) when it matches a pattern</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[260px] w-full" />
+}
+else if (notFound)
+{
+    <p class="text-danger">Sender rule not found.</p>
+    <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel"><LucideIcon Name="arrow-left" /> Back</BbButton>
+}
+else
+{
+    <div style="max-width:520px;">
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel>From Pattern (regex)</BbLabel>
+                <BbInput @bind-Value="fromPattern" Placeholder="user@example.com" />
+            </div>
+            <div class="form-group">
+                <BbLabel>Rewrite To</BbLabel>
+                <BbInput @bind-Value="toAddress" Placeholder="noreply@newdomain.com" />
+            </div>
+            <div style="display:flex;gap:1rem;">
+                <div class="form-group">
+                    <BbLabel>Sort Order</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Enabled</BbLabel>
+                    <BbNativeSelect @bind-Value="enabled">
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </BbNativeSelect>
+                </div>
+            </div>
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync"
+                        Disabled="@(string.IsNullOrWhiteSpace(fromPattern) || string.IsNullOrWhiteSpace(toAddress))">
+                    <LucideIcon Name="save" /> Save
+                </BbButton>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
+            </div>
+        </BbCardFooter>
+    </BbCard>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    private bool IsNew => Id is null;
+
+    private bool isLoading = true;
+    private bool notFound;
+
+    private string fromPattern = "";
+    private string toAddress = "";
+    private string sortOrder = "0";
+    private string enabled = "true";
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
+        var rules = await svc.GetSenderRulesAsync();
+
+        if (IsNew)
+        {
+            sortOrder = (rules.Count > 0 ? rules.Max(r => r.SortOrder) + 1 : 1).ToString();
+            isLoading = false;
+            return;
+        }
+
+        var r = rules.FirstOrDefault(x => x.Id == Id!.Value);
+        if (r is null) { notFound = true; isLoading = false; return; }
+
+        fromPattern = r.FromPattern;
+        toAddress = r.ToAddress;
+        sortOrder = r.SortOrder.ToString();
+        enabled = r.IsEnabled.ToString().ToLowerInvariant();
+        isLoading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
+
+        var entry = new SenderRewriteEntry
+        {
+            Id = Id ?? 0,
+            FromPattern = fromPattern.Trim(),
+            ToAddress = toAddress.Trim(),
+            SortOrder = int.TryParse(sortOrder, out var s) ? s : 0,
+            IsEnabled = enabled == "true"
+        };
+
+        if (IsNew) await svc.CreateSenderRuleAsync(entry);
+        else await svc.UpdateSenderRuleAsync(entry);
+        ConfigCache.Invalidate();
+        Nav.NavigateTo("/filters?tab=senders");
+    }
+
+    private void Cancel() => Nav.NavigateTo("/filters?tab=senders");
+}
