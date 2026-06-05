@@ -178,7 +178,7 @@ else
         <div style="font-size:0.875rem;line-height:1.6;">
             <p>IP access rules control which networks can connect to the SMTP relay. Rules are evaluated in sort order (lowest first).</p>
             <p>Use <strong>CIDR notation</strong> to specify networks, e.g. <code>10.0.0.0/8</code> for all 10.x.x.x addresses, or <code>192.168.1.5/32</code> for a single host.</p>
-            <p>If no rules are defined, all connections are accepted (relying on authentication only).</p>
+            <p>If no rules are defined here, the relay falls back to the static <code>AllowedNetworks</code> list from <code>appsettings.json</code> (by default the private ranges 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 and 127.0.0.1/32). Connections from outside those networks are denied; only when both this rule list and <code>AllowedNetworks</code> are empty are all connections accepted (relying on authentication only).</p>
         </div>
         <BbDialogFooter>
             <BbDialogClose>

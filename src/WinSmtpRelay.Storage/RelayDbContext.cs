@@ -299,8 +299,8 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
         });
 
         // Tenant partitioning: every ITenantOwned entity defaults to the Default tenant and
-        // gets a restricted FK to Tenant (which also indexes TenantId). Tenant-scoped query
-        // filters are applied in a later phase.
+        // gets a restricted FK to Tenant (which also indexes TenantId), plus a tenant-scoped
+        // query filter applied below (ApplyTenantQueryFilter).
         var tenantOwned = modelBuilder.Model.GetEntityTypes()
             .Where(t => typeof(ITenantOwned).IsAssignableFrom(t.ClrType))
             .ToList();

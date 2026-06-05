@@ -115,7 +115,7 @@ public class DnsSetupService(
 
         if (!HasSpfIdentity)
             return new DnsRecordResult("SPF", domain, "", live, DnsRecordStatus.NotConfigured,
-                "Configure the relay's sending identity (Dns:SendingIpAddresses / Dns:PublicHostname) to get a recommended SPF record.");
+                "Configure the relay's sending identity (sending IPs / public hostname) in Settings to get a recommended SPF record.");
 
         var expected = BuildRecommendedSpf();
         if (live is null)

@@ -1,8 +1,8 @@
-# WinSmtpRelay
+# WIN-SMTP-RELAY
 
 > **Work in progress** — This project is under active development and not yet ready for production use.
 
-> **Hosted Service** — We are considering offering WinSmtpRelay as a hosted/managed service. For test environments, we would provide the service free of charge. If you are interested, please [open an issue](https://github.com/ardimedia/winsmtprelay/issues) and let us know about your use case.
+> **Hosted Service** — We are considering offering WIN-SMTP-RELAY as a hosted/managed service. For test environments, we would provide the service free of charge. If you are interested, please [open an issue](https://github.com/ardimedia-com/win-smtp-relay/issues) and let us know about your use case.
 
 
 Open-source SMTP relay server for Windows. Built with .NET 10, designed as a modern replacement for IIS SMTP.
@@ -16,12 +16,15 @@ Open-source SMTP relay server for Windows. Built with .NET 10, designed as a mod
 - Store-and-forward message queue (SQLite)
 - STARTTLS (port 587) and implicit TLS (port 465)
 - SMTP AUTH with per-user SendAs control and rate limits
-- DKIM signing, SPF/DMARC verification
-- DNS setup page (SPF/DKIM/DMARC readiness check per sender domain)
-- IP-based relay restrictions
+- DKIM signing (per tenant), SPF/DMARC verification
+- Setup page (`/setup`): live per-organization readiness checklist (can-send + deliverability) with the DNS records to publish and a test-message sender
+- Health page (`/health`): live deliverability checks per sender domain and sending IP — SPF, DKIM, DMARC, MX, reverse DNS (PTR/FCrDNS), public-hostname A/AAAA, SPF coverage and 10-lookup-limit warnings, and DNSBL (Spamhaus ZEN / SpamCop), with copy-ready records
+- Domain ownership verification (DNS TXT) for accepted sender and recipient domains, with optional enforcement on the SMTP path
+- IP-based relay restrictions, with optional strict IP-to-tenant binding for unauthenticated submission (blocks cross-tenant sender-domain spoofing)
 - Pickup folder for .eml files
 - Blazor admin UI (HTTPS, loopback by default), sign-in required
 - Authenticated admin access: cookie login + API keys, role-based authorization (host / tenant admin / viewer)
+- Multi-tenant: isolated per-tenant configuration and data, a host-admin tenant switcher, per-tenant egress (source) IP, and optional self-service tenant signup
 - REST API for management and monitoring
 - Windows Service with Event Log integration
 - MSI installer (WiX v5)
@@ -89,7 +92,7 @@ Infrastructure settings the application needs before it can start:
 - Kestrel ports and TLS certificate paths
 - SQLite database connection string
 - Log levels
-- Admin UI enabled/disabled, port and bind address (default: `0.0.0.0:8025`)
+- Admin UI enabled/disabled, port, bind address, and HTTPS (default: HTTPS on `127.0.0.1:8025`, loopback-only)
 - Windows Service settings
 
 ### SQLite database (runtime-editable via Admin UI)
@@ -98,12 +101,15 @@ Everything the admin edits during normal operation:
 
 - Receive connectors (port/IP/TLS/auth)
 - Send connectors and domain routing
-- Accepted domains
+- Accepted sender and recipient domains (with ownership verification)
 - IP allow/deny lists
 - SMTP users and credentials
 - DKIM keys and per-domain config
 - Rate limits and auto-ban rules
 - Message filter rules
+- Tenants, web-admin accounts, and API keys
+- Inbound email authentication (SPF/DMARC + enforcement mode) and verification/tenant-binding policy
+- DNS recommendation, backup-MX, statistics, and self-service signup settings
 
 The Admin UI reads `appsettings.json` for display but does not write to it.
 

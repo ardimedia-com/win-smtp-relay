@@ -391,7 +391,7 @@ else
         inSpf ? DnsRecordStatus.Ok : DnsRecordStatus.Mismatch,
         inSpf
             ? "This egress IP is in your sending IPs, so it is covered by SPF."
-            : "This egress IP is NOT in your sending IPs — add it under Settings → DNS recommendations, or mail from it fails SPF. (This checks your configuration, not a DNS record.)");
+            : "This egress IP is NOT in your sending IPs — add it under Settings → Sending identity, or mail from it fails SPF. (This checks your configuration, not a DNS record.)");
 
     private static List<string> SplitList(string? value) =>
         string.IsNullOrWhiteSpace(value)
