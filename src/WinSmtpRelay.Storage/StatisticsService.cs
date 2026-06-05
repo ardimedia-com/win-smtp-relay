@@ -164,8 +164,10 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
         {
             var tenantId = group.Key;
             var sent = group.Count(l => l.StatusCode == "250");
-            var failed = group.Count(l => l.StatusCode.StartsWith('5'));
-            var bounced = group.Count(l => l.StatusCode.StartsWith('4'));
+            // SMTP convention: 5xx is a permanent bounce, 4xx is a transient/deferred failure. (Was
+            // inverted, so TotalBounced was always 0 since the pipeline emits 5xx for permanent failures.)
+            var failed = group.Count(l => l.StatusCode.StartsWith('4'));
+            var bounced = group.Count(l => l.StatusCode.StartsWith('5'));
 
             var deliveryTimes = group
                 .Select(l => createdById.TryGetValue(l.QueuedMessageId, out var created)

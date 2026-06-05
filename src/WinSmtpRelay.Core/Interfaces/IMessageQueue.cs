@@ -13,4 +13,11 @@ public interface IMessageQueue
     Task DeleteAsync(long messageId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<QueuedMessage>> GetRecentAsync(int maxCount, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<QueuedMessage>> GetNonDeliveredAsync(int maxCount, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resets messages stuck in <see cref="MessageStatus.Delivering"/> back to Queued — called once at
+    /// delivery-worker startup to recover rows stranded by a crash/kill mid-delivery (the poll loop only
+    /// selects Queued). Returns the number of rows requeued.
+    /// </summary>
+    Task<int> RequeueStaleDeliveringAsync(CancellationToken cancellationToken = default);
 }

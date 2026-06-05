@@ -1,3 +1,4 @@
+using MailKit.Net.Smtp;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -23,6 +24,21 @@ public class DeliveryWorker(
         var config = options.Value;
         logger.LogInformation("Delivery worker starting with {MaxConcurrent} concurrent deliveries",
             config.MaxConcurrentDeliveries);
+
+        // Recover any messages stranded in Delivering by a previous crash/kill (the poll loop only
+        // selects Queued, so otherwise they would never be retried).
+        try
+        {
+            using var startupScope = scopeFactory.CreateScope();
+            var startupQueue = startupScope.ServiceProvider.GetRequiredService<IMessageQueue>();
+            var requeued = await startupQueue.RequeueStaleDeliveringAsync(stoppingToken);
+            if (requeued > 0)
+                logger.LogWarning("Re-queued {Count} message(s) left in Delivering by a previous shutdown", requeued);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not requeue stale Delivering messages at startup");
+        }
 
         using var semaphore = new SemaphoreSlim(config.MaxConcurrentDeliveries);
 
@@ -152,6 +168,16 @@ public class DeliveryWorker(
         }
         catch (Exception ex)
         {
+            // Service shutdown cancelled an in-flight delivery — not a real failure. Re-queue it (with a
+            // non-cancelled token so the write isn't skipped) without logging a fake attempt or bumping
+            // RetryCount, so it is retried cleanly on next start rather than stranded in Delivering.
+            if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
+            {
+                try { await queue.UpdateStatusAsync(message.Id, MessageStatus.Queued, cancellationToken: CancellationToken.None); }
+                catch (Exception requeueEx) { logger.LogWarning(requeueEx, "Failed to re-queue message {QueueId} during shutdown", message.Id); }
+                return;
+            }
+
             logger.LogWarning(ex, "Delivery failed for message {MessageId} (id={QueueId}), attempt {Attempt}",
                 message.MessageId, message.Id, message.RetryCount + 1);
 
@@ -259,12 +285,15 @@ public class DeliveryWorker(
 
     private static bool IsPermanentFailure(Exception ex)
     {
-        var message = ex.Message;
-        return message.StartsWith("5") ||
-               message.Contains("550") ||
-               message.Contains("551") ||
-               message.Contains("552") ||
-               message.Contains("553") ||
-               message.Contains("554");
+        // Classify on structured status, not free-text substring matching. A DeliveryException carries
+        // per-recipient results — it is permanent only if EVERY failing recipient got a 5xx (a single
+        // 4xx/transient among them must retry). Raw exceptions (smart-host/route path) are permanent
+        // only for an actual 5xx SMTP command rejection; connection/timeout/protocol failures retry.
+        if (ex is DeliveryException dex)
+        {
+            var failures = dex.Results.Where(r => !r.Success).ToList();
+            return failures.Count > 0 && failures.All(r => r.StatusCode.StartsWith('5'));
+        }
+        return ex is SmtpCommandException sce && (int)sce.StatusCode >= 500;
     }
 }

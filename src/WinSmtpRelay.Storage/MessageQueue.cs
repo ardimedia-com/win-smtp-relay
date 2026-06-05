@@ -81,4 +81,16 @@ public class MessageQueue(RelayDbContext db) : IMessageQueue
             .Take(maxCount)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<int> RequeueStaleDeliveringAsync(CancellationToken cancellationToken = default)
+    {
+        // Single-instance Windows service: at startup nothing is genuinely in flight, so any Delivering
+        // row is a leftover from a previous crash/kill. Reset it to Queued (clear any retry delay).
+        return await db.QueuedMessages
+            .Where(m => m.Status == MessageStatus.Delivering)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(m => m.Status, MessageStatus.Queued)
+                .SetProperty(m => m.NextRetryUtc, (DateTimeOffset?)null),
+                cancellationToken);
+    }
 }

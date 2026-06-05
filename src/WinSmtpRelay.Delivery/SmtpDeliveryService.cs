@@ -137,12 +137,15 @@ public class SmtpDeliveryService : IDeliveryService
             }
         }
 
-        // All MX hosts exhausted — return failure results for all recipients
+        // All MX hosts exhausted. Use the server's real status code if one actually rejected us; a
+        // connection/timeout/DNS failure is TRANSIENT (421) — not a permanent 550 — so a momentary
+        // outage of the destination is retried, not silently bounced.
         var errorMessage = lastException?.Message ?? "All MX hosts exhausted";
+        var statusCode = lastException is SmtpCommandException sce ? ((int)sce.StatusCode).ToString() : "421";
         return recipients.Select(r => new DeliveryResult
         {
             Recipient = r,
-            StatusCode = "550",
+            StatusCode = statusCode,
             StatusMessage = $"All MX hosts exhausted for domain {domain}: {errorMessage}",
             RemoteServer = mxHosts.FirstOrDefault()
         }).ToList();
