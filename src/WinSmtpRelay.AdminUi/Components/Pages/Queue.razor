@@ -79,25 +79,18 @@ else
                     <BbTableCell>@msg.RetryCount</BbTableCell>
                     <BbTableCell><LocalTime Utc="@msg.CreatedUtc" /></BbTableCell>
                     <BbTableCell>
-                        <BbDropdownMenu>
-                            <BbDropdownMenuTrigger>
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost">
-                                    <LucideIcon Name="ellipsis" />
+                        <div class="list-row-actions">
+                            @if (msg.Status is MessageStatus.Failed or MessageStatus.Bounced)
+                            {
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Retry" @onclick="() => RetryAsync(msg.Id)">
+                                    <LucideIcon Name="rotate-ccw" />
                                 </BbButton>
-                            </BbDropdownMenuTrigger>
-                            <BbDropdownMenuContent>
-                                @if (msg.Status is MessageStatus.Failed or MessageStatus.Bounced)
-                                {
-                                    <BbDropdownMenuItem @onclick="() => RetryAsync(msg.Id)">
-                                        <LucideIcon Name="rotate-ccw" /> Retry
-                                    </BbDropdownMenuItem>
-                                    <BbDropdownMenuSeparator />
-                                }
-                                <BbDropdownMenuItem @onclick="() => { deleteTargetId = msg.Id; showDeleteConfirm = true; }">
-                                    <LucideIcon Name="trash-2" /> Delete
-                                </BbDropdownMenuItem>
-                            </BbDropdownMenuContent>
-                        </BbDropdownMenu>
+                            }
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                    @onclick="() => { deleteTargetId = msg.Id; showDeleteConfirm = true; }">
+                                <LucideIcon Name="trash-2" />
+                            </BbButton>
+                        </div>
                     </BbTableCell>
                 </BbTableRow>
             }
