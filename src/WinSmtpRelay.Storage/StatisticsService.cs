@@ -26,7 +26,8 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
             buckets[i] = new TimeBucketResult(
                 second.ToString("HH:mm:ss"),
                 matching.Count(l => l.StatusCode == "250"),
-                matching.Count(l => l.StatusCode.StartsWith('5')));
+                matching.Count(l => l.StatusCode.StartsWith('5')),
+                second);
         }
 
         return buckets;
@@ -52,7 +53,8 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
             buckets[i] = new TimeBucketResult(
                 minute.ToString("HH:mm"),
                 matching.Count(l => l.StatusCode == "250"),
-                matching.Count(l => l.StatusCode.StartsWith('5')));
+                matching.Count(l => l.StatusCode.StartsWith('5')),
+                minute);
         }
 
         return buckets;
@@ -84,7 +86,8 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
             buckets[i] = new TimeBucketResult(
                 hour.ToString("HH:00"),
                 match?.Sent ?? 0,
-                match?.Failed ?? 0);
+                match?.Failed ?? 0,
+                hour);
         }
 
         return buckets;

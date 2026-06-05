@@ -5,6 +5,7 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Navigation
 @inject IQueueDepthRecorder QueueDepthRecorder
+@inject WinSmtpRelay.AdminUi.Services.BrowserTimeService BrowserTime
 @implements IAsyncDisposable
 
 <BbBreadcrumb>
@@ -252,6 +253,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // Re-render chart labels in local time once the browser time zone is detected.
+        BrowserTime.Changed += OnTimeZoneChanged;
+
         // Load stat cards + recent messages
         queueDepth = QueueDepthRecorder.CurrentDepth;
         using (var scope = ScopeFactory.CreateScope())
@@ -431,6 +435,13 @@ else
         await LoadChartDataAsync();
     }
 
+    private void OnTimeZoneChanged() => InvokeAsync(async () =>
+    {
+        if (_disposed) return;
+        await LoadChartDataAsync();
+        StateHasChanged();
+    });
+
     private async Task LoadChartDataAsync()
     {
         try
@@ -445,7 +456,7 @@ else
                 minuteChartData = buckets.Select(b =>
                 {
                     var depth = depthHistory.TryGetValue(b.Label, out var v) ? v : 0;
-                    return (object)new { label = b.Label, sent = b.Sent, failed = b.Failed, queue = depth };
+                    return (object)new { label = BrowserTime.Format(b.TimestampUtc, "HH:mm:ss"), sent = b.Sent, failed = b.Failed, queue = depth };
                 }).ToArray();
             }
             else if (activeTab == "month")
@@ -461,7 +472,7 @@ else
                     "day" => await stats.GetDailyStatisticsAsync(),
                     _ => await stats.GetHourlyStatisticsAsync()
                 };
-                chartData = buckets.Select(b => (object)new { label = b.Label, sent = b.Sent, failed = b.Failed }).ToArray();
+                chartData = buckets.Select(b => (object)new { label = BrowserTime.Format(b.TimestampUtc, "HH:mm"), sent = b.Sent, failed = b.Failed }).ToArray();
             }
         }
         catch
@@ -482,6 +493,7 @@ else
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
+        BrowserTime.Changed -= OnTimeZoneChanged;
         _chartDebounceTimer?.Dispose();
         if (minuteRefreshTimer is not null)
             await minuteRefreshTimer.DisposeAsync();
