@@ -48,6 +48,10 @@
 {
     <BbSkeleton Class="h-[200px] w-full" />
 }
+else if (loadError is not null)
+{
+    <p class="text-danger">@loadError</p>
+}
 else
 {
     @* Reusable card renderer for a titled group of DNS record checks *@
@@ -138,66 +142,90 @@ else
     private CheckGroup? hostnameGroup;
     private string adHocDomain = "";
     private bool isLoading = true;
+    private string? loadError;
     private bool showHelp;
 
-    protected override async Task OnInitializedAsync() => await RefreshAsync();
+    // Defer the (live, possibly slow) DNS checks until after the first paint, so the page shows
+    // a skeleton immediately instead of blocking on N sequential lookups.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await RefreshAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
 
     private async Task RefreshAsync()
     {
         isLoading = true;
-        using var scope = ScopeFactory.CreateScope();
-        var sp = scope.ServiceProvider;
-        var dns = sp.GetRequiredService<IDnsSetupService>();
-
-        // ----- Domains: sending identity (SPF/DKIM/DMARC per sender domain) -----
-        senderGroups = [.. (await dns.CheckAllSenderDomainsAsync())
-            .Select(s => new CheckGroup(s.Domain, "Sending identity — you send mail as this domain", [s.Spf, s.Dkim, s.Dmarc]))];
-
-        // ----- Domains: inbound / backup-MX (MX must point here) -----
-        var recipients = await sp.GetRequiredService<IAcceptedDomainService>().GetAllAsync();
-        var backup = await sp.GetRequiredService<IBackupMxSettingsService>().GetAsync();
-        var inboundDomains = recipients.Select(d => d.Domain)
-            .Concat(backup.DomainList)
-            .Select(d => d.Trim().ToLowerInvariant())
-            .Where(d => d.Length > 0)
-            .Distinct()
-            .ToList();
-        inboundGroups = [];
-        foreach (var d in inboundDomains)
-            inboundGroups.Add(new CheckGroup(d, "Inbound / backup-MX — this relay should receive mail for this domain", [await dns.CheckMxAsync(d)]));
-
-        // ----- IP addresses: public hostname + reverse DNS per sending/egress IP -----
-        var settings = await sp.GetRequiredService<IDnsSettingsService>().GetAsync();
-        var sendingIps = SplitList(settings.SendingIpAddresses);
-        hostnameGroup = new CheckGroup(
-            string.IsNullOrWhiteSpace(settings.PublicHostname) ? "(public hostname)" : settings.PublicHostname,
-            "Public hostname — used in SPF (a:) and as the EHLO name",
-            [await dns.CheckHostnameAsync()]);
-
-        ipGroups = [];
-        foreach (var ip in sendingIps)
-            ipGroups.Add(new CheckGroup(ip, "Sending IP", [await dns.CheckReverseDnsAsync(ip)]));
-
-        // Tenant egress IP: reverse DNS + must be covered by SPF (only meaningful if not already a sending IP).
-        var current = sp.GetRequiredService<ICurrentTenant>();
-        if (current.TenantId is { } tenantId)
+        loadError = null;
+        StateHasChanged();
+        try
         {
-            var tenant = await sp.GetRequiredService<ITenantService>().GetByIdAsync(tenantId);
-            var egress = tenant?.EgressIpAddress;
-            if (!string.IsNullOrWhiteSpace(egress) && !sendingIps.Contains(egress, StringComparer.OrdinalIgnoreCase))
+            using var scope = ScopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var dns = sp.GetRequiredService<IDnsSetupService>();
+            var current = sp.GetRequiredService<ICurrentTenant>();
+
+            // ----- Domains: sending identity (SPF/DKIM/DMARC per sender domain) -----
+            senderGroups = [.. (await dns.CheckAllSenderDomainsAsync())
+                .Select(s => new CheckGroup(s.Domain, "Sending identity — you send mail as this domain", [s.Spf, s.Dkim, s.Dmarc]))];
+
+            // ----- Domains: inbound (tenant-scoped) + backup-MX (host-level, only in host scope) -----
+            inboundGroups = [];
+            var recipients = await sp.GetRequiredService<IAcceptedDomainService>().GetAllAsync();
+            foreach (var d in recipients.Select(x => x.Domain.Trim().ToLowerInvariant()).Where(x => x.Length > 0).Distinct())
+                inboundGroups.Add(new CheckGroup(d, "Inbound — this relay accepts mail for this domain", [await dns.CheckMxAsync(d)]));
+            if (current.IsHostScope)
             {
-                ipGroups.Add(new CheckGroup(egress, "Tenant egress IP — outbound mail for this tenant leaves from here",
-                    [await dns.CheckReverseDnsAsync(egress), SpfCoverage(egress, inSpf: false)]));
+                var backup = await sp.GetRequiredService<IBackupMxSettingsService>().GetAsync();
+                foreach (var d in backup.DomainList.Select(x => x.Trim().ToLowerInvariant()).Where(x => x.Length > 0).Distinct())
+                    inboundGroups.Add(new CheckGroup(d, "Backup MX (host-level) — holds mail when the primary is unreachable", [await dns.CheckMxAsync(d)]));
+            }
+
+            // ----- IP addresses: public hostname + reverse DNS per sending/egress IP -----
+            var settings = await sp.GetRequiredService<IDnsSettingsService>().GetAsync();
+            var sendingIps = SplitList(settings.SendingIpAddresses);
+            hostnameGroup = new CheckGroup(
+                string.IsNullOrWhiteSpace(settings.PublicHostname) ? "(public hostname)" : settings.PublicHostname,
+                "Public hostname — used in SPF (a:) and as the EHLO name",
+                [await dns.CheckHostnameAsync()]);
+
+            ipGroups = [];
+            foreach (var ip in sendingIps)
+                ipGroups.Add(new CheckGroup(ip, "Sending IP", [await dns.CheckReverseDnsAsync(ip)]));
+
+            // Tenant egress IP: reverse DNS + SPF coverage (only when not already a configured sending IP).
+            if (current.TenantId is { } tenantId)
+            {
+                var tenant = await sp.GetRequiredService<ITenantService>().GetByIdAsync(tenantId);
+                var egress = tenant?.EgressIpAddress?.Trim();
+                if (!string.IsNullOrWhiteSpace(egress) && !sendingIps.Any(s => IpEquals(s, egress)))
+                    ipGroups.Add(new CheckGroup(egress, "Tenant egress IP — outbound mail for this tenant leaves from here",
+                        [await dns.CheckReverseDnsAsync(egress), SpfCoverage(egress, inSpf: false)]));
             }
         }
-
-        isLoading = false;
+        catch (Exception)
+        {
+            loadError = "Could not check DNS just now — try Re-check.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
     }
+
+    private static bool IpEquals(string? a, string? b) =>
+        System.Net.IPAddress.TryParse(a?.Trim(), out var ia)
+        && System.Net.IPAddress.TryParse(b?.Trim(), out var ib)
+        && ia.Equals(ib);
 
     private async Task CheckAdHocAsync()
     {
         var domain = adHocDomain.Trim().ToLowerInvariant();
         if (string.IsNullOrEmpty(domain)) return;
+        if (Uri.CheckHostName(domain) != UriHostNameType.Dns) { adHocDomain = ""; return; }
         using var scope = ScopeFactory.CreateScope();
         var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
         var setup = await dns.CheckDomainAsync(domain);
@@ -207,11 +235,11 @@ else
     }
 
     private static DnsRecordResult SpfCoverage(string ip, bool inSpf) => new(
-        "SPF coverage", ip, "listed in your Sending IPs (SPF)", inSpf ? "listed" : "not listed",
+        "SPF coverage (config)", ip, "must be a configured sending IP", inSpf ? "configured" : "missing",
         inSpf ? DnsRecordStatus.Ok : DnsRecordStatus.Mismatch,
         inSpf
-            ? "This IP is covered by your recommended SPF record."
-            : "This egress IP is NOT in your Sending IPs, so mail from it fails SPF. Add it under Settings → DNS recommendations.");
+            ? "This egress IP is in your sending IPs, so it is covered by SPF."
+            : "This egress IP is NOT in your sending IPs — add it under Settings → DNS recommendations, or mail from it fails SPF. (This checks your configuration, not a DNS record.)");
 
     private static List<string> SplitList(string? value) =>
         string.IsNullOrWhiteSpace(value)
