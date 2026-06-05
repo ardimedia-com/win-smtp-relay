@@ -19,4 +19,10 @@
     <ProjectReference Include="..\WinSmtpRelay.Core\WinSmtpRelay.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Public Suffix List snapshot from https://publicsuffix.org/list/ — embedded so registrable-domain
+         derivation works offline. Update by re-downloading public_suffix_list.dat. -->
+    <EmbeddedResource Include="Resources\public_suffix_list.dat" />
+  </ItemGroup>
+
 </Project>

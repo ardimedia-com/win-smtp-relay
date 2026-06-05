@@ -2,6 +2,7 @@
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
+@inject IPublicSuffixService PublicSuffix
 @inject IJSRuntime JS
 
 <BbBreadcrumb>
@@ -329,7 +330,7 @@ else
                 if (checkedDomains.Contains(d) || cands.Any(c => string.Equals(c.Domain, d, StringComparison.OrdinalIgnoreCase))) return;
                 cands.Add(new DomainCandidate(d, source));
             }
-            if (RegistrableDomain(settings.PublicHostname) is { } host)
+            if (PublicSuffix.GetRegistrableDomain(settings.PublicHostname) is { } host)
                 AddCandidate(host, $"derived from {settings.PublicHostname}");
             foreach (var dk in dkimList)
                 AddCandidate(dk.Domain, "DKIM domain");
@@ -376,16 +377,6 @@ else
         adHocGroups.RemoveAll(g => g.Title == domain);
         adHocGroups.Insert(0, new CheckGroup(domain, subtitle, [setup.Spf, setup.Dkim, setup.Dmarc]));
         activeTab = "dns";
-    }
-
-    // Best-effort registrable ("organizational") domain: the last two labels of a hostname
-    // (smtp2.ardimedia.com -> ardimedia.com). Not Public-Suffix-List aware, so a multi-level TLD
-    // (e.g. example.co.uk) yields a guess the operator can ignore — it is only a suggestion.
-    private static string? RegistrableDomain(string? host)
-    {
-        if (string.IsNullOrWhiteSpace(host)) return null;
-        var labels = host.Trim().TrimEnd('.').ToLowerInvariant().Split('.', StringSplitOptions.RemoveEmptyEntries);
-        return labels.Length < 2 ? null : string.Join('.', labels[^2..]);
     }
 
     private static string? EmailDomain(string? email)

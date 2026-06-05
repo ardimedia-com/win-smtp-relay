@@ -86,6 +86,8 @@ if (adminUiConfig.Enabled)
 
     // DNS setup / domain-authentication checks (uses the singleton ILookupClient from the delivery engine).
     builder.Services.AddScoped<WinSmtpRelay.Core.Interfaces.IDnsSetupService, WinSmtpRelay.Security.DnsSetupService>();
+    // Public Suffix List lookup (embedded snapshot, parsed once) for registrable-domain derivation.
+    builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IPublicSuffixService, WinSmtpRelay.Security.PublicSuffixService>();
 
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();
