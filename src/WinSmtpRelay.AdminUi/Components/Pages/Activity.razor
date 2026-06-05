@@ -43,7 +43,7 @@
     @foreach (var evt in events)
     {
         <div class="activity-item @evt.CssClass">
-            <span class="activity-time">@evt.Timestamp.ToString("HH:mm:ss")</span>
+            <span class="activity-time"><LocalTime Utc="@evt.Timestamp" Format="HH:mm:ss" /></span>
             <span class="activity-icon">@evt.Icon</span>
             <span class="activity-text">@evt.Text</span>
         </div>
@@ -134,7 +134,7 @@
     private void AddEvent(string icon, string text, string cssClass)
     {
         if (_disposed) return;
-        events.Insert(0, new ActivityEvent(DateTime.Now, icon, text, cssClass));
+        events.Insert(0, new ActivityEvent(DateTime.UtcNow, icon, text, cssClass));
         if (events.Count > MaxEvents)
             events.RemoveAt(events.Count - 1);
         InvokeAsync(StateHasChanged);

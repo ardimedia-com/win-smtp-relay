@@ -77,7 +77,7 @@ else
                 <BbTableRow Item="@d">
                     <BbTableCell>@d.Id</BbTableCell>
                     <BbTableCell>@d.Domain</BbTableCell>
-                    <BbTableCell>@d.CreatedUtc.ToString("yyyy-MM-dd")</BbTableCell>
+                    <BbTableCell><LocalTime Utc="@d.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell>
                         <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
                                 @onclick="() => { deleteTargetId = d.Id; showDeleteConfirm = true; }">

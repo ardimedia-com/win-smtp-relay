@@ -61,7 +61,7 @@ else
             @foreach (var log in logs)
             {
                 <BbTableRow Item="@log">
-                    <BbTableCell>@log.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss")</BbTableCell>
+                    <BbTableCell><LocalTime Utc="@log.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /></BbTableCell>
                     <BbTableCell title="@($"Queue ID: {log.QueuedMessageId}")">@log.QueuedMessageId</BbTableCell>
                     <BbTableCell>@log.Recipient</BbTableCell>
                     <BbTableCell><span class="badge-status @GetStatusCss(log.StatusCode)">@log.StatusCode</span></BbTableCell>

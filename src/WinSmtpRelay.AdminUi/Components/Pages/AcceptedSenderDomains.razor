@@ -79,7 +79,7 @@ else
                 <BbTableRow Item="@d">
                     <BbTableCell>@d.Id</BbTableCell>
                     <BbTableCell>@d.Domain</BbTableCell>
-                    <BbTableCell>@d.CreatedUtc.ToString("yyyy-MM-dd")</BbTableCell>
+                    <BbTableCell><LocalTime Utc="@d.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell>
                         @if (d.VerifiedUtc is not null)
                         {

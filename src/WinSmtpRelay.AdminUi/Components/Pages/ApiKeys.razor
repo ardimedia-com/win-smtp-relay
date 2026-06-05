@@ -84,8 +84,8 @@ else
                     <BbTableCell>@k.Name</BbTableCell>
                     <BbTableCell><span class="mono">@k.KeyPrefix…</span></BbTableCell>
                     <BbTableCell>@k.Role</BbTableCell>
-                    <BbTableCell>@k.CreatedUtc.ToString("yyyy-MM-dd")</BbTableCell>
-                    <BbTableCell>@(k.LastUsedUtc?.ToString("yyyy-MM-dd HH:mm") ?? "—")</BbTableCell>
+                    <BbTableCell><LocalTime Utc="@k.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
+                    <BbTableCell><LocalTime Utc="@k.LastUsedUtc" /></BbTableCell>
                     <BbTableCell>
                         <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
                                 @onclick="() => { revokeTargetId = k.Id; showRevoke = true; }" title="Revoke">

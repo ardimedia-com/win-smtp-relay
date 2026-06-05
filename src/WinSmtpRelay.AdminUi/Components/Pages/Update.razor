@@ -190,7 +190,7 @@ else
 
         <p><strong>@release.TagName</strong></p>
         <p>@release.Name</p>
-        <p class="text-muted">Published: @release.PublishedAt?.ToString("yyyy-MM-dd HH:mm")</p>
+        <p class="text-muted">Published: <LocalTime Utc="@release.PublishedAt" /></p>
 
         if (scAsset is not null || fdAsset is not null)
         {

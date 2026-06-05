@@ -79,7 +79,7 @@ else
                     <BbTableCell>
                         <span class="badge-status @(t.IsEnabled ? "" : "badge-muted")">@(t.IsEnabled ? "Enabled" : "Disabled")</span>
                     </BbTableCell>
-                    <BbTableCell>@t.CreatedUtc.ToString("yyyy-MM-dd")</BbTableCell>
+                    <BbTableCell><LocalTime Utc="@t.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell>
                         <div style="display:flex;gap:0.25rem;align-items:center;">
                             <BbInput @bind-Value="egressEdits[t.Id]" Placeholder="(OS default)" />

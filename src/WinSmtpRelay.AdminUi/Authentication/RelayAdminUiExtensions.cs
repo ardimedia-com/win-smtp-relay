@@ -17,6 +17,8 @@ public static class RelayAdminUiExtensions
         services.AddScoped<AuthenticationStateProvider, RevalidatingIdentityAuthenticationStateProvider>();
         services.AddScoped<CircuitHandler, TenantCircuitHandler>();
         services.AddSingleton<Services.ISignupRateLimiter, Services.SignupRateLimiter>();
+        // Per-circuit browser time zone, so UTC timestamps render in the viewer's local time.
+        services.AddScoped<Services.BrowserTimeService>();
         return services;
     }
 }

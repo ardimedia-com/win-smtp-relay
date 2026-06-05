@@ -187,7 +187,7 @@ else
                     <BbTableCell>@msg.Sender</BbTableCell>
                     <BbTableCell>@msg.Recipients</BbTableCell>
                     <BbTableCell><span class="badge-status @GetBadgeCss(msg.Status)">@msg.Status</span></BbTableCell>
-                    <BbTableCell>@msg.CreatedUtc.ToString("yyyy-MM-dd HH:mm")</BbTableCell>
+                    <BbTableCell><LocalTime Utc="@msg.CreatedUtc" /></BbTableCell>
                 </BbTableRow>
             }
         </BbTableBody>

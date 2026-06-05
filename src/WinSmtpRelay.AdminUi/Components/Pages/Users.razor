@@ -92,7 +92,7 @@ else
                         @(user.RateLimitPerMinute.HasValue ? $"{user.RateLimitPerMinute}/min" : "\u2014")
                         @(user.RateLimitPerDay.HasValue ? $", {user.RateLimitPerDay}/day" : "")
                     </BbTableCell>
-                    <BbTableCell>@user.CreatedUtc.ToString("yyyy-MM-dd")</BbTableCell>
+                    <BbTableCell><LocalTime Utc="@user.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell>
                         <BbDropdownMenu>
                             <BbDropdownMenuTrigger>

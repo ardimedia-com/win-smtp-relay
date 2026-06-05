@@ -1,5 +1,7 @@
 @inherits LayoutComponentBase
 @inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject WinSmtpRelay.AdminUi.Services.BrowserTimeService BrowserTime
 
 <BbTooltipProvider>
 <BbSidebarProvider DefaultOpen="true">
@@ -243,5 +245,19 @@
         var state = await AuthState;
         if (state.User.HasClaim(RelayClaimTypes.MustChangePassword, "true"))
             Nav.NavigateTo("/account/change-password", forceLoad: true);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Detect the browser time zone once per circuit so UTC timestamps render in local time.
+        if (!firstRender || BrowserTime.IsReady)
+            return;
+        try
+        {
+            var iana = await JS.InvokeAsync<string>("winSmtpRelay.getTimeZoneName");
+            var offset = await JS.InvokeAsync<int>("winSmtpRelay.getTimeZoneOffsetMinutes");
+            BrowserTime.SetTimeZone(iana, offset);
+        }
+        catch { /* leave timestamps in UTC if interop is unavailable */ }
     }
 }

@@ -77,7 +77,7 @@ else
                     <BbTableCell>@FormatSize(msg.SizeBytes)</BbTableCell>
                     <BbTableCell><span class="badge-status @GetBadgeCss(msg.Status)">@msg.Status</span></BbTableCell>
                     <BbTableCell>@msg.RetryCount</BbTableCell>
-                    <BbTableCell>@msg.CreatedUtc.ToString("yyyy-MM-dd HH:mm")</BbTableCell>
+                    <BbTableCell><LocalTime Utc="@msg.CreatedUtc" /></BbTableCell>
                     <BbTableCell>
                         <BbDropdownMenu>
                             <BbDropdownMenuTrigger>
