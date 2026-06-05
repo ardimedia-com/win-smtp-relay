@@ -158,6 +158,13 @@ nav[aria-label="breadcrumb"] {
     margin: 0;
 }
 
+/* FocusOnNavigate moves keyboard/screen-reader focus to the page <h1> on navigation (a11y).
+   The heading isn't interactive, so suppress the browser focus ring it would otherwise draw. */
+h1:focus,
+h1:focus-visible {
+    outline: none;
+}
+
 .page-header p {
     color: var(--muted-foreground);
     font-size: 0.875rem;

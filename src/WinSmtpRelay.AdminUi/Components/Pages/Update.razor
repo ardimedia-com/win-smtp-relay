@@ -18,7 +18,7 @@
 <div class="page-header page-header-row">
     <div>
         <h1>Software Update</h1>
-        <p>Check for new WinSmtpRelay releases on GitHub</p>
+        <p>Check for new WIN-SMTP-RELAY releases on GitHub</p>
     </div>
     <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
         <LucideIcon Name="info" /> About this page
@@ -139,7 +139,7 @@ else
         </BbDialogHeader>
         <div style="font-size:0.875rem;line-height:1.6;">
             <p>
-                This page checks the <strong>GitHub Releases</strong> API for newer versions of WinSmtpRelay.
+                This page checks the <strong>GitHub Releases</strong> API for newer versions of WIN-SMTP-RELAY.
                 No data is sent &mdash; the relay simply fetches the latest release metadata from the public repository.
             </p>
             <h4 style="margin-top:1rem;">How it works</h4>
@@ -150,7 +150,7 @@ else
             </ol>
             <h4 style="margin-top:1rem;">Updating</h4>
             <p>
-                WinSmtpRelay does not auto-update. Download the new release and start the installer.
+                WIN-SMTP-RELAY does not auto-update. Download the new release and start the installer.
                 It will stop the Windows service, replace the files, and restart the service
                 (if it was running). Your <code>appsettings.json</code> and SQLite database are
                 preserved across updates.

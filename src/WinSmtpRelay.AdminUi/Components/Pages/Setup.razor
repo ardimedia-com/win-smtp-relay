@@ -476,10 +476,10 @@ else
             }
 
             var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
-            var body = "This is a test message from the WinSmtpRelay Setup & Health page, " +
+            var body = "This is a test message from the WIN-SMTP-RELAY Setup & Health page, " +
                        "sent to verify that outbound delivery works.\r\n";
             await AccountEmail.EnqueueAsync(
-                queue, from, to, "WinSmtpRelay test message", body, tenantId);
+                queue, from, to, "WIN-SMTP-RELAY test message", body, tenantId);
             testResult = $"Queued for delivery to {to}. Watch the result under Journal.";
         }
         catch (Exception ex)
