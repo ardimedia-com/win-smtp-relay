@@ -27,23 +27,6 @@
     </div>
 </div>
 
-<div style="max-width:480px;" class="mb-1">
-<BbCard>
-    <BbCardHeader><BbCardTitle>Check a domain</BbCardTitle></BbCardHeader>
-    <BbCardContent>
-        <div class="form-group">
-            <BbLabel>Domain</BbLabel>
-            <BbInput @bind-Value="adHocDomain" Placeholder="example.com" />
-        </div>
-    </BbCardContent>
-    <BbCardFooter>
-        <BbButton Variant="ButtonVariant.Default" @onclick="CheckAdHocAsync" Disabled="@string.IsNullOrWhiteSpace(adHocDomain)">
-            <LucideIcon Name="search" /> Check
-        </BbButton>
-    </BbCardFooter>
-</BbCard>
-</div>
-
 @if (isLoading)
 {
     <BbSkeleton Class="h-[200px] w-full" />
@@ -90,21 +73,103 @@ else
             </BbCardContent>
         </BbCard>;
 
-    <h2 class="health-section">Domains</h2>
-    @if (senderGroups.Count == 0 && inboundGroups.Count == 0)
-    {
-        <p class="text-muted">No sender or recipient domains configured yet. Add a sender domain under Accepted Domains (Sender), or check one above.</p>
-    }
-    @foreach (var g in senderGroups) { @groupCard(g) }
-    @foreach (var g in inboundGroups) { @groupCard(g) }
+    <BbTabs DefaultValue="ip" @bind-Value="activeTab">
+        <BbTabsList>
+            <BbTabsTrigger Value="ip">IP addresses</BbTabsTrigger>
+            <BbTabsTrigger Value="dns">Check DNS</BbTabsTrigger>
+        </BbTabsList>
 
-    <h2 class="health-section">IP addresses</h2>
-    @if (hostnameGroup is not null) { @groupCard(hostnameGroup) }
-    @if (ipGroups.Count == 0)
-    {
-        <p class="text-muted">No sending IPs configured. Add them under Settings → DNS recommendations so SPF and reverse-DNS can be checked.</p>
-    }
-    @foreach (var g in ipGroups) { @groupCard(g) }
+        <BbTabsContent Value="ip">
+            @if (hostnameGroup is not null) { @groupCard(hostnameGroup) }
+            @if (ipGroups.Count == 0)
+            {
+                <p class="text-muted">No sending IPs configured. Add them under <a href="/settings?tab=dns">Settings → Sending identity</a> so SPF and reverse-DNS can be checked.</p>
+            }
+            @foreach (var g in ipGroups) { @groupCard(g) }
+        </BbTabsContent>
+
+        <BbTabsContent Value="dns">
+            <BbCard Class="mb-1">
+                <BbCardHeader><BbCardTitle>Check a domain</BbCardTitle></BbCardHeader>
+                <BbCardContent>
+                    <div class="form-group" style="max-width:480px;">
+                        <BbLabel>Domain</BbLabel>
+                        <BbInput @bind-Value="adHocDomain" Placeholder="example.com" />
+                        @if (adHocError is not null)
+                        {
+                            <p class="text-danger" style="font-size:0.8rem;margin-top:0.25rem;">@adHocError</p>
+                        }
+                    </div>
+                </BbCardContent>
+                <BbCardFooter>
+                    <BbButton Variant="ButtonVariant.Default" @onclick="CheckAdHocAsync" Disabled="@string.IsNullOrWhiteSpace(adHocDomain)">
+                        <LucideIcon Name="search" /> Check
+                    </BbButton>
+                </BbCardFooter>
+            </BbCard>
+
+            @{
+                var pendingDomains = candidateDomains
+                    .Where(c => !senderGroups.Any(g => g.Title == c.Domain)
+                                && !inboundGroups.Any(g => g.Title == c.Domain)
+                                && !adHocGroups.Any(g => g.Title == c.Domain))
+                    .ToList();
+            }
+            @if (pendingDomains.Count > 0 || candidateIps.Count > 0)
+            {
+                <BbCard Class="mb-1">
+                    <BbCardHeader>
+                        <BbCardTitle>Used in your configuration</BbCardTitle>
+                        <BbCardDescription>Domains and IPs found in your settings — check the ones that send or receive mail.</BbCardDescription>
+                    </BbCardHeader>
+                    <BbCardContent>
+                        @if (pendingDomains.Count > 0)
+                        {
+                            <div class="health-candidates">
+                                @foreach (var c in pendingDomains)
+                                {
+                                    <div class="health-candidate">
+                                        <div>
+                                            <code class="mono">@c.Domain</code>
+                                            <span class="text-muted" style="font-size:0.78rem;margin-left:0.4rem;">@c.Source</span>
+                                        </div>
+                                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => CheckCandidateAsync(c.Domain)">
+                                            <LucideIcon Name="search" /> Check
+                                        </BbButton>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (candidateIps.Count > 0)
+                        {
+                            <div class="health-candidates" style="margin-top:0.6rem;">
+                                @foreach (var ip in candidateIps)
+                                {
+                                    <div class="health-candidate">
+                                        <div>
+                                            <code class="mono">@ip</code>
+                                            <span class="text-muted" style="font-size:0.78rem;margin-left:0.4rem;">sending / egress IP</span>
+                                        </div>
+                                        <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="ShowIpChecks">
+                                            View IP checks
+                                        </BbButton>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </BbCardContent>
+                </BbCard>
+            }
+
+            @if (senderGroups.Count == 0 && inboundGroups.Count == 0 && adHocGroups.Count == 0)
+            {
+                <p class="text-muted">No sender or recipient domains configured yet. Add a sender domain under <a href="/domains/sender">Accepted Domains (Sender)</a>, pick a candidate above, or check one by hand.</p>
+            }
+            @foreach (var g in adHocGroups) { @groupCard(g) }
+            @foreach (var g in senderGroups) { @groupCard(g) }
+            @foreach (var g in inboundGroups) { @groupCard(g) }
+        </BbTabsContent>
+    </BbTabs>
 }
 
 <BbDialog @bind-Open="showHelp">
@@ -114,17 +179,18 @@ else
             <BbDialogDescription>What to verify so your mail is accepted</BbDialogDescription>
         </BbDialogHeader>
         <div style="font-size:0.875rem;line-height:1.6;">
-            <p><strong>Domains</strong></p>
-            <ul style="padding-left:1.25rem;">
-                <li><strong>SPF / DKIM / DMARC</strong> (per sender domain) — TXT records that let receivers verify mail you send <em>as</em> that domain.</li>
-                <li><strong>MX</strong> (per recipient / backup-MX domain) — must point to this relay so it can receive mail <em>for</em> that domain.</li>
-            </ul>
             <p><strong>IP addresses</strong></p>
             <ul style="padding-left:1.25rem;">
                 <li><strong>Public hostname (A/AAAA)</strong> — must resolve to your sending IP; used in SPF (<code>a:</code>) and as the EHLO name.</li>
                 <li><strong>Reverse DNS (PTR)</strong> — each sending IP should have a PTR matching the hostname (FCrDNS). Missing/mismatched reverse DNS is a top reason mail is rejected or spam-foldered.</li>
                 <li><strong>SPF coverage</strong> — a tenant's egress IP must be listed in your sending IPs, or mail from it fails SPF.</li>
                 <li><strong>Blocklist (DNSBL)</strong> — each sending IP is checked against Spamhaus ZEN and SpamCop. <strong>Listed</strong> (red) means receivers like Microsoft 365 will reject your mail (SMTP 5.7.1) — use the delisting link and send from a clean IP. A <strong>&ldquo;could not query&rdquo;</strong> result is <em>not</em> a clean pass: Spamhaus refuses lookups from public resolvers (e.g. 8.8.8.8 / 1.1.1.1) with a special code, which this page reports honestly rather than as &ldquo;not listed&rdquo;. To get a real answer, run the relay where its DNS resolver is the server&rsquo;s own/ISP resolver (or use a Spamhaus DQS key).</li>
+            </ul>
+            <p><strong>Check DNS</strong></p>
+            <ul style="padding-left:1.25rem;">
+                <li><strong>SPF / DKIM / DMARC</strong> (per sender domain) — TXT records that let receivers verify mail you send <em>as</em> that domain.</li>
+                <li><strong>MX</strong> (per recipient / backup-MX domain) — must point to this relay so it can receive mail <em>for</em> that domain.</li>
+                <li><strong>Used in your configuration</strong> — domains found in your settings (the public hostname's registrable domain, DKIM domains, the DMARC report address) offered as one-click checks, plus an ad-hoc box for anything else.</li>
             </ul>
             <p class="text-muted">Status reflects live DNS and is subject to TTL/propagation — after publishing a change, allow time and Re-check.</p>
         </div>
@@ -136,15 +202,33 @@ else
 
 @code {
     private record CheckGroup(string Title, string? Subtitle, List<DnsRecordResult> Records);
+    private record DomainCandidate(string Domain, string Source);
+
+    // Deep-linkable tab, e.g. /health?tab=dns.
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? Tab { get; set; }
+
+    private string activeTab = "ip";
 
     private List<CheckGroup> senderGroups = [];
     private List<CheckGroup> inboundGroups = [];
     private List<CheckGroup> ipGroups = [];
+    // Ad-hoc / candidate domain checks the operator ran by hand. Kept separate from the configured
+    // senderGroups so "Re-check all" can refresh the configured domains without discarding these.
+    private List<CheckGroup> adHocGroups = [];
     private CheckGroup? hostnameGroup;
+    private List<DomainCandidate> candidateDomains = [];
+    private List<string> candidateIps = [];
     private string adHocDomain = "";
+    private string? adHocError;
     private bool isLoading = true;
     private string? loadError;
     private bool showHelp;
+
+    protected override void OnInitialized() =>
+        activeTab = Tab is "ip" or "dns" ? Tab : "ip";
+
+    private void ShowIpChecks() => activeTab = "ip";
 
     // Defer the (live, possibly slow) DNS checks until after the first paint, so the page shows
     // a skeleton immediately instead of blocking on N sequential lookups.
@@ -197,15 +281,50 @@ else
             foreach (var ip in sendingIps)
                 ipGroups.Add(new CheckGroup(ip, "Sending IP", [await dns.CheckReverseDnsAsync(ip), await dns.CheckBlocklistsAsync(ip)]));
 
+            var ips = new List<string>(sendingIps);
+
             // Tenant egress IP: reverse DNS + SPF coverage (only when not already a configured sending IP).
             if (current.TenantId is { } tenantId)
             {
                 var tenant = await sp.GetRequiredService<ITenantService>().GetByIdAsync(tenantId);
                 var egress = tenant?.EgressIpAddress?.Trim();
                 if (!string.IsNullOrWhiteSpace(egress) && !sendingIps.Any(s => IpEquals(s, egress)))
+                {
                     ipGroups.Add(new CheckGroup(egress, "Tenant egress IP — outbound mail for this tenant leaves from here",
                         [await dns.CheckReverseDnsAsync(egress), await dns.CheckBlocklistsAsync(egress), SpfCoverage(egress, inSpf: false)]));
+                    ips.Add(egress);
+                }
             }
+            candidateIps = ips;
+
+            // ----- Check-DNS candidates: domains in use that aren't already auto-checked above.
+            // Helps when no sender/recipient domain is configured yet (e.g. derive ardimedia.com
+            // from the public hostname smtp2.ardimedia.com).
+            var dkimList = await sp.GetRequiredService<IDkimDomainService>().GetAllAsync();
+            // A domain that is now a configured sender/recipient domain shouldn't also linger as an
+            // ad-hoc result card; drop those so it shows once (under its configured group).
+            var configuredDomains = new HashSet<string>(
+                senderGroups.Select(g => g.Title).Concat(inboundGroups.Select(g => g.Title)),
+                StringComparer.OrdinalIgnoreCase);
+            adHocGroups.RemoveAll(g => configuredDomains.Contains(g.Title));
+            // Don't offer as a candidate anything already shown above (configured or ad-hoc-checked).
+            var checkedDomains = new HashSet<string>(configuredDomains, StringComparer.OrdinalIgnoreCase);
+            checkedDomains.UnionWith(adHocGroups.Select(g => g.Title));
+            var cands = new List<DomainCandidate>();
+            void AddCandidate(string? domain, string source)
+            {
+                if (string.IsNullOrWhiteSpace(domain)) return;
+                var d = domain.Trim().TrimEnd('.').ToLowerInvariant();
+                if (d.Length == 0 || Uri.CheckHostName(d) != UriHostNameType.Dns) return;
+                if (checkedDomains.Contains(d) || cands.Any(c => string.Equals(c.Domain, d, StringComparison.OrdinalIgnoreCase))) return;
+                cands.Add(new DomainCandidate(d, source));
+            }
+            if (RegistrableDomain(settings.PublicHostname) is { } host)
+                AddCandidate(host, $"derived from {settings.PublicHostname}");
+            foreach (var dk in dkimList)
+                AddCandidate(dk.Domain, "DKIM domain");
+            AddCandidate(EmailDomain(settings.DmarcReportEmail), "DMARC report address");
+            candidateDomains = cands;
         }
         catch (Exception)
         {
@@ -225,14 +344,45 @@ else
     private async Task CheckAdHocAsync()
     {
         var domain = adHocDomain.Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(domain)) return;
-        if (Uri.CheckHostName(domain) != UriHostNameType.Dns) { adHocDomain = ""; return; }
+        if (string.IsNullOrEmpty(domain) || Uri.CheckHostName(domain) != UriHostNameType.Dns)
+        {
+            adHocError = "Enter a valid domain name (e.g. example.com).";
+            return;
+        }
+        adHocError = null;
+        adHocDomain = "";
+        await RunDomainCheckAsync(domain, "Ad-hoc check");
+    }
+
+    private Task CheckCandidateAsync(string domain) => RunDomainCheckAsync(domain, "Checked from your configuration");
+
+    private async Task RunDomainCheckAsync(string rawDomain, string subtitle)
+    {
+        var domain = rawDomain.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(domain) || Uri.CheckHostName(domain) != UriHostNameType.Dns) return;
         using var scope = ScopeFactory.CreateScope();
         var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
         var setup = await dns.CheckDomainAsync(domain);
-        senderGroups.RemoveAll(g => g.Title == domain);
-        senderGroups.Insert(0, new CheckGroup(domain, "Ad-hoc check", [setup.Spf, setup.Dkim, setup.Dmarc]));
-        adHocDomain = "";
+        adHocGroups.RemoveAll(g => g.Title == domain);
+        adHocGroups.Insert(0, new CheckGroup(domain, subtitle, [setup.Spf, setup.Dkim, setup.Dmarc]));
+        activeTab = "dns";
+    }
+
+    // Best-effort registrable ("organizational") domain: the last two labels of a hostname
+    // (smtp2.ardimedia.com -> ardimedia.com). Not Public-Suffix-List aware, so a multi-level TLD
+    // (e.g. example.co.uk) yields a guess the operator can ignore — it is only a suggestion.
+    private static string? RegistrableDomain(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return null;
+        var labels = host.Trim().TrimEnd('.').ToLowerInvariant().Split('.', StringSplitOptions.RemoveEmptyEntries);
+        return labels.Length < 2 ? null : string.Join('.', labels[^2..]);
+    }
+
+    private static string? EmailDomain(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        var at = email.LastIndexOf('@');
+        return at < 0 || at == email.Length - 1 ? null : email[(at + 1)..].Trim().TrimEnd('.').ToLowerInvariant();
     }
 
     private static DnsRecordResult SpfCoverage(string ip, bool inSpf) => new(

@@ -433,6 +433,23 @@ h1:focus-visible {
     margin: 1.5rem 0 0.75rem;
 }
 
+/* Health "Used in your configuration" candidate rows */
+.health-candidates {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.health-candidate {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
 /* DNS setup records */
 .dns-record {
     padding: 0.75rem 0;
