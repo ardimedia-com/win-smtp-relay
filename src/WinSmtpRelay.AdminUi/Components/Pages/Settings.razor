@@ -192,6 +192,7 @@ else
                 These describe the relay's sending identity and drive the recommended records shown on the
                 <a href="/health">Health</a> page. They don't change how mail is processed.
             </p>
+            <div class="settings-subhead settings-subhead-first">Basic</div>
             <div class="form-group">
                 <BbLabel>Public hostname</BbLabel>
                 <BbInput @bind-Value="dnsPublicHostname" Placeholder="relay.example.com" />
@@ -218,7 +219,8 @@ else
                 </div>
                 <p class="text-muted" style="font-size:0.75rem;margin-top:0.25rem;">Detected by asking an external service (api.ipify.org) for this server's public address — a proposal; confirm it's the IP your outbound mail actually uses.</p>
             </div>
-            <div class="form-group" style="margin-top:0.75rem;">
+            <div class="settings-subhead">SPF</div>
+            <div class="form-group">
                 <BbLabel>SPF includes (delimited)</BbLabel>
                 <BbInput @bind-Value="dnsSpfIncludes" Placeholder="_spf.example.net" />
             </div>
@@ -229,7 +231,8 @@ else
                     <option value="-all">-all (hardfail)</option>
                 </select>
             </div>
-            <div class="form-group" style="margin-top:0.75rem;">
+            <div class="settings-subhead">DMARC</div>
+            <div class="form-group">
                 <BbLabel>DMARC report address (rua)</BbLabel>
                 <BbInput @bind-Value="dnsDmarcEmail" Placeholder="dmarc@example.com" />
             </div>

@@ -82,6 +82,19 @@ public class TenantReadinessService(
                         : "No SMTP users — add users, or allow client IPs (IP access rules), so clients can submit",
                 "/smtpusers", "Manage users"),
 
+            new("sending-identity", "Sending identity (hostname + IP)", SetupGroup.Required,
+                hasHostname && hasSendingIps ? SetupStatus.Done
+                    : hasHostname || hasSendingIps ? SetupStatus.Partial
+                    : SetupStatus.Todo,
+                hasHostname && hasSendingIps
+                    ? "Public hostname and sending IP set — used for SPF and the Health checks"
+                    : hasHostname
+                        ? "Public hostname set; add your sending IP (Settings can auto-detect it)"
+                        : hasSendingIps
+                            ? "Sending IP set; add your public hostname"
+                            : "Set your public hostname and sending IP — Settings can auto-detect the IP. Drives SPF and the Health checks.",
+                "/settings?tab=dns", "Settings"),
+
             // ----- Recommended: best practice for inbox deliverability -----
             new("sender-domains", "Sender domain(s)", SetupGroup.Recommended,
                 senderList.Count > 0 ? SetupStatus.Done : SetupStatus.Permissive,
@@ -106,19 +119,6 @@ public class TenantReadinessService(
                     ? $"{enabledDkim} domain{Plural(enabledDkim)} signing outbound mail"
                     : "Not set up — DKIM lets recipients verify your mail is genuine",
                 "/dkim", "Set up DKIM"),
-
-            new("sending-identity", "Sending identity (hostname + IP)", SetupGroup.Recommended,
-                hasHostname && hasSendingIps ? SetupStatus.Done
-                    : hasHostname || hasSendingIps ? SetupStatus.Partial
-                    : SetupStatus.Todo,
-                hasHostname && hasSendingIps
-                    ? "Public hostname and sending IP set — used for SPF and the Health checks"
-                    : hasHostname
-                        ? "Public hostname set; add your sending IP (Settings can auto-detect it)"
-                        : hasSendingIps
-                            ? "Sending IP set; add your public hostname"
-                            : "Set your public hostname and sending IP — Settings can auto-detect the IP. Drives SPF and the Health checks.",
-                "/settings?tab=dns", "Settings"),
 
             // ----- Optional: sensible defaults already apply -----
             new("outbound", "Outbound delivery", SetupGroup.Optional,

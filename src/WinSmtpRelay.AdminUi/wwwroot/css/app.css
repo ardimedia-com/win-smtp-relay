@@ -113,6 +113,24 @@
     margin-bottom: 0.25rem;
 }
 
+/* Sub-section heading inside a settings card (e.g. Basic / SPF / DMARC) */
+.settings-subhead {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted-foreground);
+    margin: 1.25rem 0 0.6rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.settings-subhead-first {
+    margin-top: 0.25rem;
+    padding-top: 0;
+    border-top: none;
+}
+
 /* Tables */
 table {
     width: 100%;
