@@ -96,42 +96,19 @@
     </BbTabsContent>
 
     <BbTabsContent Value="routes">
-        <div style="max-width:500px;">
-        <BbCard Class="mb-1">
-            <BbCardHeader>
-                <BbCardTitle>Add Domain Route</BbCardTitle>
-            </BbCardHeader>
-            <BbCardContent>
-                <div class="form-group">
-                    <BbLabel>Domain Pattern</BbLabel>
-                    <BbInput @bind-Value="newRouteDomain" Placeholder="*.example.com" />
-                </div>
-                <div class="form-group">
-                    <BbLabel>Send Connector</BbLabel>
-                    <BbNativeSelect @bind-Value="newRouteConnectorId">
-                        @foreach (var c in connectors)
-                        {
-                            <option value="@c.Id">@c.Name</option>
-                        }
-                    </BbNativeSelect>
-                </div>
-            </BbCardContent>
-            <BbCardFooter>
-                <BbButton Variant="ButtonVariant.Default" @onclick="CreateRouteAsync"
-                        Disabled="@string.IsNullOrWhiteSpace(newRouteDomain)">
-                    <LucideIcon Name="plus" /> Add Route
-                </BbButton>
-            </BbCardFooter>
-        </BbCard>
+        <div class="page-header-row" style="margin-bottom:0.5rem;">
+            <span></span>
+            <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/connectors/send/routes/new"))">
+                <LucideIcon Name="plus" /> New domain route
+            </BbButton>
         </div>
-
         <BbTable Data="@routes">
             <BbTableHeader>
                 <BbTableRow TData="DomainRoute">
                     <BbTableHeaderCell TData="DomainRoute">Order</BbTableHeaderCell>
                     <BbTableHeaderCell TData="DomainRoute">Domain Pattern</BbTableHeaderCell>
                     <BbTableHeaderCell TData="DomainRoute">Send Connector</BbTableHeaderCell>
-                    <BbTableHeaderCell TData="DomainRoute">Actions</BbTableHeaderCell>
+                    <BbTableHeaderCell TData="DomainRoute"></BbTableHeaderCell>
                 </BbTableRow>
             </BbTableHeader>
             <BbTableBody>
@@ -143,15 +120,20 @@
                 }
                 @foreach (var r in routes)
                 {
-                    <BbTableRow Item="@r">
+                    <BbTableRow Item="@r" class="list-row-clickable" @onclick="() => EditRoute(r.Id)">
                         <BbTableCell>@r.SortOrder</BbTableCell>
                         <BbTableCell><code>@r.DomainPattern</code></BbTableCell>
                         <BbTableCell>@(r.SendConnector?.Name ?? $"ID {r.SendConnectorId}")</BbTableCell>
                         <BbTableCell>
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
-                                    @onclick="() => { deleteRouteId = r.Id; showDeleteRouteConfirm = true; }">
-                                <LucideIcon Name="trash-2" />
-                            </BbButton>
+                            <div class="list-row-actions" @onclick:stopPropagation="true">
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => EditRoute(r.Id)">
+                                    <LucideIcon Name="pencil" />
+                                </BbButton>
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                        @onclick="() => { deleteRouteId = r.Id; showDeleteRouteConfirm = true; }">
+                                    <LucideIcon Name="trash-2" />
+                                </BbButton>
+                            </div>
                         </BbTableCell>
                     </BbTableRow>
                 }
@@ -230,11 +212,13 @@
     private string? statusMessage;
     private string activeTab = "connectors";
 
-    // Create route form
-    private string newRouteDomain = "";
-    private string newRouteConnectorId = "";
+    [SupplyParameterFromQuery(Name = "tab")] public string? Tab { get; set; }
 
-    protected override async Task OnInitializedAsync() => await RefreshAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        activeTab = Tab is "routes" or "connectors" ? Tab : "connectors";
+        await RefreshAsync();
+    }
 
     private async Task RefreshAsync()
     {
@@ -244,31 +228,11 @@
         var routeSvc = scope.ServiceProvider.GetRequiredService<IDomainRouteService>();
         connectors = await connSvc.GetAllAsync();
         routes = await routeSvc.GetAllAsync();
-        if (connectors.Count > 0 && string.IsNullOrEmpty(newRouteConnectorId))
-            newRouteConnectorId = connectors[0].Id.ToString();
         isLoading = false;
     }
 
     private void Edit(int id) => Nav.NavigateTo($"/connectors/send/{id}");
-
-    private async Task CreateRouteAsync()
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IDomainRouteService>();
-
-        var nextOrder = routes.Count > 0 ? routes.Max(r => r.SortOrder) + 1 : 1;
-        await svc.CreateAsync(new DomainRoute
-        {
-            DomainPattern = newRouteDomain.Trim(),
-            SendConnectorId = int.TryParse(newRouteConnectorId, out var id) ? id : 0,
-            SortOrder = nextOrder
-        });
-
-        ConfigCache.Invalidate();
-        statusMessage = "Route added";
-        newRouteDomain = "";
-        await RefreshAsync();
-    }
+    private void EditRoute(int id) => Nav.NavigateTo($"/connectors/send/routes/{id}");
 
     private async Task ConfirmDeleteAsync()
     {

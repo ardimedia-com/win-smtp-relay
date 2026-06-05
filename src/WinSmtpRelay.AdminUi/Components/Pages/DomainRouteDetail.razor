@@ -1,0 +1,131 @@
+@page "/connectors/send/routes/new"
+@page "/connectors/send/routes/{Id:int}"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject ITenantScopeFactory ScopeFactory
+@inject IRuntimeConfigCache ConfigCache
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/connectors/send?tab=routes">Send Connectors</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>@(IsNew ? "New route" : domainPattern)</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>@(IsNew ? "New domain route" : "Edit domain route")</h1>
+    <p>Override the default connector for specific recipient domains</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[260px] w-full" />
+}
+else if (notFound)
+{
+    <p class="text-danger">Domain route not found.</p>
+    <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel"><LucideIcon Name="arrow-left" /> Back</BbButton>
+}
+else if (connectors.Count == 0)
+{
+    <p class="text-muted">No send connectors exist yet. Create a connector first, then add a route.</p>
+    <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel"><LucideIcon Name="arrow-left" /> Back</BbButton>
+}
+else
+{
+    <div style="max-width:520px;">
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel>Domain Pattern</BbLabel>
+                <BbInput @bind-Value="domainPattern" Placeholder="*.example.com" />
+            </div>
+            <div class="form-group">
+                <BbLabel>Send Connector</BbLabel>
+                <BbNativeSelect @bind-Value="connectorId">
+                    @foreach (var c in connectors)
+                    {
+                        <option value="@c.Id">@c.Name</option>
+                    }
+                </BbNativeSelect>
+            </div>
+            <div class="form-group">
+                <BbLabel>Sort Order</BbLabel>
+                <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
+            </div>
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(domainPattern)">
+                    <LucideIcon Name="save" /> Save
+                </BbButton>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
+            </div>
+        </BbCardFooter>
+    </BbCard>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    private bool IsNew => Id is null;
+
+    private bool isLoading = true;
+    private bool notFound;
+
+    private IReadOnlyList<SendConnector> connectors = [];
+    private string domainPattern = "";
+    private string connectorId = "";
+    private string sortOrder = "0";
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var connSvc = scope.ServiceProvider.GetRequiredService<ISendConnectorService>();
+        var routeSvc = scope.ServiceProvider.GetRequiredService<IDomainRouteService>();
+
+        connectors = await connSvc.GetAllAsync();
+        var routes = await routeSvc.GetAllAsync();
+
+        if (IsNew)
+        {
+            connectorId = connectors.Count > 0 ? connectors[0].Id.ToString() : "";
+            sortOrder = (routes.Count > 0 ? routes.Max(r => r.SortOrder) + 1 : 1).ToString();
+            isLoading = false;
+            return;
+        }
+
+        var r = routes.FirstOrDefault(x => x.Id == Id!.Value);
+        if (r is null) { notFound = true; isLoading = false; return; }
+
+        domainPattern = r.DomainPattern;
+        connectorId = r.SendConnectorId.ToString();
+        sortOrder = r.SortOrder.ToString();
+        isLoading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IDomainRouteService>();
+
+        var route = new DomainRoute
+        {
+            Id = Id ?? 0,
+            DomainPattern = domainPattern.Trim(),
+            SendConnectorId = int.TryParse(connectorId, out var cid) ? cid : 0,
+            SortOrder = int.TryParse(sortOrder, out var s) ? s : 0
+        };
+
+        if (IsNew) await svc.CreateAsync(route);
+        else await svc.UpdateAsync(route);
+        ConfigCache.Invalidate();
+        Nav.NavigateTo("/connectors/send?tab=routes");
+    }
+
+    private void Cancel() => Nav.NavigateTo("/connectors/send?tab=routes");
+}
