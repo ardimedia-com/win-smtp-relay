@@ -71,28 +71,31 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
             .Select(l => new { l.TimestampUtc, l.StatusCode })
             .ToListAsync(ct);
 
-        // Group by UTC hour client-side: SQLite can't extract date parts from the
-        // ISO-string-stored DateTimeOffset.
+        // Group by the full UTC hour bucket (date + hour) — NOT hour-of-day — so the boundary hour at
+        // the start of the 24h window isn't merged with the same hour-of-day at the end (e.g. at 14:30
+        // both yesterday-14:00 and today-14:00 would otherwise collapse into one). SQLite can't extract
+        // date parts from the ISO-string DateTimeOffset, so truncate client-side after materializing.
+        static DateTimeOffset TruncateToHour(DateTimeOffset t)
+        {
+            var u = t.ToUniversalTime();
+            return new DateTimeOffset(u.Year, u.Month, u.Day, u.Hour, 0, 0, TimeSpan.Zero);
+        }
+
         var grouped = logs
-            .GroupBy(l => l.TimestampUtc.Hour)
-            .Select(g => new
-            {
-                Hour = g.Key,
-                Sent = g.Count(l => l.StatusCode == "250"),
-                Failed = g.Count(l => l.StatusCode.StartsWith("5"))
-            })
-            .ToList();
+            .GroupBy(l => TruncateToHour(l.TimestampUtc))
+            .ToDictionary(
+                g => g.Key,
+                g => (Sent: g.Count(l => l.StatusCode == "250"), Failed: g.Count(l => l.StatusCode.StartsWith("5"))));
 
         var buckets = new TimeBucketResult[24];
         for (var i = 0; i < 24; i++)
         {
             var hour = now.AddHours(-(23 - i));
-            var hourKey = hour.Hour;
-            var match = grouped.FirstOrDefault(g => g.Hour == hourKey);
+            grouped.TryGetValue(TruncateToHour(hour), out var v);
             buckets[i] = new TimeBucketResult(
                 hour.ToString("HH:00"),
-                match?.Sent ?? 0,
-                match?.Failed ?? 0,
+                v.Sent,
+                v.Failed,
                 hour);
         }
 

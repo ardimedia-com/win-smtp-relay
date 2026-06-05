@@ -1,6 +1,8 @@
 @page "/dkim"
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
+@* DKIM config references on-disk private-key paths (a host-filesystem concern), so it is host-only. *@
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject ITenantScopeFactory ScopeFactory
 
 <BbBreadcrumb>

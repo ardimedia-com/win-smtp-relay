@@ -179,6 +179,7 @@ public static class AdminEndpoints
 
     private static void MapDkimEndpoints(RouteGroupBuilder group)
     {
+        // DKIM key generation/management deals with host-level private-key files — host admins only.
         group.MapPost("/dkim/generate", (DkimGenerateRequest req) =>
         {
             var (privateKey, publicKey, dnsTxt) = DkimKeyGenerator.GenerateKeyPair(
@@ -193,7 +194,7 @@ public static class AdminEndpoints
                 DnsRecord = $"{req.Selector}._domainkey.{req.Domain}",
                 DnsTxtValue = dnsTxt
             });
-        });
+        }).RequireAuthorization(AuthorizationPolicies.HostAdmin);
     }
 
     private static void MapDeliveryLogEndpoints(RouteGroupBuilder group)
@@ -520,7 +521,9 @@ public static class AdminEndpoints
 
     private static void MapDkimDomainEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/dkim/domains");
+        // PrivateKeyPath is an arbitrary host-filesystem path, so per-tenant admins must not manage it
+        // (it would let them probe server files or reference another tenant's key) — host admins only.
+        var ep = group.MapGroup("/dkim/domains").RequireAuthorization(AuthorizationPolicies.HostAdmin);
 
         ep.MapGet("/", async (IDkimDomainService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
