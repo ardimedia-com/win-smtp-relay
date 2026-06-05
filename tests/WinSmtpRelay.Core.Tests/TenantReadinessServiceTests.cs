@@ -203,9 +203,9 @@ public class TenantReadinessServiceTests
 
         var r = await Build(_current).GetAsync();
 
-        // sender-domains + sender-verified done; dkim still todo => 2 of 3.
-        Assert.AreEqual(3, r.RecommendedTotal);
-        Assert.AreEqual(2, r.RecommendedDone);
+        // smtp-users (alice) + sender-domains + sender-verified done; dkim still todo => 3 of 4.
+        Assert.AreEqual(4, r.RecommendedTotal);
+        Assert.AreEqual(3, r.RecommendedDone);
     }
 
     [TestMethod]

@@ -71,17 +71,6 @@ public class TenantReadinessService(
                 tenantActive ? "Approved and enabled by the host" : "Awaiting host approval",
                 "", ""),
 
-            new("smtp-users", "Submission access", SetupGroup.Required,
-                enabledUsers > 0 ? SetupStatus.Done
-                    : allowIpRules > 0 ? SetupStatus.Permissive
-                    : SetupStatus.Todo,
-                enabledUsers > 0
-                    ? $"{enabledUsers} SMTP user{Plural(enabledUsers)} can submit mail"
-                    : allowIpRules > 0
-                        ? $"No SMTP users — clients submit from {allowIpRules} allowed IP rule{Plural(allowIpRules)} without authentication"
-                        : "No SMTP users — add users, or allow client IPs (IP access rules), so clients can submit",
-                "/smtpusers", "Manage users"),
-
             new("sending-identity", "Sending identity (hostname + IP)", SetupGroup.Required,
                 hasHostname && hasSendingIps ? SetupStatus.Done
                     : hasHostname || hasSendingIps ? SetupStatus.Partial
@@ -95,7 +84,18 @@ public class TenantReadinessService(
                             : "Set your public hostname and sending IP — Settings can auto-detect the IP. Drives SPF and the Health checks.",
                 "/settings?tab=dns", "Settings"),
 
-            // ----- Recommended: best practice for inbox deliverability -----
+            // ----- Recommended: secure submission + inbox deliverability -----
+            new("smtp-users", "Submission access", SetupGroup.Recommended,
+                enabledUsers > 0 ? SetupStatus.Done
+                    : allowIpRules > 0 ? SetupStatus.Permissive
+                    : SetupStatus.Todo,
+                enabledUsers > 0
+                    ? $"{enabledUsers} SMTP user{Plural(enabledUsers)} can submit mail"
+                    : allowIpRules > 0
+                        ? $"No SMTP users — clients submit from {allowIpRules} allowed IP rule{Plural(allowIpRules)} without authentication; add SMTP users for authenticated submission"
+                        : "No SMTP users — add users, or allow client IPs (IP access rules), so clients can submit",
+                "/smtpusers", "Manage users"),
+
             new("sender-domains", "Sender domain(s)", SetupGroup.Recommended,
                 senderList.Count > 0 ? SetupStatus.Done : SetupStatus.Permissive,
                 senderList.Count > 0

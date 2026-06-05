@@ -175,14 +175,14 @@ else
         </div>
     }
 
-    <div class="setup-group-label">Basic <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— the essentials to start relaying and identify your sender</span></div>
+    <div class="setup-group-label">Basic <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— your organization and the sending identity it relays with</span></div>
     <BbCard>
         <BbCardContent>
             @foreach (var item in readiness.Required) { @row(item) }
         </BbCardContent>
     </BbCard>
 
-    <div class="setup-group-label">Recommended <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— so your mail reaches the inbox</span></div>
+    <div class="setup-group-label">Recommended <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— secure submission and reaching the inbox</span></div>
     <BbCard>
         <BbCardContent>
             @foreach (var item in recommendedItems) { @row(item) }
@@ -248,8 +248,8 @@ else
         <div style="font-size:0.875rem;line-height:1.6;">
             <p>This page checks your organization's configuration in real time and groups it into three tiers:</p>
             <ul style="padding-left:1.25rem;">
-                <li><strong>Basic</strong> — the essentials to start relaying (active org, submission access) plus the sending identity that makes the rest accurate. The <em>Can send mail</em> tile turns green once an org is active and clients can submit.</li>
-                <li><strong>Recommended</strong> — deliverability best practice (verified domains, DKIM, published DNS). Mail flows without them, but may land in spam.</li>
+                <li><strong>Basic</strong> — your organization and the sending identity the rest of the config builds on (public hostname + IP). The <em>Can send mail</em> tile turns green once the org is active and clients can submit (set up under <em>Submission access</em>).</li>
+                <li><strong>Recommended</strong> — secure submission (SMTP credentials) plus deliverability best practice (verified domains, DKIM, published DNS). Mail can still flow without them, but authenticated submission and these records keep it out of spam.</li>
                 <li><strong>Optional</strong> — refinements with a sensible default; an empty list usually means "allow all", shown as <em>Default</em>.</li>
             </ul>
             <h4 style="margin-top:1rem;">Status badges</h4>
@@ -399,7 +399,14 @@ else
             recommendedItems.Add(dnsItem);
         recTotal = recommendedItems.Count;
         recDone = recommendedItems.Count(i => i.Status == SetupStatus.Done);
-        nextAction = readiness.Required.FirstOrDefault(i => i.NeedsAttention)
+        // The submission path determines whether mail can flow at all, so when the tenant can't send,
+        // surface that item first — even though it now lives under Recommended. Otherwise fall back to
+        // the usual Basic-then-Recommended attention order.
+        var submissionBlocker = readiness.CanSend
+            ? null
+            : readiness.Items.FirstOrDefault(i => i.Key == "smtp-users" && i.NeedsAttention);
+        nextAction = submissionBlocker
+                     ?? readiness.Required.FirstOrDefault(i => i.NeedsAttention)
                      ?? recommendedItems.FirstOrDefault(i => i.NeedsAttention);
     }
 
