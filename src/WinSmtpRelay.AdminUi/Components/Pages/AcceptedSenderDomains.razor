@@ -4,6 +4,7 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject IRuntimeConfigCache ConfigCache
 @inject IDnsSetupService DnsSetup
+@inject NavigationManager Nav
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -22,33 +23,14 @@
         <h1>Accepted Domains (Sender)</h1>
         <p>Sender domains the relay accepts mail from. If empty, all sender domains are accepted.</p>
     </div>
-    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
-        <LucideIcon Name="info" /> About
-    </BbButton>
-</div>
-
-<div style="max-width:400px;">
-<BbCard Class="mb-1">
-    <BbCardHeader>
-        <BbCardTitle>Add Domain</BbCardTitle>
-    </BbCardHeader>
-    <BbCardContent>
-        <div class="form-group">
-            <BbLabel>Domain</BbLabel>
-            <BbInput @bind-Value="newDomain" Placeholder="example.com" />
-        </div>
-    </BbCardContent>
-    <BbCardFooter>
-        <BbButton Variant="ButtonVariant.Default" @onclick="CreateAsync"
-                Disabled="@string.IsNullOrWhiteSpace(newDomain)">
-            <LucideIcon Name="plus" /> Add
+    <div class="flex gap-1 items-center">
+        <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/domains/sender/new"))">
+            <LucideIcon Name="plus" /> New domain
         </BbButton>
-        @if (!string.IsNullOrEmpty(statusMessage))
-        {
-            <span class="text-muted" style="margin-left:1rem">@statusMessage</span>
-        }
-    </BbCardFooter>
-</BbCard>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
+            <LucideIcon Name="info" /> About
+        </BbButton>
+    </div>
 </div>
 
 @if (isLoading)
@@ -60,53 +42,44 @@ else
     <BbTable Data="@domains">
         <BbTableHeader>
             <BbTableRow TData="AcceptedSenderDomain">
-                <BbTableHeaderCell TData="AcceptedSenderDomain">ID</BbTableHeaderCell>
                 <BbTableHeaderCell TData="AcceptedSenderDomain">Domain</BbTableHeaderCell>
                 <BbTableHeaderCell TData="AcceptedSenderDomain">Added</BbTableHeaderCell>
                 <BbTableHeaderCell TData="AcceptedSenderDomain">Ownership</BbTableHeaderCell>
-                <BbTableHeaderCell TData="AcceptedSenderDomain">Actions</BbTableHeaderCell>
+                <BbTableHeaderCell TData="AcceptedSenderDomain"></BbTableHeaderCell>
             </BbTableRow>
         </BbTableHeader>
         <BbTableBody>
             @if (domains.Count == 0)
             {
                 <BbTableRow TData="AcceptedSenderDomain">
-                    <BbTableCell colspan="5" style="text-align:center;">No accepted sender domains configured &mdash; all sender domains are accepted</BbTableCell>
+                    <BbTableCell colspan="4" style="text-align:center;">No accepted sender domains configured &mdash; all sender domains are accepted</BbTableCell>
                 </BbTableRow>
             }
             @foreach (var d in domains)
             {
-                <BbTableRow Item="@d">
-                    <BbTableCell>@d.Id</BbTableCell>
+                <BbTableRow Item="@d" class="list-row-clickable" @onclick="() => Edit(d.Id)">
                     <BbTableCell>@d.Domain</BbTableCell>
                     <BbTableCell><LocalTime Utc="@d.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell>
                         @if (d.VerifiedUtc is not null)
                         {
-                            <span class="badge-status" title="@($"Verified {d.VerifiedUtc:yyyy-MM-dd}")">Verified</span>
+                            <span class="badge-status" title="@VerifiedTitle(d)">Verified</span>
                         }
                         else
                         {
-                            <div style="display:flex;flex-direction:column;gap:0.25rem;">
-                                <div>
-                                    <span class="badge-status badge-muted">Unverified</span>
-                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
-                                            @onclick="() => VerifyAsync(d)" title="Check DNS now">
-                                        <LucideIcon Name="shield-check" /> Verify
-                                    </BbButton>
-                                </div>
-                                <div class="text-muted" style="font-size:0.75rem;">
-                                    Add this TXT record at <span class="mono">@d.Domain</span>:<br />
-                                    <span class="mono">@DnsSetup.BuildOwnershipRecord(d.VerificationToken)</span>
-                                </div>
-                            </div>
+                            <span class="badge-status badge-muted">Unverified</span>
                         }
                     </BbTableCell>
                     <BbTableCell>
-                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
-                                @onclick="() => { deleteTargetId = d.Id; showDeleteConfirm = true; }">
-                            <LucideIcon Name="trash-2" />
-                        </BbButton>
+                        <div class="list-row-actions" @onclick:stopPropagation="true">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => Edit(d.Id)">
+                                <LucideIcon Name="pencil" />
+                            </BbButton>
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                    @onclick="() => { deleteTargetId = d.Id; showDeleteConfirm = true; }">
+                                <LucideIcon Name="trash-2" />
+                            </BbButton>
+                        </div>
                     </BbTableCell>
                 </BbTableRow>
             }
@@ -152,8 +125,6 @@ else
 
 @code {
     private IReadOnlyList<AcceptedSenderDomain> domains = [];
-    private string newDomain = "";
-    private string? statusMessage;
     private bool isLoading = true;
     private bool showHelp;
     private bool showDeleteConfirm;
@@ -170,51 +141,9 @@ else
         isLoading = false;
     }
 
-    private async Task CreateAsync()
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
+    private void Edit(int id) => Nav.NavigateTo($"/domains/sender/{id}");
 
-        if (await svc.ExistsAsync(newDomain))
-        {
-            statusMessage = $"Domain '{newDomain}' is already in use";
-            return;
-        }
-
-        try
-        {
-            await svc.CreateAsync(newDomain);
-        }
-        catch (InvalidOperationException ex)
-        {
-            statusMessage = ex.Message;
-            return;
-        }
-        ConfigCache.Invalidate();
-        statusMessage = $"Domain '{newDomain}' added";
-        newDomain = "";
-        await RefreshAsync();
-    }
-
-    private async Task VerifyAsync(AcceptedSenderDomain d)
-    {
-        statusMessage = $"Checking DNS for {d.Domain}…";
-        StateHasChanged();
-
-        var verified = await DnsSetup.CheckOwnershipAsync(d.Domain, d.VerificationToken);
-        if (verified)
-        {
-            using var scope = ScopeFactory.CreateScope();
-            await scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>().MarkVerifiedAsync(d.Id);
-            ConfigCache.Invalidate();
-            statusMessage = $"Ownership of {d.Domain} verified";
-        }
-        else
-        {
-            statusMessage = $"Verification TXT record for {d.Domain} not found yet (DNS can take time to propagate)";
-        }
-        await RefreshAsync();
-    }
+    private static string VerifiedTitle(AcceptedSenderDomain d) => $"Verified {d.VerifiedUtc:yyyy-MM-dd}";
 
     private async Task ConfirmDeleteAsync()
     {
@@ -222,7 +151,6 @@ else
         var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
         await svc.DeleteAsync(deleteTargetId);
         ConfigCache.Invalidate();
-        statusMessage = "Domain deleted";
         showDeleteConfirm = false;
         await RefreshAsync();
     }

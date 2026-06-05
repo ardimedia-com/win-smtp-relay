@@ -1,0 +1,239 @@
+@page "/apikeys/new"
+@page "/apikeys/{Id:int}"
+@using WinSmtpRelay.Core.Authorization
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
+@inject ITenantScopeFactory ScopeFactory
+@inject ICurrentTenant CurrentTenant
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/apikeys">API Keys</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>@(IsNew ? "New" : key?.Name)</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>@(IsNew ? "New API key" : $"API key: {key?.Name}")</h1>
+    <p>Keys for programmatic access to the admin API. The secret is shown only once at creation.</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[300px] w-full" />
+}
+else if (notFound)
+{
+    <p class="text-danger">API key not found.</p>
+    <BbButton Variant="ButtonVariant.Outline" @onclick="GoBack"><LucideIcon Name="arrow-left" /> Back</BbButton>
+}
+else if (createdSecret is not null)
+{
+    @* One-time secret display after creation. The plaintext is never persisted and cannot be recovered. *@
+    <div style="max-width:640px;">
+        <BbCard>
+            <BbCardHeader>
+                <BbCardTitle>API key created</BbCardTitle>
+            </BbCardHeader>
+            <BbCardContent>
+                <div class="badge-status badge-warning" style="display:block;padding:0.75rem;line-height:1.5;margin-bottom:1rem;">
+                    <strong>Copy this secret now &mdash; it will not be shown again.</strong>
+                    The plaintext key is not stored; only a hash is kept. If you lose it you must create a new key.
+                </div>
+                <div class="form-group">
+                    <BbLabel>Secret</BbLabel>
+                    <div style="display:flex;gap:0.5rem;align-items:center;">
+                        <BbInput Value="@createdSecret" ReadOnly="true" Class="mono" />
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopySecretAsync">
+                            <LucideIcon Name="copy" /> Copy
+                        </BbButton>
+                    </div>
+                    @if (copied)
+                    {
+                        <span class="text-muted" style="font-size:0.8125rem;">Copied to clipboard</span>
+                    }
+                </div>
+            </BbCardContent>
+            <BbCardFooter>
+                <BbButton Variant="ButtonVariant.Default" @onclick="GoBack">Done</BbButton>
+            </BbCardFooter>
+        </BbCard>
+    </div>
+}
+else if (IsNew)
+{
+    <div style="max-width:520px;">
+        <BbCard>
+            <BbCardContent>
+                <div class="form-group">
+                    <BbLabel>Name</BbLabel>
+                    <BbInput @bind-Value="newName" Placeholder="ci-pipeline" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Role</BbLabel>
+                    <select class="account-input" @bind="newRole">
+                        <option value="@RelayRoles.TenantViewer">Viewer (read-only)</option>
+                        <option value="@RelayRoles.TenantAdmin">Admin (read/write)</option>
+                    </select>
+                </div>
+            </BbCardContent>
+            <BbCardFooter>
+                <div class="flex gap-1 items-center">
+                    <BbButton Variant="ButtonVariant.Default" @onclick="CreateAsync" Disabled="@string.IsNullOrWhiteSpace(newName)">
+                        <LucideIcon Name="plus" /> Create
+                    </BbButton>
+                    <BbButton Variant="ButtonVariant.Outline" @onclick="GoBack">Cancel</BbButton>
+                    @if (!string.IsNullOrEmpty(statusMessage))
+                    {
+                        <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                    }
+                </div>
+            </BbCardFooter>
+        </BbCard>
+    </div>
+}
+else if (key is not null)
+{
+    <div style="max-width:520px;">
+        <BbCard>
+            <BbCardContent>
+                <div class="form-group">
+                    <BbLabel>Name</BbLabel>
+                    <div>@key.Name</div>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Prefix</BbLabel>
+                    <div><span class="mono">@(key.KeyPrefix)…</span></div>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Role</BbLabel>
+                    <div>@key.Role</div>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Created</BbLabel>
+                    <div><LocalTime Utc="@key.CreatedUtc" Format="yyyy-MM-dd HH:mm" /></div>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Last used</BbLabel>
+                    <div><LocalTime Utc="@key.LastUsedUtc" /></div>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Status</BbLabel>
+                    <div><span class="badge-status @(key.IsEnabled ? "badge-success" : "badge-muted")">@(key.IsEnabled ? "Enabled" : "Disabled")</span></div>
+                </div>
+                <p class="text-muted" style="font-size:0.8125rem;">The secret is not stored in plaintext and cannot be re-displayed.</p>
+            </BbCardContent>
+            <BbCardFooter>
+                <div class="flex gap-1 items-center">
+                    <BbButton Variant="ButtonVariant.Destructive" @onclick="() => showRevoke = true">
+                        <LucideIcon Name="trash-2" /> Revoke
+                    </BbButton>
+                    <BbButton Variant="ButtonVariant.Outline" @onclick="GoBack">Back</BbButton>
+                </div>
+            </BbCardFooter>
+        </BbCard>
+    </div>
+}
+
+<BbAlertDialog @bind-Open="showRevoke">
+    <BbAlertDialogContent>
+        <BbAlertDialogHeader>
+            <BbAlertDialogTitle>Revoke API key</BbAlertDialogTitle>
+            <BbAlertDialogDescription>Clients using this key will immediately lose access.</BbAlertDialogDescription>
+        </BbAlertDialogHeader>
+        <BbAlertDialogFooter>
+            <BbAlertDialogCancel>
+                <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
+            </BbAlertDialogCancel>
+            <BbAlertDialogAction>
+                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmRevokeAsync">Revoke</BbButton>
+            </BbAlertDialogAction>
+        </BbAlertDialogFooter>
+    </BbAlertDialogContent>
+</BbAlertDialog>
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    private bool IsNew => Id is null;
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private bool isLoading = true;
+    private bool notFound;
+    private string? statusMessage;
+
+    // Create form state.
+    private string newName = "";
+    private string newRole = RelayRoles.TenantViewer;
+
+    // One-time secret shown after creation; null until a key is created.
+    private string? createdSecret;
+    private bool copied;
+
+    // Edit/view state.
+    private ApiKey? key;
+    private bool showRevoke;
+
+    private int? ScopeTenantId => CurrentTenant.FilterEnabled ? CurrentTenant.FilterTenantId : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsNew)
+        {
+            isLoading = false;
+            return;
+        }
+
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+        // GetAllAsync is already scoped to the current tenant, so this also enforces authorization.
+        var all = await svc.GetAllAsync(ScopeTenantId);
+        key = all.FirstOrDefault(k => k.Id == Id!.Value);
+        if (key is null)
+            notFound = true;
+        isLoading = false;
+    }
+
+    private async Task CreateAsync()
+    {
+        // A tenant-scoped admin may only mint tenant-role keys (newRole is client-supplied).
+        if (ScopeTenantId is not null && newRole is not (RelayRoles.TenantAdmin or RelayRoles.TenantViewer))
+        {
+            statusMessage = "Invalid role for a tenant API key.";
+            return;
+        }
+
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+        var (_, plaintext) = await svc.CreateAsync(ScopeTenantId, newName.Trim(), newRole, null);
+        // Show the secret on this page; do NOT navigate away before the user can copy it.
+        createdSecret = plaintext;
+    }
+
+    private async Task CopySecretAsync()
+    {
+        if (createdSecret is null)
+            return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", createdSecret);
+        copied = true;
+    }
+
+    private async Task ConfirmRevokeAsync()
+    {
+        showRevoke = false;
+        if (key is null)
+            return;
+        // Only revoke keys in the current tenant scope (key was loaded scoped to ScopeTenantId).
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+        await svc.DeleteAsync(key.Id);
+        GoBack();
+    }
+
+    private void GoBack() => Nav.NavigateTo("/apikeys");
+}

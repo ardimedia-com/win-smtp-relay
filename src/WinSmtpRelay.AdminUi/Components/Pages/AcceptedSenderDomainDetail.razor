@@ -1,0 +1,226 @@
+@page "/domains/sender/new"
+@page "/domains/sender/{Id:int}"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject ITenantScopeFactory ScopeFactory
+@inject IRuntimeConfigCache ConfigCache
+@inject IDnsSetupService DnsSetup
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/domains/sender">Accepted Domains (Sender)</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>@(IsNew ? "New" : domain)</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>@(IsNew ? "New sender domain" : $"Domain: {domain}")</h1>
+    <p>Sender domains the relay accepts mail from. Prove ownership by publishing the verification TXT record.</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[300px] w-full" />
+}
+else if (notFound)
+{
+    <p class="text-danger">Sender domain not found.</p>
+    <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel"><LucideIcon Name="arrow-left" /> Back</BbButton>
+}
+else if (IsNew)
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel>Domain</BbLabel>
+                <BbInput @bind-Value="newDomain" Placeholder="example.com" />
+            </div>
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(newDomain)">
+                    <LucideIcon Name="save" /> Save
+                </BbButton>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
+                @if (!string.IsNullOrEmpty(statusMessage))
+                {
+                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                }
+            </div>
+        </BbCardFooter>
+    </BbCard>
+}
+else
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel>Domain</BbLabel>
+                <BbInput Value="@domain" ReadOnly="true" />
+            </div>
+
+            @if (verifiedUtc is not null)
+            {
+                <div class="form-group">
+                    <BbLabel>Ownership</BbLabel>
+                    <div>
+                        <span class="badge-status" title="@VerifiedTitle">Verified @verifiedUtc.Value.ToString("yyyy-MM-dd")</span>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="form-group">
+                    <BbLabel>Ownership</BbLabel>
+                    <div><span class="badge-status badge-muted">Unverified</span></div>
+                </div>
+                <div class="form-group">
+                    <BbLabel>DNS TXT record to publish</BbLabel>
+                    <div class="text-muted" style="font-size:0.8rem;margin-bottom:0.5rem;">
+                        Add this TXT record at your DNS provider, then click Verify. DNS can take time to propagate.
+                    </div>
+                    <div class="dns-record-row">
+                        <span class="dns-record-label">Name</span>
+                        <code class="mono dns-record-value">@domain</code>
+                    </div>
+                    <div class="dns-record-row">
+                        <span class="dns-record-label">Value</span>
+                        <code class="mono dns-record-value">@ownershipRecord</code>
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => CopyAsync(ownershipRecord)" title="Copy">
+                            <LucideIcon Name="copy" /> Copy
+                        </BbButton>
+                    </div>
+                </div>
+            }
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                @if (verifiedUtc is null)
+                {
+                    <BbButton Variant="ButtonVariant.Default" @onclick="VerifyAsync" Disabled="@isVerifying">
+                        <LucideIcon Name="shield-check" /> Verify
+                    </BbButton>
+                }
+                <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel"><LucideIcon Name="arrow-left" /> Back</BbButton>
+                @if (!string.IsNullOrEmpty(statusMessage))
+                {
+                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                }
+            </div>
+        </BbCardFooter>
+    </BbCard>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    private bool IsNew => Id is null;
+
+    private bool isLoading = true;
+    private bool notFound;
+    private bool isVerifying;
+    private string? statusMessage;
+
+    // New-domain form.
+    private string newDomain = "";
+
+    // Existing-domain state.
+    private string domain = "";
+    private string verificationToken = "";
+    private string ownershipRecord = "";
+    private DateTimeOffset? verifiedUtc;
+
+    private string VerifiedTitle => $"Verified {verifiedUtc:yyyy-MM-dd}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsNew)
+        {
+            isLoading = false;
+            return;
+        }
+
+        await LoadAsync();
+        isLoading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
+        var all = await svc.GetAllAsync();
+        var d = all.FirstOrDefault(x => x.Id == Id!.Value);
+        if (d is null)
+        {
+            notFound = true;
+            return;
+        }
+
+        domain = d.Domain;
+        verificationToken = d.VerificationToken;
+        verifiedUtc = d.VerifiedUtc;
+        ownershipRecord = DnsSetup.BuildOwnershipRecord(d.VerificationToken);
+    }
+
+    private async Task SaveAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
+
+        if (await svc.ExistsAsync(newDomain))
+        {
+            statusMessage = $"Domain '{newDomain}' is already in use";
+            return;
+        }
+
+        AcceptedSenderDomain created;
+        try
+        {
+            created = await svc.CreateAsync(newDomain);
+        }
+        catch (InvalidOperationException ex)
+        {
+            statusMessage = ex.Message;
+            return;
+        }
+
+        ConfigCache.Invalidate();
+        // Land on the detail so the operator sees the TXT record to publish.
+        Nav.NavigateTo($"/domains/sender/{created.Id}");
+    }
+
+    private async Task VerifyAsync()
+    {
+        isVerifying = true;
+        statusMessage = $"Checking DNS for {domain}…";
+        StateHasChanged();
+
+        var verified = await DnsSetup.CheckOwnershipAsync(domain, verificationToken);
+        if (verified)
+        {
+            using var scope = ScopeFactory.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>().MarkVerifiedAsync(Id!.Value);
+            ConfigCache.Invalidate();
+            await LoadAsync();
+            statusMessage = $"Ownership of {domain} verified";
+        }
+        else
+        {
+            statusMessage = $"Verification TXT record for {domain} not found yet (DNS can take time to propagate)";
+        }
+
+        isVerifying = false;
+    }
+
+    private async Task CopyAsync(string value)
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); }
+        catch { /* best-effort copy */ }
+    }
+
+    private void Cancel() => Nav.NavigateTo("/domains/sender");
+}
