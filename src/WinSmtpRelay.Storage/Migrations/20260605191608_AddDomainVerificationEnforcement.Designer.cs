@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WinSmtpRelay.Storage;
 
@@ -10,9 +11,11 @@ using WinSmtpRelay.Storage;
 namespace WinSmtpRelay.Storage.Migrations
 {
     [DbContext(typeof(RelayDbContext))]
-    partial class RelayDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260605191608_AddDomainVerificationEnforcement")]
+    partial class AddDomainVerificationEnforcement
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");

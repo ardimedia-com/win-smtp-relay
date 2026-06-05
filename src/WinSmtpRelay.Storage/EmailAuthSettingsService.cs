@@ -10,7 +10,13 @@ public class EmailAuthSettingsService(RelayDbContext db, IRuntimeConfigCache cac
     public async Task<EmailAuthSettings> GetAsync(CancellationToken ct = default)
         => await db.EmailAuthSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new EmailAuthSettings();
 
-    public async Task UpdateAsync(bool spfEnabled, bool dmarcEnabled, EnforcementMode enforcement, CancellationToken ct = default)
+    public async Task UpdateAsync(
+        bool spfEnabled,
+        bool dmarcEnabled,
+        EnforcementMode enforcement,
+        bool requireSenderDomainVerification,
+        bool requireRecipientDomainVerification,
+        CancellationToken ct = default)
     {
         var settings = await db.EmailAuthSettings.FirstOrDefaultAsync(ct);
         if (settings is null)
@@ -22,6 +28,8 @@ public class EmailAuthSettingsService(RelayDbContext db, IRuntimeConfigCache cac
         settings.SpfEnabled = spfEnabled;
         settings.DmarcEnabled = dmarcEnabled;
         settings.Enforcement = enforcement;
+        settings.RequireSenderDomainVerification = requireSenderDomainVerification;
+        settings.RequireRecipientDomainVerification = requireRecipientDomainVerification;
         settings.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 

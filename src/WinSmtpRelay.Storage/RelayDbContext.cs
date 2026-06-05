@@ -144,6 +144,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             // Globally unique: a recipient domain may be claimed by only one tenant.
             entity.HasIndex(e => e.Domain).IsUnique();
             entity.Property(e => e.Domain).HasMaxLength(255);
+            entity.Property(e => e.VerificationToken).HasMaxLength(64);
         });
 
         modelBuilder.Entity<AcceptedSenderDomain>(entity =>
@@ -224,6 +225,8 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 SpfEnabled = false,
                 DmarcEnabled = false,
                 Enforcement = WinSmtpRelay.Core.Configuration.EnforcementMode.LogOnly,
+                RequireSenderDomainVerification = false,
+                RequireRecipientDomainVerification = false,
                 UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });

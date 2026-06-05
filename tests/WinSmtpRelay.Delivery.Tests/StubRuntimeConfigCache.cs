@@ -18,6 +18,15 @@ internal class StubRuntimeConfigCache : IRuntimeConfigCache
     public Task<IReadOnlyList<string>> GetAcceptedSenderDomainsAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<string>>(AcceptedSenderDomains);
 
+    public HashSet<string> VerifiedSenderDomains { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> VerifiedRecipientDomains { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<IReadOnlySet<string>> GetVerifiedSenderDomainsAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlySet<string>>(VerifiedSenderDomains);
+
+    public Task<IReadOnlySet<string>> GetVerifiedRecipientDomainsAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlySet<string>>(VerifiedRecipientDomains);
+
     public Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<IpAccessRule>>(IpAccessRules);
 

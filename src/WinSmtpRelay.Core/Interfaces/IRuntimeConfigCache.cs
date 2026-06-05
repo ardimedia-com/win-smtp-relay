@@ -11,6 +11,12 @@ public interface IRuntimeConfigCache
     Task<IReadOnlyList<string>> GetAcceptedDomainsAsync(CancellationToken ct = default);
     Task<IReadOnlyList<string>> GetAcceptedSenderDomainsAsync(CancellationToken ct = default);
 
+    /// <summary>Accepted sender domains whose ownership is verified — used for the verification enforcement gate.</summary>
+    Task<IReadOnlySet<string>> GetVerifiedSenderDomainsAsync(CancellationToken ct = default);
+
+    /// <summary>Accepted recipient domains whose ownership is verified — used for the verification enforcement gate.</summary>
+    Task<IReadOnlySet<string>> GetVerifiedRecipientDomainsAsync(CancellationToken ct = default);
+
     /// <summary>IP access rules ordered by <see cref="IpAccessRule.SortOrder"/> (authoritative relay IP policy).</summary>
     Task<IReadOnlyList<IpAccessRule>> GetIpAccessRulesAsync(CancellationToken ct = default);
 

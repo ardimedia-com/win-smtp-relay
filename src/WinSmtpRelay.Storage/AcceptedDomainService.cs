@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -20,16 +21,28 @@ public class AcceptedDomainService(RelayDbContext db) : IAcceptedDomainService
         if (await db.AcceptedDomains.IgnoreQueryFilters().AsNoTracking().AnyAsync(d => d.Domain == normalized, ct))
             throw new InvalidOperationException($"Domain '{normalized}' is already in use.");
 
-        var entry = new AcceptedDomain { Domain = normalized };
+        var entry = new AcceptedDomain { Domain = normalized, VerificationToken = GenerateToken() };
         db.AcceptedDomains.Add(entry);
         await db.SaveChangesAsync(ct);
         return entry;
+    }
+
+    public async Task MarkVerifiedAsync(int id, CancellationToken ct = default)
+    {
+        var entry = await db.AcceptedDomains.FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (entry is null)
+            return;
+
+        entry.VerifiedUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task DeleteAsync(int id, CancellationToken ct = default)
     {
         await db.AcceptedDomains.Where(d => d.Id == id).ExecuteDeleteAsync(ct);
     }
+
+    private static string GenerateToken() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
 
     public async Task<bool> ExistsAsync(string domain, CancellationToken ct = default)
     {

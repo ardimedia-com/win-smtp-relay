@@ -8,5 +8,11 @@ public interface IEmailAuthSettingsService
     Task<EmailAuthSettings> GetAsync(CancellationToken ct = default);
 
     /// <summary>Updates the inbound email-authentication policy and refreshes the SMTP-path cache.</summary>
-    Task UpdateAsync(bool spfEnabled, bool dmarcEnabled, EnforcementMode enforcement, CancellationToken ct = default);
+    Task UpdateAsync(
+        bool spfEnabled,
+        bool dmarcEnabled,
+        EnforcementMode enforcement,
+        bool requireSenderDomainVerification,
+        bool requireRecipientDomainVerification,
+        CancellationToken ct = default);
 }

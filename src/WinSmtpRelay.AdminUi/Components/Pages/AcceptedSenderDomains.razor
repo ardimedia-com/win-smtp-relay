@@ -206,6 +206,7 @@ else
         {
             using var scope = ScopeFactory.CreateScope();
             await scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>().MarkVerifiedAsync(d.Id);
+            ConfigCache.Invalidate();
             statusMessage = $"Ownership of {d.Domain} verified";
         }
         else

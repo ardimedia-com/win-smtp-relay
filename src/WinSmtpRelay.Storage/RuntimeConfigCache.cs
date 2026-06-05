@@ -19,6 +19,8 @@ public class RuntimeConfigCache : IRuntimeConfigCache
 
     private volatile IReadOnlyList<string>? _acceptedDomains;
     private volatile IReadOnlyList<string>? _acceptedSenderDomains;
+    private volatile IReadOnlySet<string>? _verifiedSenderDomains;
+    private volatile IReadOnlySet<string>? _verifiedRecipientDomains;
     private volatile IReadOnlyDictionary<string, int>? _senderDomainOwners;
     private volatile IReadOnlyDictionary<string, int>? _recipientDomainOwners;
     private volatile IReadOnlyList<IpAccessRule>? _ipAccessRules;
@@ -86,6 +88,64 @@ public class RuntimeConfigCache : IRuntimeConfigCache
             _acceptedSenderDomains = domains;
             _logger.LogDebug("Loaded {Count} accepted sender domains into cache", domains.Count);
             return domains;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task<IReadOnlySet<string>> GetVerifiedSenderDomainsAsync(CancellationToken ct = default)
+    {
+        if (_verifiedSenderDomains is { } cached)
+            return cached;
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (_verifiedSenderDomains is { } cached2)
+                return cached2;
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var domains = await db.AcceptedSenderDomains
+                .AsNoTracking()
+                .Where(d => d.VerifiedUtc != null)
+                .Select(d => d.Domain)
+                .ToListAsync(ct);
+
+            _verifiedSenderDomains = domains.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _logger.LogDebug("Loaded {Count} verified sender domains into cache", domains.Count);
+            return _verifiedSenderDomains;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task<IReadOnlySet<string>> GetVerifiedRecipientDomainsAsync(CancellationToken ct = default)
+    {
+        if (_verifiedRecipientDomains is { } cached)
+            return cached;
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (_verifiedRecipientDomains is { } cached2)
+                return cached2;
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var domains = await db.AcceptedDomains
+                .AsNoTracking()
+                .Where(d => d.VerifiedUtc != null)
+                .Select(d => d.Domain)
+                .ToListAsync(ct);
+
+            _verifiedRecipientDomains = domains.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _logger.LogDebug("Loaded {Count} verified recipient domains into cache", domains.Count);
+            return _verifiedRecipientDomains;
         }
         finally
         {
@@ -392,6 +452,8 @@ public class RuntimeConfigCache : IRuntimeConfigCache
     {
         _acceptedDomains = null;
         _acceptedSenderDomains = null;
+        _verifiedSenderDomains = null;
+        _verifiedRecipientDomains = null;
         _senderDomainOwners = null;
         _recipientDomainOwners = null;
         _ipAccessRules = null;

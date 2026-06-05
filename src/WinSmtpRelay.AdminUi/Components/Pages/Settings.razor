@@ -110,6 +110,22 @@ else
                     <option value="@EnforcementMode.Quarantine">Quarantine — accept but flag the message</option>
                 </select>
             </div>
+
+            <div class="settings-subhead">Domain ownership</div>
+            <div style="display:flex;align-items:center;gap:0.75rem;">
+                <BbSwitch Checked="requireSenderVerification" CheckedChanged="(bool v) => requireSenderVerification = v" id="require-sender-verify" />
+                <span>Require verified ownership for accepted <strong>sender</strong> domains</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
+                <BbSwitch Checked="requireRecipientVerification" CheckedChanged="(bool v) => requireRecipientVerification = v" id="require-recipient-verify" />
+                <span>Require verified ownership for accepted <strong>recipient</strong> domains</span>
+            </div>
+            <p class="text-muted" style="font-size:0.78rem;margin-top:0.35rem;">
+                When on, a configured domain must have its ownership verified (a DNS TXT record, checked on the
+                Accepted Domains pages) before the relay accepts mail from/for it. Applies only among configured
+                domains — an empty list still means "accept all", and backup-MX domains are unaffected.
+            </p>
+
             <BbButton Variant="ButtonVariant.Default" @onclick="SaveEmailAuthAsync" Class="mt-1">
                 <LucideIcon Name="save" /> Save
             </BbButton>
@@ -283,6 +299,8 @@ else
     private bool spfEnabled;
     private bool dmarcEnabled;
     private EnforcementMode enforcement = EnforcementMode.LogOnly;
+    private bool requireSenderVerification;
+    private bool requireRecipientVerification;
     private string? emailAuthStatus;
 
     private bool bmEnabled;
@@ -324,6 +342,8 @@ else
         spfEnabled = emailAuth.SpfEnabled;
         dmarcEnabled = emailAuth.DmarcEnabled;
         enforcement = emailAuth.Enforcement;
+        requireSenderVerification = emailAuth.RequireSenderDomainVerification;
+        requireRecipientVerification = emailAuth.RequireRecipientDomainVerification;
 
         var backupMx = await sp.GetRequiredService<IBackupMxSettingsService>().GetAsync();
         bmEnabled = backupMx.Enabled;
@@ -398,7 +418,7 @@ else
     {
         using var scope = ScopeFactory.CreateScope();
         await scope.ServiceProvider.GetRequiredService<IEmailAuthSettingsService>()
-            .UpdateAsync(spfEnabled, dmarcEnabled, enforcement);
+            .UpdateAsync(spfEnabled, dmarcEnabled, enforcement, requireSenderVerification, requireRecipientVerification);
         emailAuthStatus = $"Email authentication saved (SPF {(spfEnabled ? "on" : "off")}, DMARC {(dmarcEnabled ? "on" : "off")}, enforcement {enforcement}).";
     }
 

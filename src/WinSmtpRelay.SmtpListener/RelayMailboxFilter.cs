@@ -133,6 +133,20 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
                     from.AsAddress(), senderDomainForCheck);
                 return false;
             }
+
+            // Optional verification gate: when enabled, an accepted sender domain must also have its
+            // ownership verified (DNS TXT) before it may send. Applies only among configured domains.
+            var emailAuth = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);
+            if (emailAuth.RequireSenderDomainVerification)
+            {
+                var verified = await _configCache.GetVerifiedSenderDomainsAsync(cancellationToken);
+                if (!verified.Contains(senderDomainForCheck))
+                {
+                    _logger.LogWarning("Sender {Sender} rejected: domain {Domain} ownership not verified (verification required)",
+                        from.AsAddress(), senderDomainForCheck);
+                    return false;
+                }
+            }
         }
 
         // Per-user SendAs enforcement
@@ -209,6 +223,21 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
                 _logger.LogWarning("Recipient {Recipient} rejected: domain {Domain} not in accepted domains",
                     to.AsAddress(), recipientDomain);
                 return false;
+            }
+
+            // Optional verification gate: when enabled, an accepted recipient domain must also have its
+            // ownership verified (DNS TXT) before the relay accepts mail for it. Applies only among
+            // configured domains; backup-MX domains were already accepted above.
+            var emailAuth = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);
+            if (emailAuth.RequireRecipientDomainVerification)
+            {
+                var verified = await _configCache.GetVerifiedRecipientDomainsAsync(cancellationToken);
+                if (!verified.Contains(recipientDomain))
+                {
+                    _logger.LogWarning("Recipient {Recipient} rejected: domain {Domain} ownership not verified (verification required)",
+                        to.AsAddress(), recipientDomain);
+                    return false;
+                }
             }
         }
 
