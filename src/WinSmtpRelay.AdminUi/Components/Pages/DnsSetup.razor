@@ -15,7 +15,7 @@
 <div class="page-header page-header-row">
     <div>
         <h1>Health</h1>
-        <p>Required vs. published SPF / DKIM / DMARC records for your sender domains. Publish the expected values at your DNS provider so mail you send authenticates.</p>
+        <p>The DNS your domains and sending IPs need so mail is trusted and delivered — SPF, DKIM, DMARC, MX, reverse DNS, and the public hostname. Status reflects live DNS; publish the expected values at your provider and Re-check.</p>
     </div>
     <div class="flex gap-1 items-center">
         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="RefreshAsync" Disabled="@isLoading">
@@ -48,25 +48,17 @@
 {
     <BbSkeleton Class="h-[200px] w-full" />
 }
-else if (results.Count == 0)
-{
-    <p class="text-muted">No accepted sender domains configured. Add one under Accepted Domains (Sender), or check a domain above.</p>
-}
 else
 {
-    @foreach (var setup in results)
-    {
-        <BbCard Class="mb-1">
+    @* Reusable card renderer for a titled group of DNS record checks *@
+    RenderFragment<CheckGroup> groupCard = g =>
+        @<BbCard Class="mb-1">
             <BbCardHeader>
-                <div class="flex items-center justify-between">
-                    <BbCardTitle>@setup.Domain</BbCardTitle>
-                    <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => RecheckOneAsync(setup.Domain)">
-                        <LucideIcon Name="refresh-cw" /> Re-check
-                    </BbButton>
-                </div>
+                <BbCardTitle>@g.Title</BbCardTitle>
+                @if (!string.IsNullOrEmpty(g.Subtitle)) { <BbCardDescription>@g.Subtitle</BbCardDescription> }
             </BbCardHeader>
             <BbCardContent>
-                @foreach (var rec in new[] { setup.Spf, setup.Dkim, setup.Dmarc })
+                @foreach (var rec in g.Records)
                 {
                     <div class="dns-record">
                         <div class="dns-record-head">
@@ -86,27 +78,50 @@ else
                             </div>
                         }
                         <div class="dns-record-row">
-                            <span class="dns-record-label">Published</span>
+                            <span class="dns-record-label">Found</span>
                             <code class="mono dns-record-value">@(string.IsNullOrEmpty(rec.Live) ? "— not found —" : rec.Live)</code>
                         </div>
                     </div>
                 }
             </BbCardContent>
-        </BbCard>
+        </BbCard>;
+
+    <h2 class="health-section">Domains</h2>
+    @if (senderGroups.Count == 0 && inboundGroups.Count == 0)
+    {
+        <p class="text-muted">No sender or recipient domains configured yet. Add a sender domain under Accepted Domains (Sender), or check one above.</p>
     }
+    @foreach (var g in senderGroups) { @groupCard(g) }
+    @foreach (var g in inboundGroups) { @groupCard(g) }
+
+    <h2 class="health-section">IP addresses</h2>
+    @if (hostnameGroup is not null) { @groupCard(hostnameGroup) }
+    @if (ipGroups.Count == 0)
+    {
+        <p class="text-muted">No sending IPs configured. Add them under Settings → DNS recommendations so SPF and reverse-DNS can be checked.</p>
+    }
+    @foreach (var g in ipGroups) { @groupCard(g) }
 }
 
 <BbDialog @bind-Open="showHelp">
     <BbDialogContent>
         <BbDialogHeader>
             <BbDialogTitle>About Health</BbDialogTitle>
-            <BbDialogDescription>Publish these records so recipients trust mail from your domains</BbDialogDescription>
+            <BbDialogDescription>What to verify so your mail is accepted</BbDialogDescription>
         </BbDialogHeader>
         <div style="font-size:0.875rem;line-height:1.6;">
-            <p><strong>SPF</strong> — a TXT record at the domain root authorising this relay's sending IPs. The recommended value is built from the server's <code>Dns</code> settings.</p>
-            <p><strong>DKIM</strong> — a TXT record at <code>&lt;selector&gt;._domainkey.&lt;domain&gt;</code> carrying the public key. Long keys are split into multiple quoted strings by DNS providers — that is normal; the published value is reassembled before comparison.</p>
-            <p><strong>DMARC</strong> — a TXT record at <code>_dmarc.&lt;domain&gt;</code> setting the policy and reporting address.</p>
-            <p class="text-muted">Status reflects live DNS and is subject to TTL/propagation — after publishing a change, allow time and use Re-check.</p>
+            <p><strong>Domains</strong></p>
+            <ul style="padding-left:1.25rem;">
+                <li><strong>SPF / DKIM / DMARC</strong> (per sender domain) — TXT records that let receivers verify mail you send <em>as</em> that domain.</li>
+                <li><strong>MX</strong> (per recipient / backup-MX domain) — must point to this relay so it can receive mail <em>for</em> that domain.</li>
+            </ul>
+            <p><strong>IP addresses</strong></p>
+            <ul style="padding-left:1.25rem;">
+                <li><strong>Public hostname (A/AAAA)</strong> — must resolve to your sending IP; used in SPF (<code>a:</code>) and as the EHLO name.</li>
+                <li><strong>Reverse DNS (PTR)</strong> — each sending IP should have a PTR matching the hostname (FCrDNS). Missing/mismatched reverse DNS is a top reason mail is rejected or spam-foldered.</li>
+                <li><strong>SPF coverage</strong> — a tenant's egress IP must be listed in your sending IPs, or mail from it fails SPF.</li>
+            </ul>
+            <p class="text-muted">Status reflects live DNS and is subject to TTL/propagation — after publishing a change, allow time and Re-check.</p>
         </div>
         <BbDialogFooter>
             <BbDialogClose><BbButton Variant="ButtonVariant.Outline">Close</BbButton></BbDialogClose>
@@ -115,7 +130,12 @@ else
 </BbDialog>
 
 @code {
-    private List<DomainDnsSetup> results = [];
+    private record CheckGroup(string Title, string? Subtitle, List<DnsRecordResult> Records);
+
+    private List<CheckGroup> senderGroups = [];
+    private List<CheckGroup> inboundGroups = [];
+    private List<CheckGroup> ipGroups = [];
+    private CheckGroup? hostnameGroup;
     private string adHocDomain = "";
     private bool isLoading = true;
     private bool showHelp;
@@ -126,8 +146,51 @@ else
     {
         isLoading = true;
         using var scope = ScopeFactory.CreateScope();
-        var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
-        results = [.. await dns.CheckAllSenderDomainsAsync()];
+        var sp = scope.ServiceProvider;
+        var dns = sp.GetRequiredService<IDnsSetupService>();
+
+        // ----- Domains: sending identity (SPF/DKIM/DMARC per sender domain) -----
+        senderGroups = [.. (await dns.CheckAllSenderDomainsAsync())
+            .Select(s => new CheckGroup(s.Domain, "Sending identity — you send mail as this domain", [s.Spf, s.Dkim, s.Dmarc]))];
+
+        // ----- Domains: inbound / backup-MX (MX must point here) -----
+        var recipients = await sp.GetRequiredService<IAcceptedDomainService>().GetAllAsync();
+        var backup = await sp.GetRequiredService<IBackupMxSettingsService>().GetAsync();
+        var inboundDomains = recipients.Select(d => d.Domain)
+            .Concat(backup.DomainList)
+            .Select(d => d.Trim().ToLowerInvariant())
+            .Where(d => d.Length > 0)
+            .Distinct()
+            .ToList();
+        inboundGroups = [];
+        foreach (var d in inboundDomains)
+            inboundGroups.Add(new CheckGroup(d, "Inbound / backup-MX — this relay should receive mail for this domain", [await dns.CheckMxAsync(d)]));
+
+        // ----- IP addresses: public hostname + reverse DNS per sending/egress IP -----
+        var settings = await sp.GetRequiredService<IDnsSettingsService>().GetAsync();
+        var sendingIps = SplitList(settings.SendingIpAddresses);
+        hostnameGroup = new CheckGroup(
+            string.IsNullOrWhiteSpace(settings.PublicHostname) ? "(public hostname)" : settings.PublicHostname,
+            "Public hostname — used in SPF (a:) and as the EHLO name",
+            [await dns.CheckHostnameAsync()]);
+
+        ipGroups = [];
+        foreach (var ip in sendingIps)
+            ipGroups.Add(new CheckGroup(ip, "Sending IP", [await dns.CheckReverseDnsAsync(ip)]));
+
+        // Tenant egress IP: reverse DNS + must be covered by SPF (only meaningful if not already a sending IP).
+        var current = sp.GetRequiredService<ICurrentTenant>();
+        if (current.TenantId is { } tenantId)
+        {
+            var tenant = await sp.GetRequiredService<ITenantService>().GetByIdAsync(tenantId);
+            var egress = tenant?.EgressIpAddress;
+            if (!string.IsNullOrWhiteSpace(egress) && !sendingIps.Contains(egress, StringComparer.OrdinalIgnoreCase))
+            {
+                ipGroups.Add(new CheckGroup(egress, "Tenant egress IP — outbound mail for this tenant leaves from here",
+                    [await dns.CheckReverseDnsAsync(egress), SpfCoverage(egress, inSpf: false)]));
+            }
+        }
+
         isLoading = false;
     }
 
@@ -138,21 +201,28 @@ else
         using var scope = ScopeFactory.CreateScope();
         var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
         var setup = await dns.CheckDomainAsync(domain);
-        results.RemoveAll(r => r.Domain == domain);
-        results.Insert(0, setup);
+        senderGroups.RemoveAll(g => g.Title == domain);
+        senderGroups.Insert(0, new CheckGroup(domain, "Ad-hoc check", [setup.Spf, setup.Dkim, setup.Dmarc]));
         adHocDomain = "";
     }
 
-    private async Task RecheckOneAsync(string domain)
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
-        var setup = await dns.CheckDomainAsync(domain);
-        var idx = results.FindIndex(r => r.Domain == domain);
-        if (idx >= 0) results[idx] = setup;
-    }
+    private static DnsRecordResult SpfCoverage(string ip, bool inSpf) => new(
+        "SPF coverage", ip, "listed in your Sending IPs (SPF)", inSpf ? "listed" : "not listed",
+        inSpf ? DnsRecordStatus.Ok : DnsRecordStatus.Mismatch,
+        inSpf
+            ? "This IP is covered by your recommended SPF record."
+            : "This egress IP is NOT in your Sending IPs, so mail from it fails SPF. Add it under Settings → DNS recommendations.");
 
-    private async Task CopyAsync(string value) => await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+    private static List<string> SplitList(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : [.. value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+
+    private async Task CopyAsync(string value)
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); }
+        catch { /* best-effort copy */ }
+    }
 
     private static string BadgeClass(DnsRecordStatus status) => status switch
     {

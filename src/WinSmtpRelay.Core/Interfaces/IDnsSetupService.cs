@@ -20,6 +20,15 @@ public interface IDnsSetupService
     /// <summary>The recommended DMARC record value for a domain, built from <see cref="Configuration.DnsOptions"/>.</summary>
     string BuildRecommendedDmarc(string domain);
 
+    /// <summary>Checks that a domain's MX record points to this relay (for inbound / backup-MX domains).</summary>
+    Task<DnsRecordResult> CheckMxAsync(string domain, CancellationToken ct = default);
+
+    /// <summary>Checks reverse DNS (PTR) for a sending IP and whether it matches the public hostname (FCrDNS).</summary>
+    Task<DnsRecordResult> CheckReverseDnsAsync(string ipAddress, CancellationToken ct = default);
+
+    /// <summary>Checks that the configured public hostname resolves (A/AAAA) to one of the sending IPs.</summary>
+    Task<DnsRecordResult> CheckHostnameAsync(CancellationToken ct = default);
+
     /// <summary>The TXT record value a tenant must publish at the domain apex to prove ownership.</summary>
     string BuildOwnershipRecord(string token);
 

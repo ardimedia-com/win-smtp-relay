@@ -161,6 +161,126 @@ public class DnsSetupService(
             match ? "The published DKIM public key matches." : "The published DKIM key differs from the configured key.");
     }
 
+    public async Task<DnsRecordResult> CheckHostnameAsync(CancellationToken ct = default)
+    {
+        await EnsureEffectiveAsync(ct);
+        var host = Current.PublicHostname?.Trim();
+        if (string.IsNullOrWhiteSpace(host))
+            return new DnsRecordResult("A / AAAA", "(public hostname)", "", null, DnsRecordStatus.NotConfigured,
+                "Set the relay's public hostname in Settings — it is used in SPF (a:) and as the EHLO name, and should resolve to your sending IP.");
+
+        var ips = await ResolveAddressesAsync(host, ct);
+        var expected = Current.SendingIpAddresses.Count > 0 ? string.Join(", ", Current.SendingIpAddresses) : "your sending IP";
+        if (ips.Count == 0)
+            return new DnsRecordResult("A / AAAA", host, expected, null, DnsRecordStatus.Missing,
+                "The public hostname does not resolve. Publish an A/AAAA record pointing it at your sending IP.");
+
+        var sending = new HashSet<string>(Current.SendingIpAddresses, StringComparer.OrdinalIgnoreCase);
+        var ok = sending.Count == 0 || ips.Any(sending.Contains);
+        return new DnsRecordResult("A / AAAA", host, expected, string.Join(", ", ips),
+            ok ? DnsRecordStatus.Ok : DnsRecordStatus.Mismatch,
+            ok ? "The public hostname resolves." : "The public hostname resolves to an IP that is not among your configured sending IPs.");
+    }
+
+    public async Task<DnsRecordResult> CheckMxAsync(string domain, CancellationToken ct = default)
+    {
+        await EnsureEffectiveAsync(ct);
+        domain = domain.Trim().ToLowerInvariant();
+        var host = Current.PublicHostname?.Trim();
+        var mx = await ResolveMxAsync(domain, ct);
+        var live = mx.Count > 0 ? string.Join(", ", mx) : null;
+        var expected = string.IsNullOrWhiteSpace(host) ? "this relay" : host;
+
+        if (mx.Count == 0)
+            return new DnsRecordResult("MX", domain, expected, null, DnsRecordStatus.Missing,
+                "No MX record found — this relay will not receive mail for this domain. Publish an MX record pointing to it.");
+        if (string.IsNullOrWhiteSpace(host))
+            return new DnsRecordResult("MX", domain, expected, live, DnsRecordStatus.NotConfigured,
+                "Set the relay's public hostname in Settings so the MX target can be verified.");
+
+        var pointsHere = mx.Any(m => string.Equals(m, host, StringComparison.OrdinalIgnoreCase));
+        return new DnsRecordResult("MX", domain, expected, live,
+            pointsHere ? DnsRecordStatus.Ok : DnsRecordStatus.Mismatch,
+            pointsHere ? "An MX record points to this relay." : "MX records exist but none point to this relay's hostname.");
+    }
+
+    public async Task<DnsRecordResult> CheckReverseDnsAsync(string ipAddress, CancellationToken ct = default)
+    {
+        await EnsureEffectiveAsync(ct);
+        ipAddress = ipAddress.Trim();
+        var host = Current.PublicHostname?.Trim();
+        var ptr = await ResolvePtrAsync(ipAddress, ct);
+        var expected = string.IsNullOrWhiteSpace(host) ? "an FQDN you control" : host;
+
+        if (ptr is null)
+            return new DnsRecordResult("PTR (reverse DNS)", ipAddress, expected, null, DnsRecordStatus.Missing,
+                "No reverse DNS for this IP. Many receivers distrust or reject mail from IPs without a PTR — ask your IP/hosting provider to set one matching your hostname.");
+        if (string.IsNullOrWhiteSpace(host))
+            return new DnsRecordResult("PTR (reverse DNS)", ipAddress, expected, ptr, DnsRecordStatus.NotConfigured,
+                "Reverse DNS is published; set the relay's public hostname so it can be matched (FCrDNS).");
+
+        var ok = string.Equals(ptr, host, StringComparison.OrdinalIgnoreCase);
+        return new DnsRecordResult("PTR (reverse DNS)", ipAddress, expected, ptr,
+            ok ? DnsRecordStatus.Ok : DnsRecordStatus.Mismatch,
+            ok ? "Reverse DNS matches the public hostname (FCrDNS)." : "Reverse DNS does not match the public hostname; receivers may distrust this IP.");
+    }
+
+    private async Task<List<string>> ResolveAddressesAsync(string host, CancellationToken ct)
+    {
+        try
+        {
+            var a = await dns.QueryAsync(host, QueryType.A, cancellationToken: ct);
+            var aaaa = await dns.QueryAsync(host, QueryType.AAAA, cancellationToken: ct);
+            return a.Answers.OfType<ARecord>().Select(r => r.Address.ToString())
+                .Concat(aaaa.Answers.OfType<AaaaRecord>().Select(r => r.Address.ToString()))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        catch (DnsResponseException) { return []; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "DNS A/AAAA lookup failed for {Host}", host);
+            return [];
+        }
+    }
+
+    // Returns MX exchange hostnames (trailing dot stripped), ordered by preference.
+    private async Task<List<string>> ResolveMxAsync(string domain, CancellationToken ct)
+    {
+        try
+        {
+            var result = await dns.QueryAsync(domain, QueryType.MX, cancellationToken: ct);
+            return result.Answers.OfType<MxRecord>()
+                .OrderBy(m => m.Preference)
+                .Select(m => m.Exchange.Value.TrimEnd('.'))
+                .ToList();
+        }
+        catch (DnsResponseException) { return []; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "DNS MX lookup failed for {Domain}", domain);
+            return [];
+        }
+    }
+
+    private async Task<string?> ResolvePtrAsync(string ipAddress, CancellationToken ct)
+    {
+        if (!System.Net.IPAddress.TryParse(ipAddress, out var addr))
+            return null;
+        try
+        {
+            var result = await dns.QueryReverseAsync(addr, ct);
+            return result.Answers.OfType<PtrRecord>()
+                .Select(p => p.PtrDomainName.Value.TrimEnd('.'))
+                .FirstOrDefault();
+        }
+        catch (DnsResponseException) { return null; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Reverse DNS lookup failed for {Ip}", ipAddress);
+            return null;
+        }
+    }
+
     private const string OwnershipPrefix = "winsmtprelay-verification=";
 
     public string BuildOwnershipRecord(string token) => OwnershipPrefix + token;
