@@ -51,8 +51,19 @@ public class SmtpDeliveryService : IDeliveryService
         // Optional per-tenant outbound source IP (null = OS default).
         var egressEndPoint = ParseEgressEndPoint(await _configCache.GetTenantEgressIpAsync(message.TenantId, cancellationToken));
 
-        var recipients = message.Recipients.Split(';', StringSplitOptions.RemoveEmptyEntries);
+        // Skip recipients that already received a 250 on a previous attempt — never re-deliver to them
+        // when retrying a partially-failed multi-recipient/multi-domain message.
+        var alreadyDelivered = new HashSet<string>(
+            (message.DeliveredRecipients ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.OrdinalIgnoreCase);
+        var recipients = message.Recipients
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(r => !alreadyDelivered.Contains(r))
+            .ToArray();
         var results = new List<DeliveryResult>();
+
+        if (recipients.Length == 0)
+            return results; // everything already delivered on a prior attempt → nothing to do
 
         // Group recipients by domain for efficient delivery
         var byDomain = recipients.GroupBy(r => r.Split('@').Last(), StringComparer.OrdinalIgnoreCase);

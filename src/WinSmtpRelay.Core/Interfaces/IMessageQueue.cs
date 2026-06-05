@@ -20,4 +20,8 @@ public interface IMessageQueue
     /// selects Queued). Returns the number of rows requeued.
     /// </summary>
     Task<int> RequeueStaleDeliveringAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Records the ";"-delimited set of recipients that have now received a 250, so a retry of
+    /// this message skips them (prevents duplicate delivery to already-succeeded recipients).</summary>
+    Task SetDeliveredRecipientsAsync(long messageId, string deliveredRecipients, CancellationToken cancellationToken = default);
 }

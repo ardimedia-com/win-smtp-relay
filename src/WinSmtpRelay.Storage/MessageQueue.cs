@@ -82,6 +82,13 @@ public class MessageQueue(RelayDbContext db) : IMessageQueue
             .ToListAsync(cancellationToken);
     }
 
+    public async Task SetDeliveredRecipientsAsync(long messageId, string deliveredRecipients, CancellationToken cancellationToken = default)
+    {
+        await db.QueuedMessages
+            .Where(m => m.Id == messageId)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.DeliveredRecipients, deliveredRecipients), cancellationToken);
+    }
+
     public async Task<int> RequeueStaleDeliveringAsync(CancellationToken cancellationToken = default)
     {
         // Single-instance Windows service: at startup nothing is genuinely in flight, so any Delivering

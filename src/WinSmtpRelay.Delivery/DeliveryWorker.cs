@@ -189,6 +189,17 @@ public class DeliveryWorker(
                     await LogDeliveryAsync(db, message.Id, dr.Recipient, dr.StatusCode, dr.StatusMessage, dr.RemoteServer, message.TenantId);
                     _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, dr.Recipient, dr.StatusCode, dr.RemoteServer, message.TenantId);
                 }
+
+                // Record recipients that succeeded this attempt so a retry skips them (no duplicates
+                // to recipients/domains that already accepted the message).
+                var delivered = new HashSet<string>(
+                    (message.DeliveredRecipients ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                    StringComparer.OrdinalIgnoreCase);
+                var before = delivered.Count;
+                foreach (var dr in dex.Results.Where(r => r.Success))
+                    delivered.Add(dr.Recipient);
+                if (delivered.Count != before)
+                    await queue.SetDeliveredRecipientsAsync(message.Id, string.Join(';', delivered), cancellationToken);
             }
             else
             {

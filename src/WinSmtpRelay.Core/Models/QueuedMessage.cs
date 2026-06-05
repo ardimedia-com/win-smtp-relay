@@ -17,6 +17,13 @@ public class QueuedMessage : ITenantOwned
     public DateTimeOffset? CompletedUtc { get; set; }
     public string? SourceIp { get; set; }
     public string? AuthenticatedUser { get; set; }
+
+    /// <summary>
+    /// Recipients (";"-delimited) that have already received a 250 on a previous attempt of this
+    /// message. On retry the delivery skips them, so a multi-recipient/multi-domain message where one
+    /// domain was temporarily down is never re-delivered to the recipients that already succeeded.
+    /// </summary>
+    public string? DeliveredRecipients { get; set; }
 }
 
 public enum MessageStatus
