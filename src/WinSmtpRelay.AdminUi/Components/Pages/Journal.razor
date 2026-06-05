@@ -43,7 +43,7 @@ else
     <BbTable Data="@logs">
         <BbTableHeader>
             <BbTableRow TData="DeliveryLog">
-                <BbTableHeaderCell TData="DeliveryLog">Time (UTC)</BbTableHeaderCell>
+                <BbTableHeaderCell TData="DeliveryLog">Time</BbTableHeaderCell>
                 <BbTableHeaderCell TData="DeliveryLog">Msg ID</BbTableHeaderCell>
                 <BbTableHeaderCell TData="DeliveryLog">Recipient</BbTableHeaderCell>
                 <BbTableHeaderCell TData="DeliveryLog">Status</BbTableHeaderCell>
@@ -60,20 +60,13 @@ else
             }
             @foreach (var log in logs)
             {
-                <BbTableRow Item="@log">
+                <BbTableRow Item="@log" class="log-row-clickable" @onclick="() => selected = log">
                     <BbTableCell><LocalTime Utc="@log.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /></BbTableCell>
                     <BbTableCell title="@($"Queue ID: {log.QueuedMessageId}")">@log.QueuedMessageId</BbTableCell>
                     <BbTableCell>@log.Recipient</BbTableCell>
                     <BbTableCell><span class="badge-status @GetStatusCss(log.StatusCode)">@log.StatusCode</span></BbTableCell>
                     <BbTableCell>@(log.RemoteServer ?? "-")</BbTableCell>
-                    <BbTableCell>
-                        <BbTooltip>
-                            <BbTooltipTrigger>
-                                <span>@Truncate(log.StatusMessage, 60)</span>
-                            </BbTooltipTrigger>
-                            <BbTooltipContent>@log.StatusMessage</BbTooltipContent>
-                        </BbTooltip>
-                    </BbTableCell>
+                    <BbTableCell>@Truncate(log.StatusMessage, 60)</BbTableCell>
                 </BbTableRow>
             }
         </BbTableBody>
@@ -122,7 +115,7 @@ else
                 <li><strong>Recipient</strong> &mdash; the email address this attempt targeted.</li>
                 <li><strong>Status</strong> &mdash; the SMTP status code returned by the remote server (250 = success, 4xx = temporary failure, 5xx = permanent failure).</li>
                 <li><strong>Remote Server</strong> &mdash; the MX host or smart host that handled the delivery.</li>
-                <li><strong>Details</strong> &mdash; the full status message from the remote server. Hover for the complete text.</li>
+                <li><strong>Details</strong> &mdash; the status message from the remote server (truncated). Click any row to see the full message.</li>
             </ul>
             <h4 style="margin-top:1rem;">Searching</h4>
             <p>
@@ -143,8 +136,34 @@ else
     </BbDialogContent>
 </BbDialog>
 
+<BbDialog Open="@(selected is not null)" OpenChanged="@(open => { if (!open) selected = null; })">
+    <BbDialogContent>
+        @if (selected is not null)
+        {
+            <BbDialogHeader>
+                <BbDialogTitle><span class="badge-status @GetStatusCss(selected.StatusCode)">@selected.StatusCode</span> @selected.Recipient</BbDialogTitle>
+                <BbDialogDescription><LocalTime Utc="@selected.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /> &middot; Msg @selected.QueuedMessageId</BbDialogDescription>
+            </BbDialogHeader>
+            <div style="font-size:0.875rem;line-height:1.6;max-height:60vh;overflow-y:auto;">
+                <div style="margin-bottom:0.5rem;">
+                    <strong class="text-muted">Remote server</strong><br />
+                    <span style="word-break:break-word;">@(selected.RemoteServer ?? "-")</span>
+                </div>
+                <div>
+                    <strong class="text-muted">Status message</strong><br />
+                    <span class="mono" style="word-break:break-word;white-space:pre-wrap;">@selected.StatusMessage</span>
+                </div>
+            </div>
+            <BbDialogFooter>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="() => selected = null">Close</BbButton>
+            </BbDialogFooter>
+        }
+    </BbDialogContent>
+</BbDialog>
+
 @code {
     private bool showHelp;
+    private DeliveryLog? selected;
     private List<DeliveryLog> logs = [];
     private string searchTerm = "";
     private int pageSize = 50;

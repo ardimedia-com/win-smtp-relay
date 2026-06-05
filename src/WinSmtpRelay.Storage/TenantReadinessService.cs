@@ -47,14 +47,15 @@ public class TenantReadinessService(
 
         var recipientList = await recipientDomains.GetAllAsync(ct);
         var ipRuleList = await ipRules.GetAllAsync(ct);
+        var allowIpRules = ipRuleList.Count(r => r.Action == IpAccessAction.Allow);
         var headerRules = await messageFilters.GetHeaderRulesAsync(ct);
         var senderRules = await messageFilters.GetSenderRulesAsync(ct);
         var filterCount = headerRules.Count + senderRules.Count;
         var keyList = await apiKeys.GetAllAsync(tenantId, ct);
 
-        // The hard minimum to relay mail: an active tenant with at least one credential to submit
-        // with. (Unauthenticated IP-allowed submission is possible too, noted in the item detail.)
-        var canSend = tenantActive && enabledUsers > 0;
+        // The hard minimum to relay mail: an active tenant with a way for clients to submit — either
+        // SMTP credentials, or an allow IP rule (unauthenticated submission from trusted IPs).
+        var canSend = tenantActive && (enabledUsers > 0 || allowIpRules > 0);
 
         var items = new List<SetupItem>
         {
@@ -64,11 +65,15 @@ public class TenantReadinessService(
                 tenantActive ? "Approved and enabled by the host" : "Awaiting host approval",
                 "", ""),
 
-            new("smtp-users", "SMTP credentials", SetupGroup.Required,
-                enabledUsers > 0 ? SetupStatus.Done : SetupStatus.Todo,
+            new("smtp-users", "Submission access", SetupGroup.Required,
+                enabledUsers > 0 ? SetupStatus.Done
+                    : allowIpRules > 0 ? SetupStatus.Permissive
+                    : SetupStatus.Todo,
                 enabledUsers > 0
-                    ? $"{enabledUsers} user{Plural(enabledUsers)} can submit mail"
-                    : "No SMTP users yet — clients need credentials to submit mail",
+                    ? $"{enabledUsers} SMTP user{Plural(enabledUsers)} can submit mail"
+                    : allowIpRules > 0
+                        ? $"No SMTP users — clients submit from {allowIpRules} allowed IP rule{Plural(allowIpRules)} without authentication"
+                        : "No SMTP users — add users, or allow client IPs (IP access rules), so clients can submit",
                 "/smtpusers", "Manage users"),
 
             // ----- Recommended: best practice for inbox deliverability -----

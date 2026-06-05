@@ -88,6 +88,19 @@ public class TenantReadinessServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
+    public async Task AllowIpRule_EnablesSubmissionWithoutUsers()
+    {
+        _db.IpAccessRules.Add(new IpAccessRule { Network = "10.0.0.0/8", Action = IpAccessAction.Allow });
+        await _db.SaveChangesAsync();
+
+        var r = await Build(_current).GetAsync();
+
+        Assert.IsTrue(r.CanSend, "An allow IP rule permits unauthenticated submission");
+        Assert.AreEqual(SetupStatus.Permissive, Item(r, "smtp-users").Status);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
     public async Task NoSenderDomains_IsPermissive_AndVerificationIsBlocked()
     {
         var r = await Build(_current).GetAsync();
