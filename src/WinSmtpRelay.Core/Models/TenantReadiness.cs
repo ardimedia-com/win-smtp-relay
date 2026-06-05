@@ -32,7 +32,7 @@ public enum SetupStatus
     Blocked
 }
 
-/// <summary>One checklist item on the Setup &amp; Health page.</summary>
+/// <summary>One checklist item on the Setup page.</summary>
 /// <param name="Key">Stable identifier (used for ordering/next-action selection).</param>
 /// <param name="Title">Short human-readable title.</param>
 /// <param name="Group">Required / Recommended / Optional.</param>

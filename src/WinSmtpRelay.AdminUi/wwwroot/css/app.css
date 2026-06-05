@@ -415,7 +415,7 @@ h1:focus-visible {
 .dns-record-label { flex: 0 0 5rem; font-size: 0.75rem; color: var(--muted-foreground); }
 .dns-record-value { flex: 1; word-break: break-all; font-size: 0.8rem; }
 
-/* Setup & Health page */
+/* Setup page */
 .setup-summary {
     display: flex;
     flex-wrap: wrap;
@@ -490,7 +490,7 @@ h1:focus-visible {
 .setup-row-icon.s-permissive { color: var(--muted-foreground); }
 .setup-row-main { flex: 1; min-width: 0; }
 
-/* Inline test-send area (top of Setup & Health) */
+/* Inline test-send area (top of Setup) */
 .test-send-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; }
 .test-send-row .form-group { margin-bottom: 0; flex: 1 1 200px; }
 .test-send-row .test-send-action { flex: 0 0 auto; }

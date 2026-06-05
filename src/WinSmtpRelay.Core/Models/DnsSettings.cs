@@ -1,9 +1,9 @@
 namespace WinSmtpRelay.Core.Models;
 
 /// <summary>
-/// Host-level inputs for the recommended SPF/DMARC records shown on the DNS Setup page
+/// Host-level inputs for the recommended SPF/DMARC records shown on the Health page
 /// (single row), runtime-editable. Seeded once from appsettings <c>Dns</c>, then authoritative.
-/// Consumed only by the DNS Setup page (not the SMTP hot path), so it is read directly.
+/// Consumed only by the Health page (not the SMTP hot path), so it is read directly.
 /// Lists are stored as semicolon/comma-delimited strings.
 /// </summary>
 public class DnsSettings

@@ -27,6 +27,6 @@ public class DnsSettingsService(RelayDbContext db) : IDnsSettingsService
         existing.DmarcPercentage = Math.Clamp(settings.DmarcPercentage, 1, 100);
         existing.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        // No cache: consumed only by the DNS Setup page (read on demand).
+        // No cache: consumed only by the Health page (read on demand).
     }
 }

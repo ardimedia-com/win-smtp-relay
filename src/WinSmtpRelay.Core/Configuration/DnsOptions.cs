@@ -1,7 +1,7 @@
 namespace WinSmtpRelay.Core.Configuration;
 
 /// <summary>
-/// Inputs for building the RECOMMENDED SPF/DMARC records shown on the DNS setup page.
+/// Inputs for building the RECOMMENDED SPF/DMARC records shown on the Health page.
 /// Live records are always resolved from DNS; these only describe what the operator should publish.
 /// </summary>
 public class DnsOptions

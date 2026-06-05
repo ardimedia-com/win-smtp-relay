@@ -1,4 +1,4 @@
-@page "/dns/setup"
+@page "/health"
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
@@ -8,13 +8,13 @@
     <BbBreadcrumbList>
         <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
         <BbBreadcrumbSeparator />
-        <BbBreadcrumbItem><BbBreadcrumbPage>DNS Setup</BbBreadcrumbPage></BbBreadcrumbItem>
+        <BbBreadcrumbItem><BbBreadcrumbPage>Health</BbBreadcrumbPage></BbBreadcrumbItem>
     </BbBreadcrumbList>
 </BbBreadcrumb>
 
 <div class="page-header page-header-row">
     <div>
-        <h1>DNS Setup</h1>
+        <h1>Health</h1>
         <p>Required vs. published SPF / DKIM / DMARC records for your sender domains. Publish the expected values at your DNS provider so mail you send authenticates.</p>
     </div>
     <div class="flex gap-1 items-center">
@@ -99,7 +99,7 @@ else
 <BbDialog @bind-Open="showHelp">
     <BbDialogContent>
         <BbDialogHeader>
-            <BbDialogTitle>About DNS Setup</BbDialogTitle>
+            <BbDialogTitle>About Health</BbDialogTitle>
             <BbDialogDescription>Publish these records so recipients trust mail from your domains</BbDialogDescription>
         </BbDialogHeader>
         <div style="font-size:0.875rem;line-height:1.6;">

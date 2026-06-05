@@ -11,13 +11,13 @@
     <BbBreadcrumbList>
         <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
         <BbBreadcrumbSeparator />
-        <BbBreadcrumbItem><BbBreadcrumbPage>Setup &amp; Health</BbBreadcrumbPage></BbBreadcrumbItem>
+        <BbBreadcrumbItem><BbBreadcrumbPage>Setup</BbBreadcrumbPage></BbBreadcrumbItem>
     </BbBreadcrumbList>
 </BbBreadcrumb>
 
 <div class="page-header page-header-row">
     <div>
-        <h1>Setup &amp; Health</h1>
+        <h1>Setup</h1>
         <p>A live checklist of what your organization needs to send mail — and the best practices that get it into the inbox.</p>
     </div>
     <div class="flex gap-1 items-center">
@@ -223,8 +223,8 @@ else
                     </div>
                 }
                 <div style="margin-top:0.75rem;">
-                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/dns/setup"))">
-                        Open DNS Setup <LucideIcon Name="chevron-right" Size="14" />
+                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/health"))">
+                        Open Health page <LucideIcon Name="chevron-right" Size="14" />
                     </BbButton>
                 </div>
             </BbCardContent>
@@ -242,7 +242,7 @@ else
 <BbDialog @bind-Open="showHelp">
     <BbDialogContent>
         <BbDialogHeader>
-            <BbDialogTitle>About Setup &amp; Health</BbDialogTitle>
+            <BbDialogTitle>About Setup</BbDialogTitle>
             <BbDialogDescription>How to read this page</BbDialogDescription>
         </BbDialogHeader>
         <div style="font-size:0.875rem;line-height:1.6;">
@@ -354,7 +354,7 @@ else
             // A DNS lookup failure should not break the page; show it as unknown.
             dnsResults = [];
             dnsItem = new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
-                SetupStatus.Todo, "Could not check DNS just now — try Re-check", "/dns/setup", "DNS Setup");
+                SetupStatus.Todo, "Could not check DNS just now — try Re-check", "/health", "Health");
         }
         finally
         {
@@ -378,7 +378,7 @@ else
 
         if (publishable.Count == 0)
             return new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
-                SetupStatus.Todo, "Set up DKIM and the DNS recommendation settings to generate records", "/dns/setup", "DNS Setup");
+                SetupStatus.Todo, "Set up DKIM and the DNS recommendation settings to generate records", "/health", "Health");
 
         var ok = publishable.Count(r => r.Status == DnsRecordStatus.Ok);
         var total = publishable.Count;
@@ -387,7 +387,7 @@ else
             ? $"All {total} records published across {results.Count} domain{(results.Count == 1 ? "" : "s")}"
             : $"{ok} of {total} records published";
         return new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
-            status, detail, "/dns/setup", "DNS Setup");
+            status, detail, "/health", "Health");
     }
 
     private void Recompute()
@@ -476,7 +476,7 @@ else
             }
 
             var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
-            var body = "This is a test message from the WIN-SMTP-RELAY Setup & Health page, " +
+            var body = "This is a test message from the WIN-SMTP-RELAY Setup page, " +
                        "sent to verify that outbound delivery works.\r\n";
             await AccountEmail.EnqueueAsync(
                 queue, from, to, "WIN-SMTP-RELAY test message", body, tenantId);
