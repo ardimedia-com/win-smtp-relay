@@ -1,0 +1,191 @@
+@page "/smtpusers/new"
+@page "/smtpusers/{Id:int}"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@using Microsoft.EntityFrameworkCore
+@inject ITenantScopeFactory ScopeFactory
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/smtpusers">SMTP Users</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>@(IsNew ? "New" : username)</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>@(IsNew ? "New SMTP user" : $"Edit: {username}")</h1>
+    <p>SMTP relay user account and permissions</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[300px] w-full" />
+}
+else if (notFound)
+{
+    <p class="text-danger">User not found.</p>
+    <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel"><LucideIcon Name="arrow-left" /> Back</BbButton>
+}
+else
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel>Username</BbLabel>
+                <BbInput @bind-Value="username" Placeholder="username" Disabled="@(!IsNew)" />
+            </div>
+            <div class="form-group">
+                <BbLabel>@(IsNew ? "Password" : "New Password")</BbLabel>
+                <BbInput Type="InputType.Password" @bind-Value="password"
+                         Placeholder="@(IsNew ? "password" : "leave blank to keep current")" />
+            </div>
+            <div class="form-group">
+                <BbLabel>Enabled</BbLabel>
+                <BbNativeSelect @bind-Value="enabled">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </BbNativeSelect>
+            </div>
+            <div class="form-group">
+                <BbLabel>Allowed Sender Addresses</BbLabel>
+                <BbInput @bind-Value="allowedSenders" Placeholder="user@example.com;noreply@example.com" />
+            </div>
+            <div style="display:flex;gap:1rem;">
+                <div class="form-group" style="flex:1">
+                    <BbLabel>Rate Limit per Minute</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="ratePerMinuteStr" Placeholder="unlimited" />
+                </div>
+                <div class="form-group" style="flex:1">
+                    <BbLabel>Rate Limit per Day</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="ratePerDayStr" Placeholder="unlimited" />
+                </div>
+            </div>
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@SaveDisabled">
+                    <LucideIcon Name="save" /> Save
+                </BbButton>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
+                @if (!string.IsNullOrEmpty(statusMessage))
+                {
+                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                }
+            </div>
+        </BbCardFooter>
+    </BbCard>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    private bool IsNew => Id is null;
+
+    private bool isLoading = true;
+    private bool notFound;
+    private string? statusMessage;
+
+    private string username = "";
+    private string password = "";
+    private string enabled = "true";
+    private string allowedSenders = "";
+    private string ratePerMinuteStr = "";
+    private string ratePerDayStr = "";
+
+    private int? ratePerMinute => int.TryParse(ratePerMinuteStr, out var v) ? v : null;
+    private int? ratePerDay => int.TryParse(ratePerDayStr, out var v) ? v : null;
+
+    // New user needs both username and password; an existing user only requires a username (the
+    // password is optional and only changed when a new one is entered).
+    private bool SaveDisabled => IsNew
+        ? string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password)
+        : string.IsNullOrWhiteSpace(username);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsNew)
+        {
+            isLoading = false;
+            return;
+        }
+
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var users = await svc.GetAllUsersAsync();
+        var user = users.FirstOrDefault(u => u.Id == Id);
+        if (user is null)
+        {
+            notFound = true;
+            isLoading = false;
+            return;
+        }
+
+        username = user.Username;
+        enabled = user.IsEnabled.ToString().ToLowerInvariant();
+        allowedSenders = user.AllowedSenderAddresses ?? "";
+        ratePerMinuteStr = user.RateLimitPerMinute?.ToString() ?? "";
+        ratePerDayStr = user.RateLimitPerDay?.ToString() ?? "";
+        isLoading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+
+        if (IsNew)
+        {
+            var svc = scope.ServiceProvider.GetRequiredService<IUserService>();
+
+            var existing = await svc.GetByUsernameAsync(username);
+            if (existing is not null)
+            {
+                statusMessage = $"User '{username}' already exists";
+                return;
+            }
+
+            await svc.CreateUserAsync(username, password);
+
+            // Apply the per-user policy fields the create service does not set.
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var created = await db.RelayUsers.FirstOrDefaultAsync(u => u.Username == username);
+            if (created is not null)
+            {
+                created.IsEnabled = enabled == "true";
+                created.AllowedSenderAddresses = string.IsNullOrWhiteSpace(allowedSenders) ? null : allowedSenders.Trim();
+                created.RateLimitPerMinute = ratePerMinute;
+                created.RateLimitPerDay = ratePerDay;
+                await db.SaveChangesAsync();
+            }
+        }
+        else
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var user = await db.RelayUsers.FirstOrDefaultAsync(u => u.Id == Id);
+            if (user is null)
+            {
+                notFound = true;
+                return;
+            }
+
+            user.IsEnabled = enabled == "true";
+            user.AllowedSenderAddresses = string.IsNullOrWhiteSpace(allowedSenders) ? null : allowedSenders.Trim();
+            user.RateLimitPerMinute = ratePerMinute;
+            user.RateLimitPerDay = ratePerDay;
+
+            // Only change the password when a new one is entered; otherwise keep the current hash.
+            if (!string.IsNullOrWhiteSpace(password))
+            {
+                user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        Nav.NavigateTo("/smtpusers");
+    }
+
+    private void Cancel() => Nav.NavigateTo("/smtpusers");
+}

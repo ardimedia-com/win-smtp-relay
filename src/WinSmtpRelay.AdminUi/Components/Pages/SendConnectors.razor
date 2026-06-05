@@ -3,6 +3,7 @@
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
 @inject IRuntimeConfigCache ConfigCache
+@inject NavigationManager Nav
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -21,9 +22,14 @@
         <h1>Send Connectors</h1>
         <p>Outbound delivery routes, smart hosts and domain routing</p>
     </div>
-    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
-        <LucideIcon Name="info" /> About Send Connectors
-    </BbButton>
+    <div class="flex gap-1 items-center">
+        <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/connectors/send/new"))">
+            <LucideIcon Name="plus" /> New connector
+        </BbButton>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
+            <LucideIcon Name="info" /> About Send Connectors
+        </BbButton>
+    </div>
 </div>
 
 <BbTabs DefaultValue="connectors" @bind-Value="activeTab">
@@ -33,40 +39,6 @@
     </BbTabsList>
 
     <BbTabsContent Value="connectors">
-        <div style="max-width:500px;">
-        <BbCard Class="mb-1">
-            <BbCardHeader>
-                <BbCardTitle>Create Send Connector</BbCardTitle>
-            </BbCardHeader>
-            <BbCardContent>
-                <div class="form-group">
-                    <BbLabel>Name</BbLabel>
-                    <BbInput @bind-Value="newName" Placeholder="Default" />
-                </div>
-                <div style="display:flex;gap:1rem;">
-                    <div class="form-group" style="flex:2">
-                        <BbLabel>Smart Host (empty = direct MX)</BbLabel>
-                        <BbInput @bind-Value="newSmartHost" Placeholder="smtp.example.com" />
-                    </div>
-                    <div class="form-group" style="flex:1">
-                        <BbLabel>Port</BbLabel>
-                        <BbInput Type="InputType.Number" @bind-Value="newPort" />
-                    </div>
-                </div>
-            </BbCardContent>
-            <BbCardFooter>
-                <BbButton Variant="ButtonVariant.Default" @onclick="CreateConnectorAsync"
-                        Disabled="@string.IsNullOrWhiteSpace(newName)">
-                    <LucideIcon Name="plus" /> Create
-                </BbButton>
-                @if (!string.IsNullOrEmpty(statusMessage))
-                {
-                    <span class="text-muted" style="margin-left:1rem">@statusMessage</span>
-                }
-            </BbCardFooter>
-        </BbCard>
-        </div>
-
         @if (isLoading)
         {
             <BbSkeleton Class="h-[300px] w-full" />
@@ -82,7 +54,7 @@
                         <BbTableHeaderCell TData="SendConnector">Default</BbTableHeaderCell>
                         <BbTableHeaderCell TData="SendConnector">Concurrency</BbTableHeaderCell>
                         <BbTableHeaderCell TData="SendConnector">Enabled</BbTableHeaderCell>
-                        <BbTableHeaderCell TData="SendConnector">Actions</BbTableHeaderCell>
+                        <BbTableHeaderCell TData="SendConnector"></BbTableHeaderCell>
                     </BbTableRow>
                 </BbTableHeader>
                 <BbTableBody>
@@ -94,7 +66,7 @@
                     }
                     @foreach (var c in connectors)
                     {
-                        <BbTableRow Item="@c">
+                        <BbTableRow Item="@c" class="list-row-clickable" @onclick="() => Edit(c.Id)">
                             <BbTableCell>@c.Name</BbTableCell>
                             <BbTableCell>@(string.IsNullOrEmpty(c.SmartHost) ? "Direct MX" : $"{c.SmartHost}:{c.SmartHostPort}")</BbTableCell>
                             <BbTableCell>
@@ -106,22 +78,15 @@
                             <BbTableCell>@c.MaxConcurrentDeliveries</BbTableCell>
                             <BbTableCell><span class="badge-status @(c.IsEnabled ? "badge-success" : "badge-muted")">@(c.IsEnabled ? "Yes" : "No")</span></BbTableCell>
                             <BbTableCell>
-                                <BbDropdownMenu>
-                                    <BbDropdownMenuTrigger>
-                                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost">
-                                            <LucideIcon Name="ellipsis" />
-                                        </BbButton>
-                                    </BbDropdownMenuTrigger>
-                                    <BbDropdownMenuContent>
-                                        <BbDropdownMenuItem @onclick="() => StartEditConnector(c)">
-                                            <LucideIcon Name="pencil" /> Edit
-                                        </BbDropdownMenuItem>
-                                        <BbDropdownMenuSeparator />
-                                        <BbDropdownMenuItem @onclick="() => { deleteTargetId = c.Id; showDeleteConfirm = true; }">
-                                            <LucideIcon Name="trash-2" /> Delete
-                                        </BbDropdownMenuItem>
-                                    </BbDropdownMenuContent>
-                                </BbDropdownMenu>
+                                <div class="list-row-actions" @onclick:stopPropagation="true">
+                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => Edit(c.Id)">
+                                        <LucideIcon Name="pencil" />
+                                    </BbButton>
+                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                            @onclick="() => { deleteTargetId = c.Id; showDeleteConfirm = true; }">
+                                        <LucideIcon Name="trash-2" />
+                                    </BbButton>
+                                </div>
                             </BbTableCell>
                         </BbTableRow>
                     }
@@ -195,89 +160,6 @@
     </BbTabsContent>
 </BbTabs>
 
-<BbDialog @bind-Open="isEditOpen">
-    <BbDialogContent>
-        <BbDialogHeader>
-            <BbDialogTitle>Edit: @editName</BbDialogTitle>
-            <BbDialogDescription>Modify send connector settings</BbDialogDescription>
-        </BbDialogHeader>
-        <div class="form-group">
-            <BbLabel>Name</BbLabel>
-            <BbInput @bind-Value="editName" />
-        </div>
-        <div style="display:flex;gap:1rem;">
-            <div class="form-group" style="flex:2">
-                <BbLabel>Smart Host</BbLabel>
-                <BbInput @bind-Value="editSmartHost" Placeholder="Direct MX if empty" />
-            </div>
-            <div class="form-group" style="flex:1">
-                <BbLabel>Port</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="editPort" />
-            </div>
-        </div>
-        <div style="display:flex;gap:1rem;">
-            <div class="form-group" style="flex:1">
-                <BbLabel>Username</BbLabel>
-                <BbInput @bind-Value="editUsername" />
-            </div>
-            <div class="form-group" style="flex:1">
-                <BbLabel>Password</BbLabel>
-                <BbInput Type="InputType.Password" @bind-Value="editPassword" />
-            </div>
-        </div>
-        <div style="display:flex;gap:1rem;">
-            <div class="form-group">
-                <BbLabel>Opportunistic TLS</BbLabel>
-                <BbNativeSelect @bind-Value="editOpportunisticTls">
-                    <option value="true">Yes</option>
-                    <option value="false">No</option>
-                </BbNativeSelect>
-            </div>
-            <div class="form-group">
-                <BbLabel>Require TLS</BbLabel>
-                <BbNativeSelect @bind-Value="editRequireTls">
-                    <option value="false">No</option>
-                    <option value="true">Yes</option>
-                </BbNativeSelect>
-            </div>
-            <div class="form-group">
-                <BbLabel>Default</BbLabel>
-                <BbNativeSelect @bind-Value="editIsDefault">
-                    <option value="false">No</option>
-                    <option value="true">Yes</option>
-                </BbNativeSelect>
-            </div>
-        </div>
-        <div style="display:flex;gap:1rem;">
-            <div class="form-group" style="flex:1">
-                <BbLabel>Concurrent Deliveries</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="editConcurrency" />
-            </div>
-            <div class="form-group" style="flex:1">
-                <BbLabel>Max Retry Hours</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="editMaxRetry" />
-            </div>
-        </div>
-        <div class="form-group">
-            <BbLabel>Retry Intervals (minutes, comma-separated)</BbLabel>
-            <BbInput @bind-Value="editRetryIntervals" Placeholder="1,5,30,120,480,1440" />
-        </div>
-        <div class="form-group">
-            <BbLabel>Enabled</BbLabel>
-            <BbNativeSelect @bind-Value="editEnabled">
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-            </BbNativeSelect>
-        </div>
-        <BbDialogFooter>
-            <BbDialogClose>
-                <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
-            </BbDialogClose>
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveEditAsync">Save</BbButton>
-        </BbDialogFooter>
-    </BbDialogContent>
-</BbDialog>
-
 <BbAlertDialog @bind-Open="showDeleteConfirm">
     <BbAlertDialogContent>
         <BbAlertDialogHeader>
@@ -341,7 +223,6 @@
     private IReadOnlyList<DomainRoute> routes = [];
     private bool isLoading = true;
     private bool showHelp;
-    private bool isEditOpen;
     private bool showDeleteConfirm;
     private bool showDeleteRouteConfirm;
     private int deleteTargetId;
@@ -349,29 +230,9 @@
     private string? statusMessage;
     private string activeTab = "connectors";
 
-    // Create connector form
-    private string newName = "";
-    private string newSmartHost = "";
-    private string newPort = "587";
-
     // Create route form
     private string newRouteDomain = "";
     private string newRouteConnectorId = "";
-
-    // Edit connector form
-    private int editId;
-    private string editName = "";
-    private string editSmartHost = "";
-    private string editPort = "587";
-    private string editUsername = "";
-    private string editPassword = "";
-    private string editOpportunisticTls = "true";
-    private string editRequireTls = "false";
-    private string editIsDefault = "false";
-    private string editConcurrency = "4";
-    private string editMaxRetry = "48";
-    private string editRetryIntervals = "1,5,30,120,480,1440";
-    private string editEnabled = "true";
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();
 
@@ -388,25 +249,7 @@
         isLoading = false;
     }
 
-    private async Task CreateConnectorAsync()
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ISendConnectorService>();
-
-        await svc.CreateAsync(new SendConnector
-        {
-            Name = newName.Trim(),
-            SmartHost = string.IsNullOrWhiteSpace(newSmartHost) ? null : newSmartHost.Trim(),
-            SmartHostPort = int.TryParse(newPort, out var p) ? p : 587
-        });
-
-        ConfigCache.Invalidate();
-        statusMessage = $"Connector '{newName}' created";
-        newName = "";
-        newSmartHost = "";
-        newPort = "587";
-        await RefreshAsync();
-    }
+    private void Edit(int id) => Nav.NavigateTo($"/connectors/send/{id}");
 
     private async Task CreateRouteAsync()
     {
@@ -424,53 +267,6 @@
         ConfigCache.Invalidate();
         statusMessage = "Route added";
         newRouteDomain = "";
-        await RefreshAsync();
-    }
-
-    private void StartEditConnector(SendConnector c)
-    {
-        editId = c.Id;
-        editName = c.Name;
-        editSmartHost = c.SmartHost ?? "";
-        editPort = c.SmartHostPort.ToString();
-        editUsername = c.Username ?? "";
-        editPassword = c.EncryptedPassword ?? "";
-        editOpportunisticTls = c.OpportunisticTls.ToString().ToLowerInvariant();
-        editRequireTls = c.RequireTls.ToString().ToLowerInvariant();
-        editIsDefault = c.IsDefault.ToString().ToLowerInvariant();
-        editConcurrency = c.MaxConcurrentDeliveries.ToString();
-        editMaxRetry = c.MaxRetryHours.ToString();
-        editRetryIntervals = c.RetryIntervalsMinutes;
-        editEnabled = c.IsEnabled.ToString().ToLowerInvariant();
-        isEditOpen = true;
-    }
-
-    private async Task SaveEditAsync()
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ISendConnectorService>();
-
-        await svc.UpdateAsync(new SendConnector
-        {
-            Id = editId,
-            Name = editName.Trim(),
-            SmartHost = string.IsNullOrWhiteSpace(editSmartHost) ? null : editSmartHost.Trim(),
-            SmartHostPort = int.TryParse(editPort, out var p) ? p : 587,
-            Username = string.IsNullOrWhiteSpace(editUsername) ? null : editUsername.Trim(),
-            EncryptedPassword = string.IsNullOrWhiteSpace(editPassword) ? null : editPassword,
-            OpportunisticTls = editOpportunisticTls == "true",
-            RequireTls = editRequireTls == "true",
-            IsDefault = editIsDefault == "true",
-            MaxConcurrentDeliveries = int.TryParse(editConcurrency, out var c) ? c : 4,
-            MaxRetryHours = int.TryParse(editMaxRetry, out var r) ? r : 48,
-            RetryIntervalsMinutes = editRetryIntervals.Trim(),
-            ConnectTimeoutSeconds = 30,
-            IsEnabled = editEnabled == "true"
-        });
-
-        ConfigCache.Invalidate();
-        statusMessage = "Connector updated";
-        isEditOpen = false;
         await RefreshAsync();
     }
 

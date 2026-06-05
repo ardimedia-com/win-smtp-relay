@@ -1,0 +1,136 @@
+@page "/ip-rules/new"
+@page "/ip-rules/{Id:int}"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject ITenantScopeFactory ScopeFactory
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/ip-rules">IP Access Rules</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>@(IsNew ? "New" : network)</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>@(IsNew ? "New IP rule" : $"Edit: {network}")</h1>
+    <p>Network-level allow and deny rule, evaluated in sort order</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[300px] w-full" />
+}
+else if (notFound)
+{
+    <p class="text-danger">IP access rule not found.</p>
+    <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel"><LucideIcon Name="arrow-left" /> Back</BbButton>
+}
+else
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel>Network (CIDR)</BbLabel>
+                <BbInput @bind-Value="network" Placeholder="10.0.0.0/8" />
+            </div>
+            <div class="form-group">
+                <BbLabel>Action</BbLabel>
+                <BbNativeSelect @bind-Value="action">
+                    <option value="Allow">Allow</option>
+                    <option value="Deny">Deny</option>
+                </BbNativeSelect>
+            </div>
+            <div class="form-group">
+                <BbLabel>Sort Order</BbLabel>
+                <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
+            </div>
+            <div class="form-group">
+                <BbLabel>Description (optional)</BbLabel>
+                <BbInput @bind-Value="description" Placeholder="Internal network" />
+            </div>
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(network)">
+                    <LucideIcon Name="save" /> Save
+                </BbButton>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
+                @if (!string.IsNullOrEmpty(statusMessage))
+                {
+                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                }
+            </div>
+        </BbCardFooter>
+    </BbCard>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    private bool IsNew => Id is null;
+
+    private bool isLoading = true;
+    private bool notFound;
+    private string? statusMessage;
+
+    private string network = "";
+    private string action = "Allow";
+    private string sortOrder = "0";
+    private string description = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IIpAccessRuleService>();
+        var all = await svc.GetAllAsync();
+
+        if (IsNew)
+        {
+            var nextOrder = all.Count > 0 ? all.Max(r => r.SortOrder) + 1 : 1;
+            sortOrder = nextOrder.ToString();
+            isLoading = false;
+            return;
+        }
+
+        var rule = all.FirstOrDefault(r => r.Id == Id!.Value);
+        if (rule is null)
+        {
+            notFound = true;
+            isLoading = false;
+            return;
+        }
+
+        network = rule.Network;
+        action = rule.Action.ToString();
+        sortOrder = rule.SortOrder.ToString();
+        description = rule.Description ?? "";
+        isLoading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IIpAccessRuleService>();
+
+        var rule = new IpAccessRule
+        {
+            Id = Id ?? 0,
+            Network = network.Trim(),
+            Action = Enum.Parse<IpAccessAction>(action),
+            SortOrder = int.TryParse(sortOrder, out var s) ? s : 0,
+            Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim()
+        };
+
+        if (IsNew)
+            await svc.CreateAsync(rule);
+        else
+            await svc.UpdateAsync(rule);
+
+        Nav.NavigateTo("/ip-rules");
+    }
+
+    private void Cancel() => Nav.NavigateTo("/ip-rules");
+}

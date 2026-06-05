@@ -2,6 +2,7 @@
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
+@inject NavigationManager Nav
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -20,44 +21,14 @@
         <h1>IP Access Rules</h1>
         <p>Network-level allow and deny rules, evaluated in sort order</p>
     </div>
-    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
-        <LucideIcon Name="info" /> About IP Rules
-    </BbButton>
-</div>
-
-<div style="max-width:500px;">
-<BbCard Class="mb-1">
-    <BbCardHeader>
-        <BbCardTitle>Add Rule</BbCardTitle>
-    </BbCardHeader>
-    <BbCardContent>
-        <div class="form-group">
-            <BbLabel>Network (CIDR)</BbLabel>
-            <BbInput @bind-Value="newNetwork" Placeholder="10.0.0.0/8" />
-        </div>
-        <div class="form-group">
-            <BbLabel>Action</BbLabel>
-            <BbNativeSelect @bind-Value="newAction">
-                <option value="Allow">Allow</option>
-                <option value="Deny">Deny</option>
-            </BbNativeSelect>
-        </div>
-        <div class="form-group">
-            <BbLabel>Description (optional)</BbLabel>
-            <BbInput @bind-Value="newDescription" Placeholder="Internal network" />
-        </div>
-    </BbCardContent>
-    <BbCardFooter>
-        <BbButton Variant="ButtonVariant.Default" @onclick="CreateAsync"
-                Disabled="@string.IsNullOrWhiteSpace(newNetwork)">
-            <LucideIcon Name="plus" /> Add
+    <div class="flex gap-1 items-center">
+        <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/ip-rules/new"))">
+            <LucideIcon Name="plus" /> New rule
         </BbButton>
-        @if (!string.IsNullOrEmpty(statusMessage))
-        {
-            <span class="text-muted" style="margin-left:1rem">@statusMessage</span>
-        }
-    </BbCardFooter>
-</BbCard>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
+            <LucideIcon Name="info" /> About IP Rules
+        </BbButton>
+    </div>
 </div>
 
 @if (isLoading)
@@ -73,7 +44,7 @@ else
                 <BbTableHeaderCell TData="IpAccessRule">Network</BbTableHeaderCell>
                 <BbTableHeaderCell TData="IpAccessRule">Action</BbTableHeaderCell>
                 <BbTableHeaderCell TData="IpAccessRule">Description</BbTableHeaderCell>
-                <BbTableHeaderCell TData="IpAccessRule">Actions</BbTableHeaderCell>
+                <BbTableHeaderCell TData="IpAccessRule"></BbTableHeaderCell>
             </BbTableRow>
         </BbTableHeader>
         <BbTableBody>
@@ -85,7 +56,7 @@ else
             }
             @foreach (var rule in rules)
             {
-                <BbTableRow Item="@rule">
+                <BbTableRow Item="@rule" class="list-row-clickable" @onclick="() => Edit(rule.Id)">
                     <BbTableCell>@rule.SortOrder</BbTableCell>
                     <BbTableCell><code>@rule.Network</code></BbTableCell>
                     <BbTableCell>
@@ -93,64 +64,23 @@ else
                             @rule.Action
                         </span>
                     </BbTableCell>
-                    <BbTableCell>@(rule.Description ?? "\u2014")</BbTableCell>
+                    <BbTableCell>@(rule.Description ?? "—")</BbTableCell>
                     <BbTableCell>
-                        <BbDropdownMenu>
-                            <BbDropdownMenuTrigger>
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost">
-                                    <LucideIcon Name="ellipsis" />
-                                </BbButton>
-                            </BbDropdownMenuTrigger>
-                            <BbDropdownMenuContent>
-                                <BbDropdownMenuItem @onclick="() => StartEdit(rule)">
-                                    <LucideIcon Name="pencil" /> Edit
-                                </BbDropdownMenuItem>
-                                <BbDropdownMenuSeparator />
-                                <BbDropdownMenuItem @onclick="() => { deleteTargetId = rule.Id; showDeleteConfirm = true; }">
-                                    <LucideIcon Name="trash-2" /> Delete
-                                </BbDropdownMenuItem>
-                            </BbDropdownMenuContent>
-                        </BbDropdownMenu>
+                        <div class="list-row-actions" @onclick:stopPropagation="true">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => Edit(rule.Id)">
+                                <LucideIcon Name="pencil" />
+                            </BbButton>
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                    @onclick="() => { deleteTargetId = rule.Id; showDeleteConfirm = true; }">
+                                <LucideIcon Name="trash-2" />
+                            </BbButton>
+                        </div>
                     </BbTableCell>
                 </BbTableRow>
             }
         </BbTableBody>
     </BbTable>
 }
-
-<BbDialog @bind-Open="isEditOpen">
-    <BbDialogContent>
-        <BbDialogHeader>
-            <BbDialogTitle>Edit IP Rule</BbDialogTitle>
-            <BbDialogDescription>Modify the IP access rule</BbDialogDescription>
-        </BbDialogHeader>
-        <div class="form-group">
-            <BbLabel>Network (CIDR)</BbLabel>
-            <BbInput @bind-Value="editNetwork" />
-        </div>
-        <div class="form-group">
-            <BbLabel>Action</BbLabel>
-            <BbNativeSelect @bind-Value="editAction">
-                <option value="Allow">Allow</option>
-                <option value="Deny">Deny</option>
-            </BbNativeSelect>
-        </div>
-        <div class="form-group">
-            <BbLabel>Sort Order</BbLabel>
-            <BbInput Type="InputType.Number" @bind-Value="editSortOrder" />
-        </div>
-        <div class="form-group">
-            <BbLabel>Description</BbLabel>
-            <BbInput @bind-Value="editDescription" />
-        </div>
-        <BbDialogFooter>
-            <BbDialogClose>
-                <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
-            </BbDialogClose>
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveEditAsync">Save</BbButton>
-        </BbDialogFooter>
-    </BbDialogContent>
-</BbDialog>
 
 <BbAlertDialog @bind-Open="showDeleteConfirm">
     <BbAlertDialogContent>
@@ -192,20 +122,8 @@ else
     private IReadOnlyList<IpAccessRule> rules = [];
     private bool isLoading = true;
     private bool showHelp;
-    private bool isEditOpen;
     private bool showDeleteConfirm;
     private int deleteTargetId;
-    private string? statusMessage;
-
-    private string newNetwork = "";
-    private string newAction = "Allow";
-    private string newDescription = "";
-
-    private int editId;
-    private string editNetwork = "";
-    private string editAction = "Allow";
-    private string editSortOrder = "0";
-    private string editDescription = "";
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();
 
@@ -218,61 +136,13 @@ else
         isLoading = false;
     }
 
-    private async Task CreateAsync()
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IIpAccessRuleService>();
-
-        var nextOrder = rules.Count > 0 ? rules.Max(r => r.SortOrder) + 1 : 1;
-        await svc.CreateAsync(new IpAccessRule
-        {
-            Network = newNetwork.Trim(),
-            Action = Enum.Parse<IpAccessAction>(newAction),
-            SortOrder = nextOrder,
-            Description = string.IsNullOrWhiteSpace(newDescription) ? null : newDescription.Trim()
-        });
-
-        statusMessage = "Rule added";
-        newNetwork = "";
-        newDescription = "";
-        await RefreshAsync();
-    }
-
-    private void StartEdit(IpAccessRule rule)
-    {
-        editId = rule.Id;
-        editNetwork = rule.Network;
-        editAction = rule.Action.ToString();
-        editSortOrder = rule.SortOrder.ToString();
-        editDescription = rule.Description ?? "";
-        isEditOpen = true;
-    }
-
-    private async Task SaveEditAsync()
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IIpAccessRuleService>();
-
-        await svc.UpdateAsync(new IpAccessRule
-        {
-            Id = editId,
-            Network = editNetwork.Trim(),
-            Action = Enum.Parse<IpAccessAction>(editAction),
-            SortOrder = int.TryParse(editSortOrder, out var s) ? s : 0,
-            Description = string.IsNullOrWhiteSpace(editDescription) ? null : editDescription.Trim()
-        });
-
-        statusMessage = "Rule updated";
-        isEditOpen = false;
-        await RefreshAsync();
-    }
+    private void Edit(int id) => Nav.NavigateTo($"/ip-rules/{id}");
 
     private async Task ConfirmDeleteAsync()
     {
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<IIpAccessRuleService>();
         await svc.DeleteAsync(deleteTargetId);
-        statusMessage = "Rule deleted";
         showDeleteConfirm = false;
         await RefreshAsync();
     }

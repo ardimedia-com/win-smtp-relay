@@ -1,0 +1,208 @@
+@page "/connectors/send/new"
+@page "/connectors/send/{Id:int}"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject ITenantScopeFactory ScopeFactory
+@inject IRuntimeConfigCache ConfigCache
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/connectors/send">Send Connectors</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>@(IsNew ? "New" : name)</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>@(IsNew ? "New send connector" : $"Edit: {name}")</h1>
+    <p>Outbound delivery route &mdash; smart host or direct MX delivery</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[300px] w-full" />
+}
+else if (notFound)
+{
+    <p class="text-danger">Send connector not found.</p>
+    <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel"><LucideIcon Name="arrow-left" /> Back</BbButton>
+}
+else
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel>Name</BbLabel>
+                <BbInput @bind-Value="name" Placeholder="Default" />
+            </div>
+            <div style="display:flex;gap:1rem;">
+                <div class="form-group" style="flex:2">
+                    <BbLabel>Smart Host (empty = direct MX)</BbLabel>
+                    <BbInput @bind-Value="smartHost" Placeholder="smtp.example.com" />
+                </div>
+                <div class="form-group" style="flex:1">
+                    <BbLabel>Port</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="port" />
+                </div>
+            </div>
+            <div style="display:flex;gap:1rem;">
+                <div class="form-group" style="flex:1">
+                    <BbLabel>Username</BbLabel>
+                    <BbInput @bind-Value="username" />
+                </div>
+                <div class="form-group" style="flex:1">
+                    <BbLabel>Password</BbLabel>
+                    <BbInput Type="InputType.Password" @bind-Value="password" />
+                </div>
+            </div>
+            <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+                <div class="form-group">
+                    <BbLabel>Opportunistic TLS</BbLabel>
+                    <BbNativeSelect @bind-Value="opportunisticTls">
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </BbNativeSelect>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Require TLS</BbLabel>
+                    <BbNativeSelect @bind-Value="requireTls">
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                    </BbNativeSelect>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Default</BbLabel>
+                    <BbNativeSelect @bind-Value="isDefault">
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                    </BbNativeSelect>
+                </div>
+            </div>
+            <div style="display:flex;gap:1rem;">
+                <div class="form-group" style="flex:1">
+                    <BbLabel>Concurrent Deliveries</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="concurrency" />
+                </div>
+                <div class="form-group" style="flex:1">
+                    <BbLabel>Max Retry Hours</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="maxRetry" />
+                </div>
+            </div>
+            <div class="form-group">
+                <BbLabel>Retry Intervals (minutes, comma-separated)</BbLabel>
+                <BbInput @bind-Value="retryIntervals" Placeholder="1,5,30,120,480,1440" />
+            </div>
+            <div class="form-group">
+                <BbLabel>Enabled</BbLabel>
+                <BbNativeSelect @bind-Value="enabled">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </BbNativeSelect>
+            </div>
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(name)">
+                    <LucideIcon Name="save" /> Save
+                </BbButton>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
+                @if (!string.IsNullOrEmpty(statusMessage))
+                {
+                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                }
+            </div>
+        </BbCardFooter>
+    </BbCard>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    private bool IsNew => Id is null;
+
+    private bool isLoading = true;
+    private bool notFound;
+    private string? statusMessage;
+
+    private string name = "";
+    private string smartHost = "";
+    private string port = "587";
+    private string username = "";
+    private string password = "";
+    private string opportunisticTls = "true";
+    private string requireTls = "false";
+    private string isDefault = "false";
+    private string concurrency = "4";
+    private string maxRetry = "48";
+    private string retryIntervals = "1,5,30,120,480,1440";
+    private string enabled = "true";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsNew)
+        {
+            isLoading = false;
+            return;
+        }
+
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ISendConnectorService>();
+        var c = await svc.GetByIdAsync(Id!.Value);
+        if (c is null)
+        {
+            notFound = true;
+            isLoading = false;
+            return;
+        }
+
+        name = c.Name;
+        smartHost = c.SmartHost ?? "";
+        port = c.SmartHostPort.ToString();
+        username = c.Username ?? "";
+        password = c.EncryptedPassword ?? "";
+        opportunisticTls = c.OpportunisticTls.ToString().ToLowerInvariant();
+        requireTls = c.RequireTls.ToString().ToLowerInvariant();
+        isDefault = c.IsDefault.ToString().ToLowerInvariant();
+        concurrency = c.MaxConcurrentDeliveries.ToString();
+        maxRetry = c.MaxRetryHours.ToString();
+        retryIntervals = c.RetryIntervalsMinutes;
+        enabled = c.IsEnabled.ToString().ToLowerInvariant();
+        isLoading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ISendConnectorService>();
+
+        var connector = new SendConnector
+        {
+            Id = Id ?? 0,
+            Name = name.Trim(),
+            SmartHost = string.IsNullOrWhiteSpace(smartHost) ? null : smartHost.Trim(),
+            SmartHostPort = int.TryParse(port, out var p) ? p : 587,
+            Username = string.IsNullOrWhiteSpace(username) ? null : username.Trim(),
+            EncryptedPassword = string.IsNullOrWhiteSpace(password) ? null : password,
+            OpportunisticTls = opportunisticTls == "true",
+            RequireTls = requireTls == "true",
+            IsDefault = isDefault == "true",
+            MaxConcurrentDeliveries = int.TryParse(concurrency, out var conc) ? conc : 4,
+            MaxRetryHours = int.TryParse(maxRetry, out var mr) ? mr : 48,
+            RetryIntervalsMinutes = retryIntervals.Trim(),
+            ConnectTimeoutSeconds = 30,
+            IsEnabled = enabled == "true"
+        };
+
+        if (IsNew)
+            await svc.CreateAsync(connector);
+        else
+            await svc.UpdateAsync(connector);
+
+        ConfigCache.Invalidate();
+        Nav.NavigateTo("/connectors/send");
+    }
+
+    private void Cancel() => Nav.NavigateTo("/connectors/send");
+}

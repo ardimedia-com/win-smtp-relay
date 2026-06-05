@@ -3,6 +3,7 @@
 @using WinSmtpRelay.Core.Models
 @using Microsoft.EntityFrameworkCore
 @inject ITenantScopeFactory ScopeFactory
+@inject NavigationManager Nav
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -21,37 +22,14 @@
         <h1>SMTP Users</h1>
         <p>SMTP relay user accounts and permissions</p>
     </div>
-    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelpDialog = true">
-        <LucideIcon Name="info" /> What are SMTP users?
-    </BbButton>
-</div>
-
-<div style="max-width:400px;">
-<BbCard Class="mb-1">
-    <BbCardHeader>
-        <BbCardTitle>Create User</BbCardTitle>
-    </BbCardHeader>
-    <BbCardContent>
-        <div class="form-group">
-            <BbLabel>Username</BbLabel>
-            <BbInput @bind-Value="newUsername" Placeholder="username" />
-        </div>
-        <div class="form-group">
-            <BbLabel>Password</BbLabel>
-            <BbInput Type="InputType.Password" @bind-Value="newPassword" Placeholder="password" />
-        </div>
-    </BbCardContent>
-    <BbCardFooter>
-        <BbButton Variant="ButtonVariant.Default" @onclick="CreateUserAsync"
-                Disabled="@(string.IsNullOrWhiteSpace(newUsername) || string.IsNullOrWhiteSpace(newPassword))">
-            <LucideIcon Name="plus" /> Create
+    <div class="flex gap-1 items-center">
+        <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/smtpusers/new"))">
+            <LucideIcon Name="plus" /> New user
         </BbButton>
-        @if (!string.IsNullOrEmpty(statusMessage))
-        {
-            <span class="text-muted" style="margin-left:1rem">@statusMessage</span>
-        }
-    </BbCardFooter>
-</BbCard>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelpDialog = true">
+            <LucideIcon Name="info" /> What are SMTP users?
+        </BbButton>
+    </div>
 </div>
 
 @if (isLoading)
@@ -69,7 +47,7 @@ else
                 <BbTableHeaderCell TData="RelayUser">Allowed Senders</BbTableHeaderCell>
                 <BbTableHeaderCell TData="RelayUser">Rate Limit</BbTableHeaderCell>
                 <BbTableHeaderCell TData="RelayUser">Created</BbTableHeaderCell>
-                <BbTableHeaderCell TData="RelayUser">Actions</BbTableHeaderCell>
+                <BbTableHeaderCell TData="RelayUser"></BbTableHeaderCell>
             </BbTableRow>
         </BbTableHeader>
         <BbTableBody>
@@ -81,7 +59,7 @@ else
             }
             @foreach (var user in users)
             {
-                <BbTableRow Item="@user">
+                <BbTableRow Item="@user" class="list-row-clickable" @onclick="() => Edit(user.Id)">
                     <BbTableCell>@user.Id</BbTableCell>
                     <BbTableCell>@user.Username</BbTableCell>
                     <BbTableCell><span class="badge-status @(user.IsEnabled ? "badge-success" : "badge-muted")">@(user.IsEnabled ? "Yes" : "No")</span></BbTableCell>
@@ -89,67 +67,26 @@ else
                         @(string.IsNullOrEmpty(user.AllowedSenderAddresses) ? "Any" : user.AllowedSenderAddresses)
                     </BbTableCell>
                     <BbTableCell>
-                        @(user.RateLimitPerMinute.HasValue ? $"{user.RateLimitPerMinute}/min" : "\u2014")
+                        @(user.RateLimitPerMinute.HasValue ? $"{user.RateLimitPerMinute}/min" : "—")
                         @(user.RateLimitPerDay.HasValue ? $", {user.RateLimitPerDay}/day" : "")
                     </BbTableCell>
                     <BbTableCell><LocalTime Utc="@user.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell>
-                        <BbDropdownMenu>
-                            <BbDropdownMenuTrigger>
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost">
-                                    <LucideIcon Name="ellipsis" />
-                                </BbButton>
-                            </BbDropdownMenuTrigger>
-                            <BbDropdownMenuContent>
-                                <BbDropdownMenuItem @onclick="() => StartEdit(user)">
-                                    <LucideIcon Name="pencil" /> Edit
-                                </BbDropdownMenuItem>
-                                <BbDropdownMenuSeparator />
-                                <BbDropdownMenuItem @onclick="() => { deleteTargetId = user.Id; showDeleteConfirm = true; }">
-                                    <LucideIcon Name="trash-2" /> Delete
-                                </BbDropdownMenuItem>
-                            </BbDropdownMenuContent>
-                        </BbDropdownMenu>
+                        <div class="list-row-actions" @onclick:stopPropagation="true">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => Edit(user.Id)">
+                                <LucideIcon Name="pencil" />
+                            </BbButton>
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                    @onclick="() => { deleteTargetId = user.Id; showDeleteConfirm = true; }">
+                                <LucideIcon Name="trash-2" />
+                            </BbButton>
+                        </div>
                     </BbTableCell>
                 </BbTableRow>
             }
         </BbTableBody>
     </BbTable>
 }
-
-<BbDialog @bind-Open="isEditDialogOpen">
-    <BbDialogContent>
-        <BbDialogHeader>
-            <BbDialogTitle>Edit: @editingUser?.Username</BbDialogTitle>
-            <BbDialogDescription>Modify user settings</BbDialogDescription>
-        </BbDialogHeader>
-        <div class="form-group">
-            <BbLabel>Enabled</BbLabel>
-            <BbNativeSelect @bind-Value="editEnabled">
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-            </BbNativeSelect>
-        </div>
-        <div class="form-group">
-            <BbLabel>Allowed Sender Addresses</BbLabel>
-            <BbInput @bind-Value="editAllowedSenders" Placeholder="user@example.com;noreply@example.com" />
-        </div>
-        <div class="form-group">
-            <BbLabel>Rate Limit per Minute</BbLabel>
-            <BbInput Type="InputType.Number" @bind-Value="editRatePerMinuteStr" Placeholder="unlimited" />
-        </div>
-        <div class="form-group">
-            <BbLabel>Rate Limit per Day</BbLabel>
-            <BbInput Type="InputType.Number" @bind-Value="editRatePerDayStr" Placeholder="unlimited" />
-        </div>
-        <BbDialogFooter>
-            <BbDialogClose>
-                <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
-            </BbDialogClose>
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveEditAsync">Save</BbButton>
-        </BbDialogFooter>
-    </BbDialogContent>
-</BbDialog>
 
 <BbAlertDialog @bind-Open="showDeleteConfirm">
     <BbAlertDialogContent>
@@ -209,23 +146,10 @@ else
 
 @code {
     private IReadOnlyList<RelayUser> users = [];
-    private string newUsername = "";
-    private string newPassword = "";
-    private string? statusMessage;
     private bool isLoading = true;
     private bool showHelpDialog;
-    private bool isEditDialogOpen;
     private bool showDeleteConfirm;
     private int deleteTargetId;
-
-    private RelayUser? editingUser;
-    private string editEnabled = "true";
-    private string editAllowedSenders = "";
-    private string editRatePerMinuteStr = "";
-    private string editRatePerDayStr = "";
-
-    private int? editRatePerMinute => int.TryParse(editRatePerMinuteStr, out var v) ? v : null;
-    private int? editRatePerDay => int.TryParse(editRatePerDayStr, out var v) ? v : null;
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();
 
@@ -238,76 +162,14 @@ else
         isLoading = false;
     }
 
-    private async Task CreateUserAsync()
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IUserService>();
-
-        var existing = await svc.GetByUsernameAsync(newUsername);
-        if (existing is not null)
-        {
-            statusMessage = $"User '{newUsername}' already exists";
-            return;
-        }
-
-        await svc.CreateUserAsync(newUsername, newPassword);
-        statusMessage = $"User '{newUsername}' created";
-        newUsername = "";
-        newPassword = "";
-        await RefreshAsync();
-    }
-
-    private void StartEdit(RelayUser user)
-    {
-        editingUser = user;
-        editEnabled = user.IsEnabled.ToString().ToLowerInvariant();
-        editAllowedSenders = user.AllowedSenderAddresses ?? "";
-        editRatePerMinuteStr = user.RateLimitPerMinute?.ToString() ?? "";
-        editRatePerDayStr = user.RateLimitPerDay?.ToString() ?? "";
-        isEditDialogOpen = true;
-    }
-
-    private void CancelEdit()
-    {
-        isEditDialogOpen = false;
-        editingUser = null;
-    }
-
-    private async Task SaveEditAsync()
-    {
-        if (editingUser is null) return;
-
-        using var scope = ScopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
-        var user = await db.RelayUsers.FirstOrDefaultAsync(u => u.Id == editingUser.Id);
-        if (user is null) return;
-
-        user.IsEnabled = editEnabled == "true";
-        user.AllowedSenderAddresses = string.IsNullOrWhiteSpace(editAllowedSenders) ? null : editAllowedSenders.Trim();
-        user.RateLimitPerMinute = editRatePerMinute;
-        user.RateLimitPerDay = editRatePerDay;
-        await db.SaveChangesAsync();
-
-        statusMessage = $"User '{user.Username}' updated";
-        isEditDialogOpen = false;
-        editingUser = null;
-        await RefreshAsync();
-    }
+    private void Edit(int id) => Nav.NavigateTo($"/smtpusers/{id}");
 
     private async Task ConfirmDeleteAsync()
     {
-        await DeleteUserAsync(deleteTargetId);
-        showDeleteConfirm = false;
-    }
-
-    private async Task DeleteUserAsync(int id)
-    {
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<IUserService>();
-        await svc.DeleteUserAsync(id);
-        statusMessage = "User deleted";
-        isEditDialogOpen = false;
-        editingUser = null;
+        await svc.DeleteUserAsync(deleteTargetId);
+        showDeleteConfirm = false;
         await RefreshAsync();
     }
 }
