@@ -126,6 +126,23 @@ else
                 domains — an empty list still means "accept all", and backup-MX domains are unaffected.
             </p>
 
+            <div class="settings-subhead">Tenant binding (unauthenticated submission)</div>
+            <div style="display:flex;align-items:center;gap:0.75rem;">
+                <BbSwitch Checked="bindTenantToAllowIpRule" CheckedChanged="(bool v) => bindTenantToAllowIpRule = v" id="bind-tenant-ip" />
+                <span>Bind the tenant to the matching allow IP rule (reject cross-tenant sender domains)</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
+                <BbSwitch Checked="rejectUnresolvedTenant" CheckedChanged="(bool v) => rejectUnresolvedTenant = v" id="reject-unresolved-tenant" />
+                <span>Reject when no tenant can be determined (instead of using the default tenant)</span>
+            </div>
+            <p class="text-muted" style="font-size:0.78rem;margin-top:0.35rem;">
+                For mail submitted <strong>without SMTP AUTH</strong>: by default the tenant is guessed from the
+                MAIL FROM domain (falling back to the default tenant). The first toggle instead derives the tenant
+                from the tenant's own allow IP rule and rejects a MAIL FROM domain owned by another tenant — closing
+                cross-tenant spoofing. The second rejects mail that can't be attributed at all. Authenticated
+                sessions are unaffected (their tenant comes from the SMTP user).
+            </p>
+
             <BbButton Variant="ButtonVariant.Default" @onclick="SaveEmailAuthAsync" Class="mt-1">
                 <LucideIcon Name="save" /> Save
             </BbButton>
@@ -301,6 +318,8 @@ else
     private EnforcementMode enforcement = EnforcementMode.LogOnly;
     private bool requireSenderVerification;
     private bool requireRecipientVerification;
+    private bool bindTenantToAllowIpRule;
+    private bool rejectUnresolvedTenant;
     private string? emailAuthStatus;
 
     private bool bmEnabled;
@@ -344,6 +363,8 @@ else
         enforcement = emailAuth.Enforcement;
         requireSenderVerification = emailAuth.RequireSenderDomainVerification;
         requireRecipientVerification = emailAuth.RequireRecipientDomainVerification;
+        bindTenantToAllowIpRule = emailAuth.BindTenantToAllowIpRule;
+        rejectUnresolvedTenant = emailAuth.RejectUnresolvedTenant;
 
         var backupMx = await sp.GetRequiredService<IBackupMxSettingsService>().GetAsync();
         bmEnabled = backupMx.Enabled;
@@ -418,7 +439,8 @@ else
     {
         using var scope = ScopeFactory.CreateScope();
         await scope.ServiceProvider.GetRequiredService<IEmailAuthSettingsService>()
-            .UpdateAsync(spfEnabled, dmarcEnabled, enforcement, requireSenderVerification, requireRecipientVerification);
+            .UpdateAsync(spfEnabled, dmarcEnabled, enforcement, requireSenderVerification, requireRecipientVerification,
+                bindTenantToAllowIpRule, rejectUnresolvedTenant);
         emailAuthStatus = $"Email authentication saved (SPF {(spfEnabled ? "on" : "off")}, DMARC {(dmarcEnabled ? "on" : "off")}, enforcement {enforcement}).";
     }
 

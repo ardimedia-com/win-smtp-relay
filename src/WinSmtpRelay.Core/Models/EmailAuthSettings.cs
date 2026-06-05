@@ -33,5 +33,19 @@ public class EmailAuthSettings
     /// </summary>
     public bool RequireRecipientDomainVerification { get; set; }
 
+    /// <summary>
+    /// Strict tenant binding for <em>unauthenticated</em> submission: derive the owning tenant from the
+    /// matching tenant-scoped Allow IP rule (not from the sender domain) and reject when the MAIL FROM
+    /// domain belongs to a different tenant — closing cross-tenant sender-domain spoofing. Authenticated
+    /// sessions are unaffected (their tenant comes from the SMTP user).
+    /// </summary>
+    public bool BindTenantToAllowIpRule { get; set; }
+
+    /// <summary>
+    /// When true, reject an <em>unauthenticated</em> message that cannot be unambiguously attributed to a
+    /// tenant, instead of silently assigning it to the default tenant.
+    /// </summary>
+    public bool RejectUnresolvedTenant { get; set; }
+
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

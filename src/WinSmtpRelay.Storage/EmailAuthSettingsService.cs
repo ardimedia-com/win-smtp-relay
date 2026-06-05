@@ -16,6 +16,8 @@ public class EmailAuthSettingsService(RelayDbContext db, IRuntimeConfigCache cac
         EnforcementMode enforcement,
         bool requireSenderDomainVerification,
         bool requireRecipientDomainVerification,
+        bool bindTenantToAllowIpRule,
+        bool rejectUnresolvedTenant,
         CancellationToken ct = default)
     {
         var settings = await db.EmailAuthSettings.FirstOrDefaultAsync(ct);
@@ -30,6 +32,8 @@ public class EmailAuthSettingsService(RelayDbContext db, IRuntimeConfigCache cac
         settings.Enforcement = enforcement;
         settings.RequireSenderDomainVerification = requireSenderDomainVerification;
         settings.RequireRecipientDomainVerification = requireRecipientDomainVerification;
+        settings.BindTenantToAllowIpRule = bindTenantToAllowIpRule;
+        settings.RejectUnresolvedTenant = rejectUnresolvedTenant;
         settings.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 

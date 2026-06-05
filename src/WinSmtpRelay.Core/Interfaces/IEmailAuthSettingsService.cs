@@ -14,5 +14,7 @@ public interface IEmailAuthSettingsService
         EnforcementMode enforcement,
         bool requireSenderDomainVerification,
         bool requireRecipientDomainVerification,
+        bool bindTenantToAllowIpRule,
+        bool rejectUnresolvedTenant,
         CancellationToken ct = default);
 }

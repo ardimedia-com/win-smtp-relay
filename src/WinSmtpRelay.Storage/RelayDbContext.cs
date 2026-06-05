@@ -227,6 +227,8 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 Enforcement = WinSmtpRelay.Core.Configuration.EnforcementMode.LogOnly,
                 RequireSenderDomainVerification = false,
                 RequireRecipientDomainVerification = false,
+                BindTenantToAllowIpRule = false,
+                RejectUnresolvedTenant = false,
                 UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });

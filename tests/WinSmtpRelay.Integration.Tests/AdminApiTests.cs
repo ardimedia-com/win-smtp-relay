@@ -772,7 +772,8 @@ public class AdminApiTests
         using (var scope = _app.Services.CreateScope())
             await scope.ServiceProvider.GetRequiredService<IEmailAuthSettingsService>()
                 .UpdateAsync(spfEnabled: true, dmarcEnabled: true, WinSmtpRelay.Core.Configuration.EnforcementMode.Reject,
-                    requireSenderDomainVerification: false, requireRecipientDomainVerification: false);
+                    requireSenderDomainVerification: false, requireRecipientDomainVerification: false,
+                    bindTenantToAllowIpRule: false, rejectUnresolvedTenant: false);
 
         var after = await cache.GetEmailAuthSettingsAsync();
         Assert.IsTrue(after.SpfEnabled, "cache should reflect the persisted SPF change after invalidation");

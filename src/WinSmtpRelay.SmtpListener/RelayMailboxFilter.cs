@@ -54,14 +54,37 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         var remoteEndPoint = context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep) ? ep as IPEndPoint : null;
         var clientIp = remoteEndPoint?.Address.ToString();
 
+        // IP access rules are needed both for strict tenant binding (just below) and the relay access
+        // check further down — load once (cached).
+        var ipRules = await _configCache.GetIpAccessRulesAsync(cancellationToken);
+
         // Resolve the owning tenant for this message. Authenticated sessions set it at AUTH time;
-        // otherwise resolve by sender domain (falls back to the default tenant). Stamped onto the
-        // queued message in RelayMessageStore.
+        // otherwise attribute it here — by sender domain, or, under strict mode, by the matching
+        // tenant Allow IP rule (with anti-spoofing / no-silent-default). Stamped onto the queued
+        // message in RelayMessageStore.
         if (!context.Properties.ContainsKey("TenantId"))
         {
-            var ownerTenant = await _configCache.GetTenantForSenderDomainAsync(
+            var emailAuth = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);
+            var domainTenant = await _configCache.GetTenantForSenderDomainAsync(
                 GetDomainFromAddress(from.AsAddress()), cancellationToken);
-            context.Properties["TenantId"] = ownerTenant ?? Core.Models.TenantDefaults.DefaultTenantId;
+
+            int? ipTenant = null;
+            var ipAmbiguous = false;
+            if (emailAuth.BindTenantToAllowIpRule && remoteEndPoint is not null)
+                (ipTenant, ipAmbiguous) = UnauthenticatedTenantResolver.TenantFromAllowRules(remoteEndPoint.Address, ipRules);
+
+            var (tenant, outcome) = UnauthenticatedTenantResolver.Decide(
+                domainTenant, ipTenant, ipAmbiguous,
+                emailAuth.BindTenantToAllowIpRule, emailAuth.RejectUnresolvedTenant);
+
+            if (outcome != UnauthenticatedTenantResolver.Outcome.Resolved)
+            {
+                _logger.LogWarning("Message from {Sender} ({ClientIp}) rejected: unauthenticated tenant attribution failed ({Outcome})",
+                    from.AsAddress(), clientIp, outcome);
+                return false;
+            }
+
+            context.Properties["TenantId"] = tenant!.Value;
         }
 
         // Reject mail for a disabled tenant (the owning tenant was just resolved above).
@@ -93,7 +116,6 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         // AllowedNetworks list only when no DB rules exist.
         if (remoteEndPoint is not null)
         {
-            var ipRules = await _configCache.GetIpAccessRulesAsync(cancellationToken);
             // Evaluate only this tenant's rules plus the host baseline — one tenant's rules
             // must never allow or deny another tenant's traffic on the shared listener.
             var decision = IpAccessEvaluator.EvaluateForTenant(remoteEndPoint.Address, ipRules, resolvedTenantId);
