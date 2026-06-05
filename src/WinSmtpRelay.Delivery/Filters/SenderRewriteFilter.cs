@@ -20,7 +20,11 @@ public class SenderRewriteFilter : IMessageFilter
 
     public async Task<MessageFilterResult> FilterAsync(MessageFilterContext context, CancellationToken cancellationToken = default)
     {
-        var rules = await _configCache.GetSenderRewriteRulesAsync(cancellationToken);
+        // Rewrite rules are tenant-owned; the cache loads them across all tenants, so apply only the
+        // message's own tenant's rules (otherwise one tenant's rule could rewrite another's mail).
+        var rules = (await _configCache.GetSenderRewriteRulesAsync(cancellationToken))
+            .Where(r => r.TenantId == context.TenantId)
+            .ToList();
         if (rules.Count == 0)
             return MessageFilterResult.Accepted();
 

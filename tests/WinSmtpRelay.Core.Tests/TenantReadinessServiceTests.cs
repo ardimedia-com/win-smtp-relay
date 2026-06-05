@@ -40,7 +40,7 @@ public class TenantReadinessServiceTests
         new DkimDomainService(_db),
         new SendConnectorService(_db),
         new AcceptedDomainService(_db),
-        new IpAccessRuleService(_db),
+        new IpAccessRuleService(_db, null!),
         new MessageFilterService(_db),
         new ApiKeyService(_db),
         new DnsSettingsService(_db));

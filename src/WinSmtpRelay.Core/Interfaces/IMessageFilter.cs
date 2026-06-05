@@ -16,6 +16,10 @@ public class MessageFilterContext
     public required string Sender { get; set; }
     public required string Recipients { get; set; }
     public string? SourceIp { get; set; }
+
+    /// <summary>The owning tenant of the message being filtered — filters must apply only this
+    /// tenant's rules (rewrite rules are tenant-owned and the cache loads them across all tenants).</summary>
+    public int TenantId { get; set; }
 }
 
 public class MessageFilterResult

@@ -104,7 +104,8 @@ public class DeliveryWorker(
                 RawMessage = message.RawMessage,
                 Sender = message.Sender,
                 Recipients = message.Recipients,
-                SourceIp = message.SourceIp
+                SourceIp = message.SourceIp,
+                TenantId = message.TenantId
             };
 
             foreach (var filter in filters)

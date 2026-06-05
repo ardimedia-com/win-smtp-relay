@@ -9,6 +9,10 @@ namespace WinSmtpRelay.Delivery.Tests;
 [TestClass]
 public class MessageFilterTests
 {
+    // Rewrite rules created without an explicit TenantId default to TenantDefaults.DefaultTenantId,
+    // so a message context must carry the same tenant for the rules to apply.
+    private const int Tenant = TenantDefaults.DefaultTenantId;
+
     private static byte[] CreateTestMessage(string from = "sender@test.com", string to = "rcpt@test.com", string subject = "Test")
     {
         var msg = new MimeMessage();
@@ -33,7 +37,8 @@ public class MessageFilterTests
         {
             RawMessage = CreateTestMessage(),
             Sender = "sender@test.com",
-            Recipients = "rcpt@test.com"
+            Recipients = "rcpt@test.com",
+            TenantId = Tenant
         };
 
         var result = await filter.FilterAsync(context);
@@ -56,7 +61,8 @@ public class MessageFilterTests
         {
             RawMessage = CreateTestMessage(),
             Sender = "sender@test.com",
-            Recipients = "rcpt@test.com"
+            Recipients = "rcpt@test.com",
+            TenantId = Tenant
         };
 
         var result = await filter.FilterAsync(context);
@@ -90,7 +96,8 @@ public class MessageFilterTests
         {
             RawMessage = raw,
             Sender = "sender@test.com",
-            Recipients = "rcpt@test.com"
+            Recipients = "rcpt@test.com",
+            TenantId = Tenant
         };
 
         var result = await filter.FilterAsync(context);
@@ -104,6 +111,31 @@ public class MessageFilterTests
 
     [TestMethod]
     [TestCategory("Unit")]
+    public async Task HeaderRewriteFilter_RuleOfAnotherTenant_DoesNotApply()
+    {
+        // A rule owned by the default tenant must not touch another tenant's message.
+        var cache = new StubRuntimeConfigCache
+        {
+            HeaderRewriteRules = [new HeaderRewriteEntry { HeaderName = "X-Custom", Action = "Set", NewValue = "test-value", IsEnabled = true }]
+        };
+        var filter = new HeaderRewriteFilter(cache, NullLogger<HeaderRewriteFilter>.Instance);
+
+        var context = new MessageFilterContext
+        {
+            RawMessage = CreateTestMessage(),
+            Sender = "sender@test.com",
+            Recipients = "rcpt@test.com",
+            TenantId = Tenant + 999 // a different tenant than the rule's owner
+        };
+
+        var result = await filter.FilterAsync(context);
+
+        Assert.IsTrue(result.Accept);
+        Assert.IsNull(result.ModifiedRawMessage, "another tenant's header rule must not modify this message");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
     public async Task SenderRewriteFilter_NoRules_AcceptsUnmodified()
     {
         var cache = new StubRuntimeConfigCache();
@@ -113,7 +145,8 @@ public class MessageFilterTests
         {
             RawMessage = CreateTestMessage(),
             Sender = "sender@test.com",
-            Recipients = "rcpt@test.com"
+            Recipients = "rcpt@test.com",
+            TenantId = Tenant
         };
 
         var result = await filter.FilterAsync(context);
@@ -136,7 +169,8 @@ public class MessageFilterTests
         {
             RawMessage = CreateTestMessage(from: "user@internal.com"),
             Sender = "user@internal.com",
-            Recipients = "rcpt@test.com"
+            Recipients = "rcpt@test.com",
+            TenantId = Tenant
         };
 
         var result = await filter.FilterAsync(context);
@@ -163,13 +197,40 @@ public class MessageFilterTests
         {
             RawMessage = CreateTestMessage(from: "user@test.com"),
             Sender = "user@test.com",
-            Recipients = "rcpt@test.com"
+            Recipients = "rcpt@test.com",
+            TenantId = Tenant
         };
 
         var result = await filter.FilterAsync(context);
 
         Assert.IsTrue(result.Accept);
         Assert.IsNull(result.ModifiedRawMessage);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SenderRewriteFilter_RuleOfAnotherTenant_DoesNotApply()
+    {
+        // A '.*'-matching rule owned by the default tenant must not rewrite another tenant's sender.
+        var cache = new StubRuntimeConfigCache
+        {
+            SenderRewriteRules = [new SenderRewriteEntry { FromPattern = ".*", ToAddress = "noreply@public.com", IsEnabled = true }]
+        };
+        var filter = new SenderRewriteFilter(cache, NullLogger<SenderRewriteFilter>.Instance);
+
+        var context = new MessageFilterContext
+        {
+            RawMessage = CreateTestMessage(from: "user@victim.com"),
+            Sender = "user@victim.com",
+            Recipients = "rcpt@test.com",
+            TenantId = Tenant + 999 // a different tenant than the rule's owner
+        };
+
+        var result = await filter.FilterAsync(context);
+
+        Assert.IsTrue(result.Accept);
+        Assert.IsNull(result.ModifiedRawMessage, "another tenant's sender rule must not rewrite this message");
+        Assert.AreEqual("user@victim.com", context.Sender);
     }
 
     [TestMethod]

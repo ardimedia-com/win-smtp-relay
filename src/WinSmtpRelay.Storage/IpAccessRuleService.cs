@@ -4,7 +4,7 @@ using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class IpAccessRuleService(RelayDbContext db) : IIpAccessRuleService
+public class IpAccessRuleService(RelayDbContext db, IRuntimeConfigCache cache) : IIpAccessRuleService
 {
     public async Task<IReadOnlyList<IpAccessRule>> GetAllAsync(CancellationToken ct = default)
     {
@@ -15,6 +15,9 @@ public class IpAccessRuleService(RelayDbContext db) : IIpAccessRuleService
     {
         db.IpAccessRules.Add(rule);
         await db.SaveChangesAsync(ct);
+        // IP rules are read on the SMTP hot path (relay access + strict tenant binding); refresh the
+        // cache here so no caller (UI, API, or background) can forget to and leave stale policy live.
+        cache.Invalidate();
         return rule;
     }
 
@@ -29,10 +32,12 @@ public class IpAccessRuleService(RelayDbContext db) : IIpAccessRuleService
         existing.Description = rule.Description;
 
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
     }
 
     public async Task DeleteAsync(int id, CancellationToken ct = default)
     {
         await db.IpAccessRules.Where(r => r.Id == id).ExecuteDeleteAsync(ct);
+        cache.Invalidate();
     }
 }

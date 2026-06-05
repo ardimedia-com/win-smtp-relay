@@ -19,7 +19,11 @@ public class HeaderRewriteFilter : IMessageFilter
 
     public async Task<MessageFilterResult> FilterAsync(MessageFilterContext context, CancellationToken cancellationToken = default)
     {
-        var rules = await _configCache.GetHeaderRewriteRulesAsync(cancellationToken);
+        // Rewrite rules are tenant-owned; the cache loads them across all tenants, so apply only the
+        // message's own tenant's rules (otherwise one tenant's rule could alter another's mail).
+        var rules = (await _configCache.GetHeaderRewriteRulesAsync(cancellationToken))
+            .Where(r => r.TenantId == context.TenantId)
+            .ToList();
         if (rules.Count == 0)
             return MessageFilterResult.Accepted();
 
