@@ -72,6 +72,40 @@ else
             }
         </div>;
 
+    <AuthorizeView Policy="@AuthorizationPolicies.AdminFull">
+        <BbCard Class="mb-1">
+            <BbCardHeader>
+                <BbCardTitle>Send a test message</BbCardTitle>
+                <BbCardDescription>Confirm outbound delivery works end-to-end (MX lookup, TLS, and DKIM if configured). Send to an address you control, then watch the result under Journal.</BbCardDescription>
+            </BbCardHeader>
+            <BbCardContent>
+                <div class="test-send-row">
+                    <div class="form-group">
+                        <BbLabel>From</BbLabel>
+                        <BbInput @bind-Value="testFrom" Placeholder="test@your-domain.com" />
+                    </div>
+                    <div class="form-group">
+                        <BbLabel>To</BbLabel>
+                        <BbInput @bind-Value="testTo" Placeholder="you@example.com" />
+                    </div>
+                    <div class="test-send-action">
+                        <BbButton Variant="ButtonVariant.Default" @onclick="SendTestAsync" Disabled="@testSending">
+                            <LucideIcon Name="send" /> @(testSending ? "Sending…" : "Send test")
+                        </BbButton>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(testError))
+                {
+                    <p class="text-danger" style="font-size:0.8rem;margin:0.5rem 0 0;">@testError</p>
+                }
+                @if (!string.IsNullOrEmpty(testResult))
+                {
+                    <p style="font-size:0.8rem;color:var(--primary);margin:0.5rem 0 0;">@testResult</p>
+                }
+            </BbCardContent>
+        </BbCard>
+    </AuthorizeView>
+
     <div class="setup-summary">
         <div class="setup-tile">
             <div class="setup-tile-icon @(readiness.CanSend ? "setup-tile-ok" : "setup-tile-bad")">
@@ -203,26 +237,6 @@ else
             @foreach (var item in readiness.Optional) { @row(item) }
         </BbCardContent>
     </BbCard>
-
-    <AuthorizeView Policy="@AuthorizationPolicies.AdminFull">
-        <div class="setup-group-label">Verify delivery</div>
-        <BbCard>
-            <BbCardContent>
-                <div class="setup-row" style="border:none;">
-                    <span class="setup-row-icon s-done"><LucideIcon Name="send" Size="18" /></span>
-                    <div class="setup-row-main">
-                        <div class="setup-row-title">Send a test message</div>
-                        <div class="setup-row-detail">Queue a message through the relay to confirm outbound delivery works end-to-end (MX lookup, TLS, and DKIM if configured). Send it to an address you control, then watch the result under Journal.</div>
-                    </div>
-                    <div class="setup-row-action">
-                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="OpenTestDialogAsync">
-                            <LucideIcon Name="send" Size="14" /> Send test
-                        </BbButton>
-                    </div>
-                </div>
-            </BbCardContent>
-        </BbCard>
-    </AuthorizeView>
 }
 
 <BbDialog @bind-Open="showHelp">
@@ -250,37 +264,6 @@ else
         </div>
         <BbDialogFooter>
             <BbDialogClose><BbButton Variant="ButtonVariant.Outline">Close</BbButton></BbDialogClose>
-        </BbDialogFooter>
-    </BbDialogContent>
-</BbDialog>
-
-<BbDialog @bind-Open="showTestDialog">
-    <BbDialogContent>
-        <BbDialogHeader>
-            <BbDialogTitle>Send a test message</BbDialogTitle>
-            <BbDialogDescription>Queues a message through the relay's own delivery pipeline.</BbDialogDescription>
-        </BbDialogHeader>
-        <div class="form-group">
-            <BbLabel>From</BbLabel>
-            <BbInput @bind-Value="testFrom" Placeholder="test@your-domain.com" />
-        </div>
-        <div class="form-group">
-            <BbLabel>To</BbLabel>
-            <BbInput @bind-Value="testTo" Placeholder="you@example.com" />
-        </div>
-        @if (!string.IsNullOrEmpty(testError))
-        {
-            <p class="text-danger" style="font-size:0.8rem;margin:0.25rem 0 0;">@testError</p>
-        }
-        @if (!string.IsNullOrEmpty(testResult))
-        {
-            <p style="font-size:0.8rem;color:var(--primary);margin:0.25rem 0 0;">@testResult</p>
-        }
-        <BbDialogFooter>
-            <BbDialogClose><BbButton Variant="ButtonVariant.Outline">Close</BbButton></BbDialogClose>
-            <BbButton Variant="ButtonVariant.Default" @onclick="SendTestAsync" Disabled="@testSending">
-                <LucideIcon Name="send" /> @(testSending ? "Sending…" : "Send")
-            </BbButton>
         </BbDialogFooter>
     </BbDialogContent>
 </BbDialog>
@@ -314,7 +297,10 @@ else
         isLoading = false;
         // DNS is loaded after the first render so the checklist appears instantly.
         if (readiness is { IsHostScope: false })
+        {
             dnsLoading = true;
+            await PrefillTestFromAsync();
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -425,30 +411,26 @@ else
     }
 
     // ----- Test message -----
-    private bool showTestDialog;
     private string testFrom = "";
     private string testTo = "";
     private bool testSending;
     private string? testResult;
     private string? testError;
 
-    private async Task OpenTestDialogAsync()
+    /// <summary>Prefills the From field with the tenant's first sender domain (best-effort).</summary>
+    private async Task PrefillTestFromAsync()
     {
-        testResult = null;
-        testError = null;
-        if (string.IsNullOrWhiteSpace(testFrom))
+        if (!string.IsNullOrWhiteSpace(testFrom))
+            return;
+        try
         {
-            try
-            {
-                using var scope = ScopeFactory.CreateScope();
-                var senders = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
-                var domains = await senders.GetAllAsync();
-                if (domains.Count > 0)
-                    testFrom = $"test@{domains[0].Domain}";
-            }
-            catch { /* prefill is best-effort */ }
+            using var scope = ScopeFactory.CreateScope();
+            var senders = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
+            var domains = await senders.GetAllAsync();
+            if (domains.Count > 0)
+                testFrom = $"test@{domains[0].Domain}";
         }
-        showTestDialog = true;
+        catch { /* prefill is best-effort */ }
     }
 
     private async Task SendTestAsync()
