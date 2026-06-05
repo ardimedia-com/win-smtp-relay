@@ -42,7 +42,8 @@ public class TenantReadinessServiceTests
         new AcceptedDomainService(_db),
         new IpAccessRuleService(_db),
         new MessageFilterService(_db),
-        new ApiKeyService(_db));
+        new ApiKeyService(_db),
+        new DnsSettingsService(_db));
 
     private static SetupItem Item(TenantReadiness r, string key) => r.Items.Single(i => i.Key == key);
 
@@ -84,6 +85,26 @@ public class TenantReadinessServiceTests
 
         Assert.IsFalse(r.CanSend);
         Assert.AreEqual(SetupStatus.Todo, Item(r, "smtp-users").Status);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SendingIdentity_TodoWhenUnset_DoneWhenHostnameAndIpSet()
+    {
+        var dns = await _db.DnsSettings.FirstAsync();
+        dns.PublicHostname = "";
+        dns.SendingIpAddresses = "";
+        await _db.SaveChangesAsync();
+        var unset = await Build(_current).GetAsync();
+        Assert.AreEqual(SetupStatus.Todo, Item(unset, "sending-identity").Status);
+
+        dns = await _db.DnsSettings.FirstAsync();
+        dns.PublicHostname = "relay.acme.com";
+        dns.SendingIpAddresses = "203.0.113.10";
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+        var set = await Build(_current).GetAsync();
+        Assert.AreEqual(SetupStatus.Done, Item(set, "sending-identity").Status);
     }
 
     [TestMethod]
@@ -182,8 +203,8 @@ public class TenantReadinessServiceTests
 
         var r = await Build(_current).GetAsync();
 
-        // sender-domains + sender-verified done; dkim still todo => 2 of 3.
-        Assert.AreEqual(3, r.RecommendedTotal);
+        // sender-domains + sender-verified done; dkim + sending-identity still todo => 2 of 4.
+        Assert.AreEqual(4, r.RecommendedTotal);
         Assert.AreEqual(2, r.RecommendedDone);
     }
 
