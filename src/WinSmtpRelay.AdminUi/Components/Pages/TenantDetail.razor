@@ -1,0 +1,187 @@
+@page "/tenants/new"
+@page "/tenants/{Id:int}"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
+@inject IServiceScopeFactory ScopeFactory
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/tenants">Tenants</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>@(IsNew ? "New" : name)</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>@(IsNew ? "New tenant" : $"Tenant: {name}")</h1>
+    <p>Isolated relay configuration. Host administrators only.</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[260px] w-full" />
+}
+else if (notFound)
+{
+    <p class="text-danger">Tenant not found.</p>
+    <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel"><LucideIcon Name="arrow-left" /> Back</BbButton>
+}
+else
+{
+    <div style="max-width:520px;">
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel>Name</BbLabel>
+                <BbInput @bind-Value="name" Placeholder="Acme Corp" />
+            </div>
+            <div class="form-group">
+                <BbLabel>Slug</BbLabel>
+                @if (IsNew)
+                {
+                    <BbInput @bind-Value="slug" Placeholder="acme" />
+                }
+                else
+                {
+                    <div><span class="mono">@slug</span></div>
+                }
+            </div>
+
+            @if (!IsNew)
+            {
+                <div class="form-group">
+                    <BbLabel>Enabled</BbLabel>
+                    @if (IsDefault)
+                    {
+                        <div><span class="badge-status">Enabled</span> <span class="text-muted" style="font-size:0.78rem;">(the default tenant cannot be disabled)</span></div>
+                    }
+                    else
+                    {
+                        <BbNativeSelect @bind-Value="enabled">
+                            <option value="true">Enabled</option>
+                            <option value="false">Disabled</option>
+                        </BbNativeSelect>
+                        <p class="text-muted" style="font-size:0.78rem;margin-top:0.25rem;">Enabling a pending self-service signup also confirms and unlocks its admins.</p>
+                    }
+                </div>
+                <div class="form-group" style="max-width:320px;">
+                    <BbLabel>Egress IP address</BbLabel>
+                    <BbInput @bind-Value="egress" Placeholder="(OS default)" />
+                    <p class="text-muted" style="font-size:0.78rem;margin-top:0.25rem;">Outbound mail for this tenant binds to this source IP. The host must own it; leave blank for the OS default.</p>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Created</BbLabel>
+                    <div><LocalTime Utc="@createdUtc" Format="yyyy-MM-dd HH:mm" /></div>
+                </div>
+            }
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync"
+                        Disabled="@(string.IsNullOrWhiteSpace(name) || (IsNew && string.IsNullOrWhiteSpace(slug)))">
+                    <LucideIcon Name="save" /> Save
+                </BbButton>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
+                @if (!string.IsNullOrEmpty(statusMessage))
+                {
+                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                }
+            </div>
+        </BbCardFooter>
+    </BbCard>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    private bool IsNew => Id is null;
+    private bool IsDefault => Id == TenantDefaults.DefaultTenantId;
+
+    private bool isLoading = true;
+    private bool notFound;
+    private string? statusMessage;
+
+    private string name = "";
+    private string slug = "";
+    private string enabled = "true";
+    private string egress = "";
+    private bool wasEnabled;
+    private DateTimeOffset createdUtc;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsNew)
+        {
+            isLoading = false;
+            return;
+        }
+
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
+        var t = await svc.GetByIdAsync(Id!.Value);
+        if (t is null)
+        {
+            notFound = true;
+            isLoading = false;
+            return;
+        }
+
+        name = t.Name;
+        slug = t.Slug;
+        enabled = t.IsEnabled.ToString().ToLowerInvariant();
+        wasEnabled = t.IsEnabled;
+        egress = t.EgressIpAddress ?? "";
+        createdUtc = t.CreatedUtc;
+        isLoading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
+
+        if (IsNew)
+        {
+            try
+            {
+                await svc.CreateAsync(name.Trim(), slug.Trim());
+                Nav.NavigateTo("/tenants");
+            }
+            catch (InvalidOperationException ex)
+            {
+                statusMessage = ex.Message;
+            }
+            return;
+        }
+
+        var targetEnabled = IsDefault || enabled == "true";
+        try
+        {
+            // Enabling a previously-disabled tenant approves a pending self-service signup
+            // (confirms + unlocks its admins); the name is then applied via Update.
+            if (targetEnabled && !wasEnabled)
+            {
+                var signup = scope.ServiceProvider.GetRequiredService<ITenantSignupService>();
+                await signup.ApproveTenantAsync(Id!.Value);
+                await svc.UpdateAsync(Id!.Value, name.Trim(), true);
+            }
+            else
+            {
+                await svc.UpdateAsync(Id!.Value, name.Trim(), targetEnabled);
+            }
+
+            await svc.SetEgressIpAsync(Id!.Value, string.IsNullOrWhiteSpace(egress) ? null : egress.Trim());
+            Nav.NavigateTo("/tenants");
+        }
+        catch (InvalidOperationException ex)
+        {
+            statusMessage = ex.Message;
+        }
+    }
+
+    private void Cancel() => Nav.NavigateTo("/tenants");
+}

@@ -3,6 +3,7 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
+@inject NavigationManager Nav
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -21,34 +22,9 @@
         <h1>Tenants</h1>
         <p>Isolated relay configurations sharing this installation. Host administrators only.</p>
     </div>
-</div>
-
-<div style="max-width:480px;">
-<BbCard Class="mb-1">
-    <BbCardHeader>
-        <BbCardTitle>Add Tenant</BbCardTitle>
-    </BbCardHeader>
-    <BbCardContent>
-        <div class="form-group">
-            <BbLabel>Name</BbLabel>
-            <BbInput @bind-Value="newName" Placeholder="Acme Corp" />
-        </div>
-        <div class="form-group">
-            <BbLabel>Slug</BbLabel>
-            <BbInput @bind-Value="newSlug" Placeholder="acme" />
-        </div>
-    </BbCardContent>
-    <BbCardFooter>
-        <BbButton Variant="ButtonVariant.Default" @onclick="CreateAsync"
-                Disabled="@(string.IsNullOrWhiteSpace(newName) || string.IsNullOrWhiteSpace(newSlug))">
-            <LucideIcon Name="plus" /> Add
-        </BbButton>
-        @if (!string.IsNullOrEmpty(statusMessage))
-        {
-            <span class="text-muted" style="margin-left:1rem">@statusMessage</span>
-        }
-    </BbCardFooter>
-</BbCard>
+    <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/tenants/new"))">
+        <LucideIcon Name="plus" /> New tenant
+    </BbButton>
 </div>
 
 @if (isLoading)
@@ -64,46 +40,36 @@ else
                 <BbTableHeaderCell TData="Tenant">Name</BbTableHeaderCell>
                 <BbTableHeaderCell TData="Tenant">Slug</BbTableHeaderCell>
                 <BbTableHeaderCell TData="Tenant">Status</BbTableHeaderCell>
-                <BbTableHeaderCell TData="Tenant">Created</BbTableHeaderCell>
                 <BbTableHeaderCell TData="Tenant">Egress IP</BbTableHeaderCell>
-                <BbTableHeaderCell TData="Tenant">Actions</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Tenant">Created</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Tenant"></BbTableHeaderCell>
             </BbTableRow>
         </BbTableHeader>
         <BbTableBody>
             @foreach (var t in tenants)
             {
-                <BbTableRow Item="@t">
+                <BbTableRow Item="@t" class="list-row-clickable" @onclick="() => Edit(t.Id)">
                     <BbTableCell>@t.Id</BbTableCell>
                     <BbTableCell>@t.Name</BbTableCell>
                     <BbTableCell><span class="mono">@t.Slug</span></BbTableCell>
                     <BbTableCell>
                         <span class="badge-status @(t.IsEnabled ? "" : "badge-muted")">@(t.IsEnabled ? "Enabled" : "Disabled")</span>
                     </BbTableCell>
+                    <BbTableCell><span class="mono text-muted">@(string.IsNullOrWhiteSpace(t.EgressIpAddress) ? "—" : t.EgressIpAddress)</span></BbTableCell>
                     <BbTableCell><LocalTime Utc="@t.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell>
-                        <div style="display:flex;gap:0.25rem;align-items:center;">
-                            <BbInput @bind-Value="egressEdits[t.Id]" Placeholder="(OS default)" />
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
-                                    @onclick="() => SaveEgressAsync(t)" title="Save egress IP">
-                                <LucideIcon Name="save" />
+                        <div class="list-row-actions" @onclick:stopPropagation="true">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => Edit(t.Id)">
+                                <LucideIcon Name="pencil" />
                             </BbButton>
+                            @if (t.Id != TenantDefaults.DefaultTenantId)
+                            {
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                        @onclick="() => { deleteTargetId = t.Id; showDeleteConfirm = true; }">
+                                    <LucideIcon Name="trash-2" />
+                                </BbButton>
+                            }
                         </div>
-                    </BbTableCell>
-                    <BbTableCell>
-                        @if (t.Id != TenantDefaults.DefaultTenantId || !t.IsEnabled)
-                        {
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
-                                    @onclick="() => ToggleAsync(t)" title="@(t.IsEnabled ? "Disable" : "Enable")">
-                                <LucideIcon Name="@(t.IsEnabled ? "pause" : "play")" />
-                            </BbButton>
-                        }
-                        @if (t.Id != TenantDefaults.DefaultTenantId)
-                        {
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost"
-                                    @onclick="() => { deleteTargetId = t.Id; showDeleteConfirm = true; }" title="Delete">
-                                <LucideIcon Name="trash-2" />
-                            </BbButton>
-                        }
                     </BbTableCell>
                 </BbTableRow>
             }
@@ -130,13 +96,9 @@ else
 
 @code {
     private IReadOnlyList<Tenant> tenants = [];
-    private string newName = "";
-    private string newSlug = "";
-    private string? statusMessage;
     private bool isLoading = true;
     private bool showDeleteConfirm;
     private int deleteTargetId;
-    private Dictionary<int, string> egressEdits = new();
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();
 
@@ -146,87 +108,18 @@ else
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
         tenants = await svc.GetAllAsync();
-        egressEdits = tenants.ToDictionary(t => t.Id, t => t.EgressIpAddress ?? "");
         isLoading = false;
     }
 
-    private async Task SaveEgressAsync(Tenant t)
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
-        try
-        {
-            var value = egressEdits.TryGetValue(t.Id, out var v) ? v : null;
-            await svc.SetEgressIpAsync(t.Id, value);
-            statusMessage = string.IsNullOrWhiteSpace(value)
-                ? $"Egress IP cleared for '{t.Name}'"
-                : $"Egress IP set for '{t.Name}'";
-        }
-        catch (InvalidOperationException ex)
-        {
-            statusMessage = ex.Message;
-        }
-        await RefreshAsync();
-    }
-
-    private async Task CreateAsync()
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
-        try
-        {
-            var created = await svc.CreateAsync(newName, newSlug);
-            statusMessage = $"Tenant '{created.Name}' created";
-            newName = "";
-            newSlug = "";
-            await RefreshAsync();
-        }
-        catch (InvalidOperationException ex)
-        {
-            statusMessage = ex.Message;
-        }
-    }
-
-    private async Task ToggleAsync(Tenant t)
-    {
-        using var scope = ScopeFactory.CreateScope();
-        try
-        {
-            if (!t.IsEnabled)
-            {
-                // Enabling — also approves a pending self-service signup (confirms + unlocks its admins).
-                var signup = scope.ServiceProvider.GetRequiredService<ITenantSignupService>();
-                await signup.ApproveTenantAsync(t.Id);
-                statusMessage = $"Tenant '{t.Name}' enabled";
-            }
-            else
-            {
-                var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
-                await svc.UpdateAsync(t.Id, t.Name, false);
-                statusMessage = $"Tenant '{t.Name}' disabled";
-            }
-        }
-        catch (InvalidOperationException ex)
-        {
-            statusMessage = ex.Message;
-        }
-        await RefreshAsync();
-    }
+    private void Edit(int id) => Nav.NavigateTo($"/tenants/{id}");
 
     private async Task ConfirmDeleteAsync()
     {
         showDeleteConfirm = false;
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
-        try
-        {
-            await svc.PurgeAndDeleteAsync(deleteTargetId);
-            statusMessage = "Tenant and all its data deleted";
-        }
-        catch (InvalidOperationException ex)
-        {
-            statusMessage = ex.Message;
-        }
+        try { await svc.PurgeAndDeleteAsync(deleteTargetId); }
+        catch (InvalidOperationException) { /* surfaced on the detail page; ignore here */ }
         await RefreshAsync();
     }
 }
