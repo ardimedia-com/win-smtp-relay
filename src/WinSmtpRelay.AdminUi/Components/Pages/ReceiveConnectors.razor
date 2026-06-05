@@ -3,6 +3,7 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject ITenantScopeFactory ScopeFactory
+@inject NavigationManager Nav
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -21,66 +22,14 @@
         <h1>Receive Connectors</h1>
         <p>SMTP listener endpoints &mdash; changes require a service restart to take effect</p>
     </div>
-    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
-        <LucideIcon Name="info" /> About Receive Connectors
-    </BbButton>
-</div>
-
-<div style="max-width:500px;">
-<BbCard Class="mb-1">
-    <BbCardHeader>
-        <BbCardTitle>Create Connector</BbCardTitle>
-    </BbCardHeader>
-    <BbCardContent>
-        <div class="form-group">
-            <BbLabel>Name</BbLabel>
-            <BbInput @bind-Value="newName" Placeholder="Default" />
-        </div>
-        <div style="display:flex;gap:1rem;">
-            <div class="form-group" style="flex:2">
-                <BbLabel>Bind Address</BbLabel>
-                <BbInput @bind-Value="newAddress" Placeholder="0.0.0.0" />
-            </div>
-            <div class="form-group" style="flex:1">
-                <BbLabel>Port</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="newPort" />
-            </div>
-        </div>
-        <div style="display:flex;gap:1rem;">
-            <div class="form-group">
-                <BbLabel>Require TLS</BbLabel>
-                <BbNativeSelect @bind-Value="newRequireTls">
-                    <option value="false">No</option>
-                    <option value="true">Yes (STARTTLS)</option>
-                </BbNativeSelect>
-            </div>
-            <div class="form-group">
-                <BbLabel>Implicit TLS</BbLabel>
-                <BbNativeSelect @bind-Value="newImplicitTls">
-                    <option value="false">No</option>
-                    <option value="true">Yes</option>
-                </BbNativeSelect>
-            </div>
-            <div class="form-group">
-                <BbLabel>Require Auth</BbLabel>
-                <BbNativeSelect @bind-Value="newRequireAuth">
-                    <option value="false">No</option>
-                    <option value="true">Yes</option>
-                </BbNativeSelect>
-            </div>
-        </div>
-    </BbCardContent>
-    <BbCardFooter>
-        <BbButton Variant="ButtonVariant.Default" @onclick="CreateAsync"
-                Disabled="@string.IsNullOrWhiteSpace(newName)">
-            <LucideIcon Name="plus" /> Create
+    <div class="flex gap-1 items-center">
+        <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/connectors/receive/new"))">
+            <LucideIcon Name="plus" /> New connector
         </BbButton>
-        @if (!string.IsNullOrEmpty(statusMessage))
-        {
-            <span class="text-muted" style="margin-left:1rem">@statusMessage</span>
-        }
-    </BbCardFooter>
-</BbCard>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
+            <LucideIcon Name="info" /> About
+        </BbButton>
+    </div>
 </div>
 
 @if (isLoading)
@@ -98,7 +47,7 @@ else
                 <BbTableHeaderCell TData="ReceiveConnector">Auth</BbTableHeaderCell>
                 <BbTableHeaderCell TData="ReceiveConnector">Max Size</BbTableHeaderCell>
                 <BbTableHeaderCell TData="ReceiveConnector">Enabled</BbTableHeaderCell>
-                <BbTableHeaderCell TData="ReceiveConnector">Actions</BbTableHeaderCell>
+                <BbTableHeaderCell TData="ReceiveConnector"></BbTableHeaderCell>
             </BbTableRow>
         </BbTableHeader>
         <BbTableBody>
@@ -110,7 +59,7 @@ else
             }
             @foreach (var c in connectors)
             {
-                <BbTableRow Item="@c">
+                <BbTableRow Item="@c" class="list-row-clickable" @onclick="() => Edit(c.Id)">
                     <BbTableCell>@c.Name</BbTableCell>
                     <BbTableCell><code>@c.Address:@c.Port</code></BbTableCell>
                     <BbTableCell>
@@ -122,97 +71,21 @@ else
                     <BbTableCell>@(c.MaxMessageSizeBytes / (1024 * 1024)) MB</BbTableCell>
                     <BbTableCell><span class="badge-status @(c.IsEnabled ? "badge-success" : "badge-muted")">@(c.IsEnabled ? "Yes" : "No")</span></BbTableCell>
                     <BbTableCell>
-                        <BbDropdownMenu>
-                            <BbDropdownMenuTrigger>
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost">
-                                    <LucideIcon Name="ellipsis" />
-                                </BbButton>
-                            </BbDropdownMenuTrigger>
-                            <BbDropdownMenuContent>
-                                <BbDropdownMenuItem @onclick="() => StartEdit(c)">
-                                    <LucideIcon Name="pencil" /> Edit
-                                </BbDropdownMenuItem>
-                                <BbDropdownMenuSeparator />
-                                <BbDropdownMenuItem @onclick="() => { deleteTargetId = c.Id; showDeleteConfirm = true; }">
-                                    <LucideIcon Name="trash-2" /> Delete
-                                </BbDropdownMenuItem>
-                            </BbDropdownMenuContent>
-                        </BbDropdownMenu>
+                        <div class="list-row-actions" @onclick:stopPropagation="true">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => Edit(c.Id)">
+                                <LucideIcon Name="pencil" />
+                            </BbButton>
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                    @onclick="() => { deleteTargetId = c.Id; showDeleteConfirm = true; }">
+                                <LucideIcon Name="trash-2" />
+                            </BbButton>
+                        </div>
                     </BbTableCell>
                 </BbTableRow>
             }
         </BbTableBody>
     </BbTable>
 }
-
-<BbDialog @bind-Open="isEditOpen">
-    <BbDialogContent>
-        <BbDialogHeader>
-            <BbDialogTitle>Edit: @editName</BbDialogTitle>
-            <BbDialogDescription>Modify receive connector settings</BbDialogDescription>
-        </BbDialogHeader>
-        <div class="form-group">
-            <BbLabel>Name</BbLabel>
-            <BbInput @bind-Value="editName" />
-        </div>
-        <div style="display:flex;gap:1rem;">
-            <div class="form-group" style="flex:2">
-                <BbLabel>Bind Address</BbLabel>
-                <BbInput @bind-Value="editAddress" />
-            </div>
-            <div class="form-group" style="flex:1">
-                <BbLabel>Port</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="editPort" />
-            </div>
-        </div>
-        <div style="display:flex;gap:1rem;">
-            <div class="form-group">
-                <BbLabel>Require TLS</BbLabel>
-                <BbNativeSelect @bind-Value="editRequireTls">
-                    <option value="false">No</option>
-                    <option value="true">Yes</option>
-                </BbNativeSelect>
-            </div>
-            <div class="form-group">
-                <BbLabel>Implicit TLS</BbLabel>
-                <BbNativeSelect @bind-Value="editImplicitTls">
-                    <option value="false">No</option>
-                    <option value="true">Yes</option>
-                </BbNativeSelect>
-            </div>
-            <div class="form-group">
-                <BbLabel>Require Auth</BbLabel>
-                <BbNativeSelect @bind-Value="editRequireAuth">
-                    <option value="false">No</option>
-                    <option value="true">Yes</option>
-                </BbNativeSelect>
-            </div>
-        </div>
-        <div style="display:flex;gap:1rem;">
-            <div class="form-group" style="flex:1">
-                <BbLabel>Max Message Size (MB)</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="editMaxSizeMb" />
-            </div>
-            <div class="form-group" style="flex:1">
-                <BbLabel>Max Connections</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="editMaxConn" />
-            </div>
-        </div>
-        <div class="form-group">
-            <BbLabel>Enabled</BbLabel>
-            <BbNativeSelect @bind-Value="editEnabled">
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-            </BbNativeSelect>
-        </div>
-        <BbDialogFooter>
-            <BbDialogClose>
-                <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
-            </BbDialogClose>
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveEditAsync">Save</BbButton>
-        </BbDialogFooter>
-    </BbDialogContent>
-</BbDialog>
 
 <BbAlertDialog @bind-Open="showDeleteConfirm">
     <BbAlertDialogContent>
@@ -259,30 +132,8 @@ else
     private IReadOnlyList<ReceiveConnector> connectors = [];
     private bool isLoading = true;
     private bool showHelp;
-    private bool isEditOpen;
     private bool showDeleteConfirm;
     private int deleteTargetId;
-    private string? statusMessage;
-
-    // Create form
-    private string newName = "";
-    private string newAddress = "0.0.0.0";
-    private string newPort = "25";
-    private string newRequireTls = "false";
-    private string newImplicitTls = "false";
-    private string newRequireAuth = "false";
-
-    // Edit form
-    private int editId;
-    private string editName = "";
-    private string editAddress = "";
-    private string editPort = "";
-    private string editRequireTls = "false";
-    private string editImplicitTls = "false";
-    private string editRequireAuth = "false";
-    private string editMaxSizeMb = "25";
-    private string editMaxConn = "100";
-    private string editEnabled = "true";
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();
 
@@ -295,76 +146,13 @@ else
         isLoading = false;
     }
 
-    private async Task CreateAsync()
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IReceiveConnectorService>();
-
-        await svc.CreateAsync(new ReceiveConnector
-        {
-            Name = newName.Trim(),
-            Address = newAddress.Trim(),
-            Port = int.TryParse(newPort, out var p) ? p : 25,
-            RequireTls = newRequireTls == "true",
-            ImplicitTls = newImplicitTls == "true",
-            RequireAuth = newRequireAuth == "true"
-        });
-
-        statusMessage = $"Connector '{newName}' created (restart required)";
-        newName = "";
-        newAddress = "0.0.0.0";
-        newPort = "25";
-        newRequireTls = "false";
-        newImplicitTls = "false";
-        newRequireAuth = "false";
-        await RefreshAsync();
-    }
-
-    private void StartEdit(ReceiveConnector c)
-    {
-        editId = c.Id;
-        editName = c.Name;
-        editAddress = c.Address;
-        editPort = c.Port.ToString();
-        editRequireTls = c.RequireTls.ToString().ToLowerInvariant();
-        editImplicitTls = c.ImplicitTls.ToString().ToLowerInvariant();
-        editRequireAuth = c.RequireAuth.ToString().ToLowerInvariant();
-        editMaxSizeMb = (c.MaxMessageSizeBytes / (1024 * 1024)).ToString();
-        editMaxConn = c.MaxConnections.ToString();
-        editEnabled = c.IsEnabled.ToString().ToLowerInvariant();
-        isEditOpen = true;
-    }
-
-    private async Task SaveEditAsync()
-    {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IReceiveConnectorService>();
-
-        await svc.UpdateAsync(new ReceiveConnector
-        {
-            Id = editId,
-            Name = editName.Trim(),
-            Address = editAddress.Trim(),
-            Port = int.TryParse(editPort, out var p) ? p : 25,
-            RequireTls = editRequireTls == "true",
-            ImplicitTls = editImplicitTls == "true",
-            RequireAuth = editRequireAuth == "true",
-            MaxMessageSizeBytes = (int.TryParse(editMaxSizeMb, out var s) ? s : 25) * 1024 * 1024,
-            MaxConnections = int.TryParse(editMaxConn, out var mc) ? mc : 100,
-            IsEnabled = editEnabled == "true"
-        });
-
-        statusMessage = "Connector updated (restart required)";
-        isEditOpen = false;
-        await RefreshAsync();
-    }
+    private void Edit(int id) => Nav.NavigateTo($"/connectors/receive/{id}");
 
     private async Task ConfirmDeleteAsync()
     {
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<IReceiveConnectorService>();
         await svc.DeleteAsync(deleteTargetId);
-        statusMessage = "Connector deleted (restart required)";
         showDeleteConfirm = false;
         await RefreshAsync();
     }

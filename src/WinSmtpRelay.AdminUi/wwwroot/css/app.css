@@ -83,6 +83,11 @@
 .log-handled { opacity: 0.4; }
 .log-row-clickable { cursor: pointer; }
 
+/* List/detail pattern: clickable rows open the detail page; row actions are inline icon buttons. */
+.list-row-clickable { cursor: pointer; }
+.list-row-clickable:hover { background: var(--muted); }
+.list-row-actions { display: flex; gap: 0.25rem; align-items: center; }
+
 /* Search input with clear button */
 .search-input-wrapper {
     position: relative;

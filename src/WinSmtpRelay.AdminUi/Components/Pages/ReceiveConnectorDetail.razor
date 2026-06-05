@@ -1,0 +1,183 @@
+@page "/connectors/receive/new"
+@page "/connectors/receive/{Id:int}"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
+@inject ITenantScopeFactory ScopeFactory
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/connectors/receive">Receive Connectors</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>@(IsNew ? "New" : name)</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>@(IsNew ? "New receive connector" : $"Edit: {name}")</h1>
+    <p>SMTP listener endpoint &mdash; changes require a service restart to take effect</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[300px] w-full" />
+}
+else if (notFound)
+{
+    <p class="text-danger">Receive connector not found.</p>
+    <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel"><LucideIcon Name="arrow-left" /> Back</BbButton>
+}
+else
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel>Name</BbLabel>
+                <BbInput @bind-Value="name" Placeholder="Default" />
+            </div>
+            <div style="display:flex;gap:1rem;">
+                <div class="form-group" style="flex:2">
+                    <BbLabel>Bind Address</BbLabel>
+                    <BbInput @bind-Value="address" Placeholder="0.0.0.0" />
+                </div>
+                <div class="form-group" style="flex:1">
+                    <BbLabel>Port</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="port" />
+                </div>
+            </div>
+            <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+                <div class="form-group">
+                    <BbLabel>Require TLS</BbLabel>
+                    <BbNativeSelect @bind-Value="requireTls">
+                        <option value="false">No</option>
+                        <option value="true">Yes (STARTTLS)</option>
+                    </BbNativeSelect>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Implicit TLS</BbLabel>
+                    <BbNativeSelect @bind-Value="implicitTls">
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                    </BbNativeSelect>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Require Auth</BbLabel>
+                    <BbNativeSelect @bind-Value="requireAuth">
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                    </BbNativeSelect>
+                </div>
+            </div>
+            <div style="display:flex;gap:1rem;">
+                <div class="form-group" style="flex:1">
+                    <BbLabel>Max Message Size (MB)</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="maxSizeMb" />
+                </div>
+                <div class="form-group" style="flex:1">
+                    <BbLabel>Max Connections</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="maxConn" />
+                </div>
+            </div>
+            <div class="form-group">
+                <BbLabel>Enabled</BbLabel>
+                <BbNativeSelect @bind-Value="enabled">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </BbNativeSelect>
+            </div>
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(name)">
+                    <LucideIcon Name="save" /> Save
+                </BbButton>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
+                @if (!string.IsNullOrEmpty(statusMessage))
+                {
+                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                }
+            </div>
+        </BbCardFooter>
+    </BbCard>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+    private bool IsNew => Id is null;
+
+    private bool isLoading = true;
+    private bool notFound;
+    private string? statusMessage;
+
+    private string name = "";
+    private string address = "0.0.0.0";
+    private string port = "25";
+    private string requireTls = "false";
+    private string implicitTls = "false";
+    private string requireAuth = "false";
+    private string maxSizeMb = "25";
+    private string maxConn = "100";
+    private string enabled = "true";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsNew)
+        {
+            isLoading = false;
+            return;
+        }
+
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IReceiveConnectorService>();
+        var c = await svc.GetByIdAsync(Id!.Value);
+        if (c is null)
+        {
+            notFound = true;
+            isLoading = false;
+            return;
+        }
+
+        name = c.Name;
+        address = c.Address;
+        port = c.Port.ToString();
+        requireTls = c.RequireTls.ToString().ToLowerInvariant();
+        implicitTls = c.ImplicitTls.ToString().ToLowerInvariant();
+        requireAuth = c.RequireAuth.ToString().ToLowerInvariant();
+        maxSizeMb = (c.MaxMessageSizeBytes / (1024 * 1024)).ToString();
+        maxConn = c.MaxConnections.ToString();
+        enabled = c.IsEnabled.ToString().ToLowerInvariant();
+        isLoading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IReceiveConnectorService>();
+
+        var connector = new ReceiveConnector
+        {
+            Id = Id ?? 0,
+            Name = name.Trim(),
+            Address = address.Trim(),
+            Port = int.TryParse(port, out var p) ? p : 25,
+            RequireTls = requireTls == "true",
+            ImplicitTls = implicitTls == "true",
+            RequireAuth = requireAuth == "true",
+            MaxMessageSizeBytes = (int.TryParse(maxSizeMb, out var s) ? s : 25) * 1024 * 1024,
+            MaxConnections = int.TryParse(maxConn, out var mc) ? mc : 100,
+            IsEnabled = enabled == "true"
+        };
+
+        if (IsNew)
+            await svc.CreateAsync(connector);
+        else
+            await svc.UpdateAsync(connector);
+
+        Nav.NavigateTo("/connectors/receive");
+    }
+
+    private void Cancel() => Nav.NavigateTo("/connectors/receive");
+}
