@@ -1,6 +1,7 @@
 @page "/health"
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
+@implements IDisposable
 @inject ITenantScopeFactory ScopeFactory
 @inject IPublicSuffixService PublicSuffix
 @inject IJSRuntime JS
@@ -236,6 +237,10 @@ else
     private string? loadError;
     private bool showHelp;
 
+    // Cancels the in-flight (possibly slow) live DNS lookups if the user navigates away / the circuit
+    // is disposed, so a background continuation can't keep querying or touch a disposed renderer.
+    private readonly CancellationTokenSource _cts = new();
+
     protected override void OnInitialized() =>
         activeTab = Tab is "ip" or "dns" ? Tab : "ip";
 
@@ -248,7 +253,12 @@ else
         if (firstRender)
         {
             await RefreshAsync();
-            await InvokeAsync(StateHasChanged);
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException) { /* circuit gone while the DNS lookup was in flight */ }
+            catch (OperationCanceledException) { /* circuit gone while the DNS lookup was in flight */ }
         }
     }
 
@@ -257,6 +267,7 @@ else
         isLoading = true;
         loadError = null;
         StateHasChanged();
+        var ct = _cts.Token;
         try
         {
             using var scope = ScopeFactory.CreateScope();
@@ -265,19 +276,19 @@ else
             var current = sp.GetRequiredService<ICurrentTenant>();
 
             // ----- Domains: sending identity (SPF/DKIM/DMARC per sender domain) -----
-            senderGroups = [.. (await dns.CheckAllSenderDomainsAsync())
+            senderGroups = [.. (await dns.CheckAllSenderDomainsAsync(ct))
                 .Select(s => new CheckGroup(s.Domain, "Sending identity — you send mail as this domain", [s.Spf, s.Dkim, s.Dmarc]))];
 
             // ----- Domains: inbound (tenant-scoped) + backup-MX (host-level, only in host scope) -----
             inboundGroups = [];
             var recipients = await sp.GetRequiredService<IAcceptedDomainService>().GetAllAsync();
             foreach (var d in recipients.Select(x => x.Domain.Trim().ToLowerInvariant()).Where(x => x.Length > 0).Distinct())
-                inboundGroups.Add(new CheckGroup(d, "Inbound — this relay accepts mail for this domain", [await dns.CheckMxAsync(d)]));
+                inboundGroups.Add(new CheckGroup(d, "Inbound — this relay accepts mail for this domain", [await dns.CheckMxAsync(d, ct)]));
             if (current.IsHostScope)
             {
                 var backup = await sp.GetRequiredService<IBackupMxSettingsService>().GetAsync();
                 foreach (var d in backup.DomainList.Select(x => x.Trim().ToLowerInvariant()).Where(x => x.Length > 0).Distinct())
-                    inboundGroups.Add(new CheckGroup(d, "Backup MX (host-level) — holds mail when the primary is unreachable", [await dns.CheckMxAsync(d)]));
+                    inboundGroups.Add(new CheckGroup(d, "Backup MX (host-level) — holds mail when the primary is unreachable", [await dns.CheckMxAsync(d, ct)]));
             }
 
             // ----- IP addresses: public hostname + reverse DNS per sending/egress IP -----
@@ -286,11 +297,11 @@ else
             hostnameGroup = new CheckGroup(
                 string.IsNullOrWhiteSpace(settings.PublicHostname) ? "(public hostname)" : settings.PublicHostname,
                 "Public hostname — used in SPF (a:) and as the EHLO name",
-                [await dns.CheckHostnameAsync()]);
+                [await dns.CheckHostnameAsync(ct)]);
 
             ipGroups = [];
             foreach (var ip in sendingIps)
-                ipGroups.Add(new CheckGroup(ip, "Sending IP", [await dns.CheckReverseDnsAsync(ip), await dns.CheckBlocklistsAsync(ip)]));
+                ipGroups.Add(new CheckGroup(ip, "Sending IP", [await dns.CheckReverseDnsAsync(ip, ct), await dns.CheckBlocklistsAsync(ip, ct)]));
 
             var ips = new List<string>(sendingIps);
 
@@ -302,7 +313,7 @@ else
                 if (!string.IsNullOrWhiteSpace(egress) && !sendingIps.Any(s => IpEquals(s, egress)))
                 {
                     ipGroups.Add(new CheckGroup(egress, "Tenant egress IP — outbound mail for this tenant leaves from here",
-                        [await dns.CheckReverseDnsAsync(egress), await dns.CheckBlocklistsAsync(egress), SpfCoverage(egress, inSpf: false)]));
+                        [await dns.CheckReverseDnsAsync(egress, ct), await dns.CheckBlocklistsAsync(egress, ct), SpfCoverage(egress, inSpf: false)]));
                     ips.Add(egress);
                 }
             }
@@ -373,7 +384,7 @@ else
         if (string.IsNullOrEmpty(domain) || Uri.CheckHostName(domain) != UriHostNameType.Dns) return;
         using var scope = ScopeFactory.CreateScope();
         var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
-        var setup = await dns.CheckDomainAsync(domain);
+        var setup = await dns.CheckDomainAsync(domain, _cts.Token);
         adHocGroups.RemoveAll(g => g.Title == domain);
         adHocGroups.Insert(0, new CheckGroup(domain, subtitle, [setup.Spf, setup.Dkim, setup.Dmarc]));
         activeTab = "dns";
@@ -412,4 +423,10 @@ else
         DnsRecordStatus.Listed => "badge-error",
         _ => "badge-muted"
     };
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
 }
