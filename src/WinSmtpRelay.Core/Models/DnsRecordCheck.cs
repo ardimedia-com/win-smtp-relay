@@ -9,7 +9,9 @@ public enum DnsRecordStatus
     /// <summary>An expected value exists but nothing is published.</summary>
     Missing,
     /// <summary>A record is published but differs from the expected value.</summary>
-    Mismatch
+    Mismatch,
+    /// <summary>The item is present on a blocklist (DNSBL) — a bad outcome, unlike the others.</summary>
+    Listed
 }
 
 /// <summary>One DNS record (SPF/DKIM/DMARC) for a domain: where to publish it, the expected value, the live value, and the diff status.</summary>

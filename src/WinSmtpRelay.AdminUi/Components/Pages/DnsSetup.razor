@@ -124,6 +124,7 @@ else
                 <li><strong>Public hostname (A/AAAA)</strong> — must resolve to your sending IP; used in SPF (<code>a:</code>) and as the EHLO name.</li>
                 <li><strong>Reverse DNS (PTR)</strong> — each sending IP should have a PTR matching the hostname (FCrDNS). Missing/mismatched reverse DNS is a top reason mail is rejected or spam-foldered.</li>
                 <li><strong>SPF coverage</strong> — a tenant's egress IP must be listed in your sending IPs, or mail from it fails SPF.</li>
+                <li><strong>Blocklist (DNSBL)</strong> — each sending IP is checked against Spamhaus and SpamCop. A listing means receivers like Microsoft 365 will reject your mail (SMTP 5.7.1); use the delisting link and send from a clean IP.</li>
             </ul>
             <p class="text-muted">Status reflects live DNS and is subject to TTL/propagation — after publishing a change, allow time and Re-check.</p>
         </div>
@@ -194,7 +195,7 @@ else
 
             ipGroups = [];
             foreach (var ip in sendingIps)
-                ipGroups.Add(new CheckGroup(ip, "Sending IP", [await dns.CheckReverseDnsAsync(ip)]));
+                ipGroups.Add(new CheckGroup(ip, "Sending IP", [await dns.CheckReverseDnsAsync(ip), await dns.CheckBlocklistsAsync(ip)]));
 
             // Tenant egress IP: reverse DNS + SPF coverage (only when not already a configured sending IP).
             if (current.TenantId is { } tenantId)
@@ -203,7 +204,7 @@ else
                 var egress = tenant?.EgressIpAddress?.Trim();
                 if (!string.IsNullOrWhiteSpace(egress) && !sendingIps.Any(s => IpEquals(s, egress)))
                     ipGroups.Add(new CheckGroup(egress, "Tenant egress IP — outbound mail for this tenant leaves from here",
-                        [await dns.CheckReverseDnsAsync(egress), SpfCoverage(egress, inSpf: false)]));
+                        [await dns.CheckReverseDnsAsync(egress), await dns.CheckBlocklistsAsync(egress), SpfCoverage(egress, inSpf: false)]));
             }
         }
         catch (Exception)
@@ -257,6 +258,7 @@ else
         DnsRecordStatus.Ok => "badge-success",
         DnsRecordStatus.Mismatch => "badge-warning",
         DnsRecordStatus.Missing => "badge-error",
+        DnsRecordStatus.Listed => "badge-error",
         _ => "badge-muted"
     };
 }

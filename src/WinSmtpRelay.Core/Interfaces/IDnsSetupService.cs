@@ -29,6 +29,9 @@ public interface IDnsSetupService
     /// <summary>Checks that the configured public hostname resolves (A/AAAA) to one of the sending IPs.</summary>
     Task<DnsRecordResult> CheckHostnameAsync(CancellationToken ct = default);
 
+    /// <summary>Checks whether an IPv4 sending IP is on common DNS blocklists (Spamhaus, SpamCop).</summary>
+    Task<DnsRecordResult> CheckBlocklistsAsync(string ipAddress, CancellationToken ct = default);
+
     /// <summary>The TXT record value a tenant must publish at the domain apex to prove ownership.</summary>
     string BuildOwnershipRecord(string token);
 

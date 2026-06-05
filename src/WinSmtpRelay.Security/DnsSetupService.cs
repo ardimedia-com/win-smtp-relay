@@ -317,6 +317,68 @@ public class DnsSetupService(
         }
     }
 
+    // DNS blocklists queried for sending IPs (free, DNS-based). Spamhaus ZEN is the one Microsoft 365
+    // consults; SpamCop is a second widely-used list.
+    private static readonly (string Zone, string Name)[] Dnsbls =
+    [
+        ("zen.spamhaus.org", "Spamhaus ZEN"),
+        ("bl.spamcop.net", "SpamCop"),
+    ];
+
+    public async Task<DnsRecordResult> CheckBlocklistsAsync(string ipAddress, CancellationToken ct = default)
+    {
+        ipAddress = ipAddress.Trim();
+        if (!System.Net.IPAddress.TryParse(ipAddress, out var addr))
+            return new DnsRecordResult("Blocklist (DNSBL)", ipAddress, "not listed", null, DnsRecordStatus.NotConfigured,
+                "Not a valid IP address.");
+        if (addr.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+            return new DnsRecordResult("Blocklist (DNSBL)", ipAddress, "not listed", null, DnsRecordStatus.NotConfigured,
+                "Blocklist lookup currently supports IPv4 addresses only.");
+
+        var o = ipAddress.Split('.');
+        var reversed = $"{o[3]}.{o[2]}.{o[1]}.{o[0]}";
+
+        var listed = new List<string>();
+        var blocked = new List<string>();
+        foreach (var (zone, name) in Dnsbls)
+        {
+            var answers = await ResolveAAsync($"{reversed}.{zone}", ct);
+            // 127.0.0.x = a listing; 127.255.255.x = the resolver was refused (public resolvers / rate limit).
+            if (answers.Any(a => a.StartsWith("127.0.0.", StringComparison.Ordinal)))
+                listed.Add(name);
+            else if (answers.Any(a => a.StartsWith("127.255.255.", StringComparison.Ordinal)))
+                blocked.Add(name);
+        }
+
+        if (listed.Count > 0)
+            return new DnsRecordResult("Blocklist (DNSBL)", ipAddress, "not listed", "listed on " + string.Join(", ", listed),
+                DnsRecordStatus.Listed,
+                $"This IP is on {string.Join(", ", listed)} — receivers such as Microsoft 365 reject mail from it (SMTP 5.7.1). Request delisting (Spamhaus: https://www.spamhaus.org/query/ip/{ipAddress}), and avoid sending from listed IPs.");
+
+        if (blocked.Count > 0)
+            return new DnsRecordResult("Blocklist (DNSBL)", ipAddress, "not listed", "could not query: " + string.Join(", ", blocked),
+                DnsRecordStatus.NotConfigured,
+                $"Could not query {string.Join(", ", blocked)} from this server's DNS resolver (public resolvers are refused). Check from the server's own resolver or a Spamhaus DQS key.");
+
+        return new DnsRecordResult("Blocklist (DNSBL)", ipAddress, "not listed", "not listed", DnsRecordStatus.Ok,
+            $"Not listed on the checked blocklists ({string.Join(", ", Dnsbls.Select(d => d.Name))}).");
+    }
+
+    private async Task<List<string>> ResolveAAsync(string name, CancellationToken ct)
+    {
+        try
+        {
+            var result = await dns.QueryAsync(name, QueryType.A, cancellationToken: ct);
+            return result.Answers.OfType<ARecord>().Select(r => r.Address.ToString()).ToList();
+        }
+        catch (DnsResponseException) { return []; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "DNSBL lookup failed for {Name}", name);
+            return [];
+        }
+    }
+
     private const string OwnershipPrefix = "winsmtprelay-verification=";
 
     public string BuildOwnershipRecord(string token) => OwnershipPrefix + token;
