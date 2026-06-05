@@ -8,7 +8,7 @@ public class IpAccessRule : ITenantOwned
     public IpAccessAction Action { get; set; } = IpAccessAction.Allow;
     public int SortOrder { get; set; }
     public string? Description { get; set; }
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public enum IpAccessAction

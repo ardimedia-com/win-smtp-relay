@@ -29,5 +29,5 @@ public class DnsSettings
     /// <summary>Recommended DMARC percentage (1-100).</summary>
     public int DmarcPercentage { get; set; } = 100;
 
-    public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -38,6 +38,27 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<HeaderRewriteEntry> HeaderRewriteEntries => Set<HeaderRewriteEntry>();
     public DbSet<SenderRewriteEntry> SenderRewriteEntries => Set<SenderRewriteEntry>();
 
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        base.ConfigureConventions(configurationBuilder);
+
+        // SQLite has no native DateTimeOffset: the default mapping can't ORDER BY it. Store every
+        // DateTimeOffset as a fixed-width, UTC-normalised ISO-8601 string ("...Z"). That keeps the value
+        // human-readable and offset-marked in the database, and — because the format is fixed width —
+        // lexicographic order equals chronological order, so SQLite can ORDER BY and range-filter (>=, <)
+        // on it. The CLR/API type stays DateTimeOffset; on a provider with native support (SQL Server,
+        // PostgreSQL) this convention can be dropped and the offset persisted directly.
+        // (Note: a comparison on a *nullable* DateTimeOffset column combined with an OR-null still can't
+        //  be translated — see MessageQueue.GetPendingAsync, which filters eligibility in memory.)
+        configurationBuilder.Properties<DateTimeOffset>().HaveConversion<UtcIsoDateTimeOffsetConverter>();
+    }
+
+    /// <summary>Round-trips a DateTimeOffset as a fixed-width UTC ISO-8601 string (sortable in SQLite).</summary>
+    private sealed class UtcIsoDateTimeOffsetConverter()
+        : Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<DateTimeOffset, string>(
+            v => v.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            v => DateTimeOffset.Parse(v, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind));
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder); // Identity tables (AspNetUsers, AspNetRoles, ...)
@@ -55,7 +76,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 Name = TenantDefaults.DefaultName,
                 Slug = TenantDefaults.DefaultSlug,
                 IsEnabled = true,
-                CreatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                CreatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });
 
@@ -177,7 +198,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.HasData(new RateLimitSettings
             {
                 Id = 1,
-                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });
 
@@ -190,7 +211,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 Id = 1,
                 SelfServiceSignupEnabled = false,
                 SignupMaxAttemptsPerIpPerHour = 5,
-                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });
 
@@ -203,7 +224,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 SpfEnabled = false,
                 DmarcEnabled = false,
                 Enforcement = WinSmtpRelay.Core.Configuration.EnforcementMode.LogOnly,
-                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });
 
@@ -218,7 +239,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 Domains = "",
                 RetryIntervalMinutes = 15,
                 MaxHoldHours = 168,
-                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });
 
@@ -231,7 +252,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 Id = 1,
                 RetentionDays = 90,
                 AggregationTimeUtc = "00:00",
-                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });
 
@@ -252,7 +273,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 SpfAllQualifier = "~all",
                 DmarcPolicy = "none",
                 DmarcPercentage = 100,
-                UpdatedUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });
 

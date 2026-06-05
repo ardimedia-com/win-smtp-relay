@@ -44,7 +44,7 @@ public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userM
             Name = string.IsNullOrWhiteSpace(tenantName) ? slug : tenantName.Trim(),
             Slug = slug,
             IsEnabled = false,
-            CreatedUtc = DateTime.UtcNow
+            CreatedUtc = DateTimeOffset.UtcNow
         };
         db.Tenants.Add(tenant);
         await db.SaveChangesAsync(ct);
@@ -58,7 +58,7 @@ public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userM
             IsHostAdmin = false,
             MustChangePassword = false,
             LockoutEnabled = true,
-            CreatedUtc = DateTime.UtcNow
+            CreatedUtc = DateTimeOffset.UtcNow
         };
 
         var create = await userManager.CreateAsync(user, password);

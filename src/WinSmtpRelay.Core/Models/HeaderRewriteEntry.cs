@@ -10,5 +10,5 @@ public class HeaderRewriteEntry : ITenantOwned
     public string? NewValue { get; set; }
     public int SortOrder { get; set; }
     public bool IsEnabled { get; set; } = true;
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

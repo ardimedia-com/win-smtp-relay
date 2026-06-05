@@ -12,9 +12,9 @@ public class QueuedMessage : ITenantOwned
     public MessageStatus Status { get; set; } = MessageStatus.Queued;
     public int RetryCount { get; set; }
     public string? LastError { get; set; }
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
-    public DateTime? NextRetryUtc { get; set; }
-    public DateTime? CompletedUtc { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? NextRetryUtc { get; set; }
+    public DateTimeOffset? CompletedUtc { get; set; }
     public string? SourceIp { get; set; }
     public string? AuthenticatedUser { get; set; }
 }

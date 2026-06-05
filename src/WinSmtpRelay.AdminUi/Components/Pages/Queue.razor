@@ -216,7 +216,7 @@ else
         using var scope = ScopeFactory.CreateScope();
         var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
         await queue.UpdateStatusAsync(id, MessageStatus.Queued);
-        await queue.SetRetryAsync(id, 0, DateTime.UtcNow);
+        await queue.SetRetryAsync(id, 0, DateTimeOffset.UtcNow);
         statusMessage = $"Message {id} re-queued for delivery";
         await RefreshAsync();
     }

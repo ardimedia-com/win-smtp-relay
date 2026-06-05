@@ -218,15 +218,15 @@ public class DeliveryWorker(
             StatusCode = statusCode,
             StatusMessage = statusMessage,
             RemoteServer = remoteServer,
-            TimestampUtc = DateTime.UtcNow
+            TimestampUtc = DateTimeOffset.UtcNow
         });
         await db.SaveChangesAsync();
     }
 
-    internal static DateTime? CalculateNextRetry(int retryCount, DeliveryOptions config)
+    internal static DateTimeOffset? CalculateNextRetry(int retryCount, DeliveryOptions config)
     {
         if (retryCount <= 0)
-            return DateTime.UtcNow;
+            return DateTimeOffset.UtcNow;
 
         var intervals = config.RetryIntervalsMinutes;
         if (intervals.Length == 0)
@@ -243,7 +243,7 @@ public class DeliveryWorker(
         if (totalMinutes > config.MaxRetryHours * 60)
             return null;
 
-        return DateTime.UtcNow.AddMinutes(delayMinutes);
+        return DateTimeOffset.UtcNow.AddMinutes(delayMinutes);
     }
 
     private static bool IsBackupMxMessage(QueuedMessage message, BackupMxSettings backupMx)

@@ -22,7 +22,7 @@ public class BackupMxSettings
     /// <summary>Maximum time (hours) to hold backup-MX mail before giving up.</summary>
     public int MaxHoldHours { get; set; } = 168;
 
-    public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>Parsed view of <see cref="Domains"/>.</summary>
     [NotMapped]

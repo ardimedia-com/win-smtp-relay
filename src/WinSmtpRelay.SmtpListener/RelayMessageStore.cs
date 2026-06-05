@@ -94,7 +94,7 @@ public class RelayMessageStore : MessageStore
             SizeBytes = rawMessage.Length,
             SourceIp = sourceIp,
             TenantId = tenantId,
-            NextRetryUtc = DateTime.UtcNow
+            NextRetryUtc = DateTimeOffset.UtcNow
         };
 
         var id = await queue.EnqueueAsync(message, cancellationToken);

@@ -212,7 +212,7 @@ else
         var skip = (currentPage - 1) * pageSize;
 
         logs = await query
-            .OrderByDescending(l => l.TimestampUtc)
+            .OrderByDescending(l => l.Id)
             .Skip(skip)
             .Take(pageSize)
             .ToListAsync();

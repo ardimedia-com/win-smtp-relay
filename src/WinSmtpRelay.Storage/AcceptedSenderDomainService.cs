@@ -33,7 +33,7 @@ public class AcceptedSenderDomainService(RelayDbContext db) : IAcceptedSenderDom
         if (entry is null)
             return;
 
-        entry.VerifiedUtc = DateTime.UtcNow;
+        entry.VerifiedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
     }
 

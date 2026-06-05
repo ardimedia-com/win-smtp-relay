@@ -8,5 +8,5 @@ public class DailyStatistics : ITenantOwned
     public int TotalFailed { get; set; }
     public int TotalBounced { get; set; }
     public double AverageDeliveryTimeMs { get; set; }
-    public DateTime ComputedAtUtc { get; set; }
+    public DateTimeOffset ComputedAtUtc { get; set; }
 }

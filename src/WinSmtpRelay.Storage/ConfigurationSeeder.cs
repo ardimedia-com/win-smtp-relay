@@ -180,7 +180,7 @@ public class ConfigurationSeeder(
     }
 
     // Matches the HasData seeds in RelayDbContext: an untouched settings row carries this timestamp.
-    private static readonly DateTime SeedSentinel = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTimeOffset SeedSentinel = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     private async Task SeedRateLimitSettingsAsync(RelayDbContext db, CancellationToken ct)
     {

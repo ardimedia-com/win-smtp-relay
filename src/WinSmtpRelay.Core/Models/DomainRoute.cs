@@ -8,5 +8,5 @@ public class DomainRoute : ITenantOwned
     public int SendConnectorId { get; set; }
     public SendConnector? SendConnector { get; set; }
     public int SortOrder { get; set; }
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

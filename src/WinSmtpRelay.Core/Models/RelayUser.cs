@@ -10,5 +10,5 @@ public class RelayUser : ITenantOwned
     public string? AllowedSenderAddresses { get; set; }
     public int? RateLimitPerMinute { get; set; }
     public int? RateLimitPerDay { get; set; }
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -23,7 +23,7 @@ internal static class AccountEmail
             $"From: {from}\r\n" +
             $"To: {to}\r\n" +
             $"Subject: {subject}\r\n" +
-            $"Date: {DateTime.UtcNow:r}\r\n" +
+            $"Date: {DateTimeOffset.UtcNow:r}\r\n" +
             $"Message-ID: {messageId}\r\n" +
             "MIME-Version: 1.0\r\n" +
             "Content-Type: text/plain; charset=utf-8\r\n" +
@@ -38,7 +38,7 @@ internal static class AccountEmail
             RawMessage = raw,
             SizeBytes = raw.Length,
             TenantId = tenantId,
-            NextRetryUtc = DateTime.UtcNow
+            NextRetryUtc = DateTimeOffset.UtcNow
         }, ct);
     }
 

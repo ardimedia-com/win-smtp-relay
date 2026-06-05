@@ -15,5 +15,5 @@ public class StatisticsRetentionSettings
     /// <summary>UTC time-of-day (HH:mm) at which the daily aggregation/purge runs.</summary>
     public string AggregationTimeUtc { get; set; } = "00:00";
 
-    public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

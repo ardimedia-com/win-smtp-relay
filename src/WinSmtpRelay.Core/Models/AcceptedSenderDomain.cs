@@ -10,7 +10,7 @@ public class AcceptedSenderDomain : ITenantOwned
     public string VerificationToken { get; set; } = "";
 
     /// <summary>When ownership was last verified via DNS, or null if not yet verified.</summary>
-    public DateTime? VerifiedUtc { get; set; }
+    public DateTimeOffset? VerifiedUtc { get; set; }
 
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -18,5 +18,5 @@ public class AdminUser : IdentityUser<int>
     /// <summary>Set when the account was seeded/reset with a temporary password and must be changed.</summary>
     public bool MustChangePassword { get; set; }
 
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -25,7 +25,7 @@ public class DnsSettingsService(RelayDbContext db) : IDnsSettingsService
         existing.DmarcReportEmail = string.IsNullOrWhiteSpace(settings.DmarcReportEmail) ? null : settings.DmarcReportEmail.Trim();
         existing.DmarcPolicy = string.IsNullOrWhiteSpace(settings.DmarcPolicy) ? "none" : settings.DmarcPolicy.Trim();
         existing.DmarcPercentage = Math.Clamp(settings.DmarcPercentage, 1, 100);
-        existing.UpdatedUtc = DateTime.UtcNow;
+        existing.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         // No cache: consumed only by the DNS Setup page (read on demand).
     }

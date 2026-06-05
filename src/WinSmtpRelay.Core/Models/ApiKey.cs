@@ -27,9 +27,9 @@ public class ApiKey
 
     public bool IsEnabled { get; set; } = true;
 
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 
-    public DateTime? ExpiresUtc { get; set; }
+    public DateTimeOffset? ExpiresUtc { get; set; }
 
-    public DateTime? LastUsedUtc { get; set; }
+    public DateTimeOffset? LastUsedUtc { get; set; }
 }

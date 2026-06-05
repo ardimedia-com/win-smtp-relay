@@ -218,7 +218,7 @@ else
             TenantId = scoped ? CurrentTenant.FilterTenantId : null,
             IsHostAdmin = !scoped,
             MustChangePassword = true,
-            CreatedUtc = DateTime.UtcNow
+            CreatedUtc = DateTimeOffset.UtcNow
         };
 
         var password = GenerateTempPassword();

@@ -32,7 +32,7 @@ public class QueueDepthRecorder(
                 var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
                 CurrentDepth = await queue.GetQueueDepthAsync(stoppingToken);
 
-                var key = DateTime.UtcNow.ToString("HH:mm:ss");
+                var key = DateTimeOffset.UtcNow.ToString("HH:mm:ss");
                 _history[key] = CurrentDepth;
                 Prune();
             }
@@ -53,7 +53,7 @@ public class QueueDepthRecorder(
     {
         if (_history.Count <= 90) return;
 
-        var now = DateTime.UtcNow;
+        var now = DateTimeOffset.UtcNow;
         var validKeys = Enumerable.Range(0, 90)
             .Select(i => now.AddSeconds(-i).ToString("HH:mm:ss"))
             .ToHashSet();

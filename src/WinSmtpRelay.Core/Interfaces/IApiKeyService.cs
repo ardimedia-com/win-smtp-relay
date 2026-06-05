@@ -12,7 +12,7 @@ public interface IApiKeyService
     /// The plaintext is never persisted and cannot be recovered later.
     /// </summary>
     Task<(ApiKey Key, string Plaintext)> CreateAsync(
-        int? tenantId, string name, string role, DateTime? expiresUtc, CancellationToken cancellationToken = default);
+        int? tenantId, string name, string role, DateTimeOffset? expiresUtc, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Validates a presented key. Returns the matching enabled, unexpired key (and updates

@@ -24,7 +24,7 @@ public class Tenant
     /// </summary>
     public string? EgressIpAddress { get; set; }
 
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public static class TenantDefaults

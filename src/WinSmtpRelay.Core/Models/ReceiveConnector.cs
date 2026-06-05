@@ -13,5 +13,5 @@ public class ReceiveConnector : ITenantOwned
     public int MaxMessageSizeBytes { get; set; } = 25 * 1024 * 1024;
     public int MaxConnections { get; set; } = 100;
     public bool IsEnabled { get; set; } = true;
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

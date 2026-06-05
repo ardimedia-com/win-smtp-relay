@@ -28,7 +28,7 @@ public class RateLimitSettingsService(RelayDbContext db, IRuntimeConfigCache cac
         existing.MaxMessagesPerSenderPerDay = settings.MaxMessagesPerSenderPerDay;
         existing.FailedAuthBanThreshold = settings.FailedAuthBanThreshold;
         existing.FailedAuthBanMinutes = settings.FailedAuthBanMinutes;
-        existing.UpdatedUtc = DateTime.UtcNow;
+        existing.UpdatedUtc = DateTimeOffset.UtcNow;
 
         await db.SaveChangesAsync(ct);
 

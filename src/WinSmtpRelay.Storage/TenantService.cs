@@ -27,7 +27,7 @@ public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITena
             Name = string.IsNullOrWhiteSpace(name) ? normalizedSlug : name.Trim(),
             Slug = normalizedSlug,
             IsEnabled = true,
-            CreatedUtc = DateTime.UtcNow
+            CreatedUtc = DateTimeOffset.UtcNow
         };
         db.Tenants.Add(tenant);
         await db.SaveChangesAsync(cancellationToken);

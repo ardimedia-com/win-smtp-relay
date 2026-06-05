@@ -17,11 +17,11 @@ public class ApiKeyService(RelayDbContext db) : IApiKeyService
         if (tenantId is not null)
             query = query.Where(k => k.TenantId == tenantId);
 
-        return await query.OrderByDescending(k => k.CreatedUtc).ToListAsync(cancellationToken);
+        return await query.OrderByDescending(k => k.Id).ToListAsync(cancellationToken);
     }
 
     public async Task<(ApiKey Key, string Plaintext)> CreateAsync(
-        int? tenantId, string name, string role, DateTime? expiresUtc, CancellationToken cancellationToken)
+        int? tenantId, string name, string role, DateTimeOffset? expiresUtc, CancellationToken cancellationToken)
     {
         var plaintext = GenerateKey();
         var entity = new ApiKey
@@ -32,7 +32,7 @@ public class ApiKeyService(RelayDbContext db) : IApiKeyService
             KeyPrefix = plaintext[..PrefixStoreLength],
             KeyHash = Hash(plaintext),
             IsEnabled = true,
-            CreatedUtc = DateTime.UtcNow,
+            CreatedUtc = DateTimeOffset.UtcNow,
             ExpiresUtc = expiresUtc
         };
 
@@ -52,7 +52,7 @@ public class ApiKeyService(RelayDbContext db) : IApiKeyService
 
         // Narrow by indexed prefix, then timing-safe compare the hash.
         var candidates = await db.ApiKeys.Where(k => k.KeyPrefix == prefix).ToListAsync(cancellationToken);
-        var now = DateTime.UtcNow;
+        var now = DateTimeOffset.UtcNow;
 
         foreach (var candidate in candidates)
         {

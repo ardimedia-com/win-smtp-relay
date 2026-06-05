@@ -116,7 +116,7 @@ public class PickupFolderService : BackgroundService
             RawMessage = rawMessage,
             SizeBytes = rawMessage.Length,
             Status = MessageStatus.Queued,
-            CreatedUtc = DateTime.UtcNow,
+            CreatedUtc = DateTimeOffset.UtcNow,
             SourceIp = "pickup"
         };
 
@@ -138,7 +138,7 @@ public class PickupFolderService : BackgroundService
             Directory.CreateDirectory(errorDir);
             var dest = Path.Combine(errorDir, Path.GetFileName(filePath));
             if (File.Exists(dest))
-                dest = Path.Combine(errorDir, $"{Path.GetFileNameWithoutExtension(filePath)}_{DateTime.UtcNow:yyyyMMddHHmmss}.eml");
+                dest = Path.Combine(errorDir, $"{Path.GetFileNameWithoutExtension(filePath)}_{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.eml");
             File.Move(filePath, dest);
         }
         catch (Exception ex)

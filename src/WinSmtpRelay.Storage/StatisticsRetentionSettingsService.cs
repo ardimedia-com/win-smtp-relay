@@ -20,7 +20,7 @@ public class StatisticsRetentionSettingsService(RelayDbContext db) : IStatistics
 
         settings.RetentionDays = Math.Max(1, retentionDays);
         settings.AggregationTimeUtc = string.IsNullOrWhiteSpace(aggregationTimeUtc) ? "00:00" : aggregationTimeUtc.Trim();
-        settings.UpdatedUtc = DateTime.UtcNow;
+        settings.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         // No cache: consumed only by the daily background aggregator, which reads it each cycle.
     }

@@ -8,5 +8,5 @@ public class RateLimitSettings
     public int MaxMessagesPerSenderPerDay { get; set; } = 1000;
     public int FailedAuthBanThreshold { get; set; } = 5;
     public int FailedAuthBanMinutes { get; set; } = 30;
-    public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

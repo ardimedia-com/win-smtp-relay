@@ -4,7 +4,7 @@
 
 @if (Utc is { } value)
 {
-    <span title="@($"{value:yyyy-MM-dd HH:mm:ss} UTC")">@Time.Format(value, Format)</span>
+    <span title="@($"{value.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC")">@Time.Format(value, Format)</span>
 }
 else
 {
@@ -12,8 +12,8 @@ else
 }
 
 @code {
-    /// <summary>The UTC timestamp to display (null renders <see cref="Null"/>).</summary>
-    [Parameter, EditorRequired] public DateTime? Utc { get; set; }
+    /// <summary>The timestamp to display (null renders <see cref="Null"/>).</summary>
+    [Parameter, EditorRequired] public DateTimeOffset? Utc { get; set; }
 
     /// <summary>.NET date/time format string applied after conversion to the browser's local time.</summary>
     [Parameter] public string Format { get; set; } = "yyyy-MM-dd HH:mm";

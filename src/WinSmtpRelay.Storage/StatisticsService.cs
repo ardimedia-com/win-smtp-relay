@@ -8,8 +8,8 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
 {
     public async Task<IReadOnlyList<TimeBucketResult>> GetLiveStatisticsAsync(CancellationToken ct = default)
     {
-        var cutoff = DateTime.UtcNow.AddSeconds(-60);
-        var now = DateTime.UtcNow;
+        var cutoff = DateTimeOffset.UtcNow.AddSeconds(-60);
+        var now = DateTimeOffset.UtcNow;
 
         var logs = await db.DeliveryLogs
             .AsNoTracking()
@@ -35,8 +35,8 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
 
     public async Task<IReadOnlyList<TimeBucketResult>> GetHourlyStatisticsAsync(CancellationToken ct = default)
     {
-        var cutoff = DateTime.UtcNow.AddHours(-1);
-        var now = DateTime.UtcNow;
+        var cutoff = DateTimeOffset.UtcNow.AddHours(-1);
+        var now = DateTimeOffset.UtcNow;
 
         var logs = await db.DeliveryLogs
             .AsNoTracking()
@@ -62,12 +62,18 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
 
     public async Task<IReadOnlyList<TimeBucketResult>> GetDailyStatisticsAsync(CancellationToken ct = default)
     {
-        var cutoff = DateTime.UtcNow.AddHours(-24);
-        var now = DateTime.UtcNow;
+        var cutoff = DateTimeOffset.UtcNow.AddHours(-24);
+        var now = DateTimeOffset.UtcNow;
 
-        var grouped = await db.DeliveryLogs
+        var logs = await db.DeliveryLogs
             .AsNoTracking()
             .Where(l => l.TimestampUtc >= cutoff)
+            .Select(l => new { l.TimestampUtc, l.StatusCode })
+            .ToListAsync(ct);
+
+        // Group by UTC hour client-side: SQLite can't extract date parts from the
+        // ISO-string-stored DateTimeOffset.
+        var grouped = logs
             .GroupBy(l => l.TimestampUtc.Hour)
             .Select(g => new
             {
@@ -75,7 +81,7 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
                 Sent = g.Count(l => l.StatusCode == "250"),
                 Failed = g.Count(l => l.StatusCode.StartsWith("5"))
             })
-            .ToListAsync(ct);
+            .ToList();
 
         var buckets = new TimeBucketResult[24];
         for (var i = 0; i < 24; i++)
@@ -131,7 +137,7 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
 
     public async Task AggregateDayAsync(DateOnly date, CancellationToken ct = default)
     {
-        var startUtc = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var startUtc = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
         var endUtc = startUtc.AddDays(1);
 
         // Runs unscoped from the background aggregator, so the query filter is off and this sees
@@ -145,7 +151,7 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
         // Load message creation times once for the day to compute delivery latency.
         var messageIds = logs.Select(l => l.QueuedMessageId).Distinct().ToList();
         var createdById = messageIds.Count == 0
-            ? new Dictionary<long, DateTime>()
+            ? new Dictionary<long, DateTimeOffset>()
             : (await db.QueuedMessages
                 .AsNoTracking()
                 .Where(m => messageIds.Contains(m.Id))
@@ -153,7 +159,7 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
                 .ToListAsync(ct))
                 .ToDictionary(m => m.Id, m => m.CreatedUtc);
 
-        var now = DateTime.UtcNow;
+        var now = DateTimeOffset.UtcNow;
         foreach (var group in logs.GroupBy(l => l.TenantId))
         {
             var tenantId = group.Key;
@@ -200,14 +206,14 @@ public class StatisticsService(RelayDbContext db) : IStatisticsService
     {
         var earliest = await db.DeliveryLogs
             .AsNoTracking()
-            .OrderBy(l => l.TimestampUtc)
-            .Select(l => (DateTime?)l.TimestampUtc)
+            .OrderBy(l => l.Id)
+            .Select(l => (DateTimeOffset?)l.TimestampUtc)
             .FirstOrDefaultAsync(ct);
 
         if (earliest is null)
             return;
 
-        var startDate = DateOnly.FromDateTime(earliest.Value);
+        var startDate = DateOnly.FromDateTime(earliest.Value.UtcDateTime);
         var yesterday = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);
 
         for (var date = startDate; date <= yesterday; date = date.AddDays(1))

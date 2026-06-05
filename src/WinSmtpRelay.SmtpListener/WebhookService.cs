@@ -33,7 +33,7 @@ public class WebhookService
         var payload = new
         {
             @event = "message.received",
-            timestamp = DateTime.UtcNow.ToString("O"),
+            timestamp = DateTimeOffset.UtcNow.ToString("O"),
             messageId,
             sender,
             recipients = recipients.Split(';', StringSplitOptions.RemoveEmptyEntries),

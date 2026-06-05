@@ -9,5 +9,5 @@ public class DeliveryLog : ITenantOwned
     public required string StatusCode { get; set; }
     public required string StatusMessage { get; set; }
     public string? RemoteServer { get; set; }
-    public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset TimestampUtc { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -19,5 +19,5 @@ public class EmailAuthSettings
     /// <summary>What to do on an authentication failure: log only, reject, or quarantine.</summary>
     public EnforcementMode Enforcement { get; set; } = EnforcementMode.LogOnly;
 
-    public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

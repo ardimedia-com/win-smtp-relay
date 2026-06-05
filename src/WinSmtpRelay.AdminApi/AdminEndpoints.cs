@@ -59,7 +59,7 @@ public static class AdminEndpoints
         group.MapGet("/health", () => Results.Ok(new
         {
             Status = "Healthy",
-            Timestamp = DateTime.UtcNow
+            Timestamp = DateTimeOffset.UtcNow
         })).AllowAnonymous();
     }
 
@@ -75,7 +75,7 @@ public static class AdminEndpoints
 
             return Results.Ok(new
             {
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTimeOffset.UtcNow,
                 Queue = new { Depth = queueDepth, TotalProcessed = totalMessages },
                 Deliveries = new { Total = totalDeliveries, Failed = failedDeliveries },
                 Process = new
@@ -121,7 +121,7 @@ public static class AdminEndpoints
                 return Results.BadRequest(new { Error = "Only failed or bounced messages can be retried" });
 
             await q.UpdateStatusAsync(id, MessageStatus.Queued, null, ct);
-            await q.SetRetryAsync(id, 0, DateTime.UtcNow, ct);
+            await q.SetRetryAsync(id, 0, DateTimeOffset.UtcNow, ct);
             return Results.Ok(new { Message = "Message re-queued for delivery" });
         });
 
@@ -208,7 +208,7 @@ public static class AdminEndpoints
                 query = query.Where(l => l.QueuedMessageId == messageId.Value);
 
             var items = await query
-                .OrderByDescending(l => l.TimestampUtc)
+                .OrderByDescending(l => l.Id)
                 .Skip(offset)
                 .Take(limit)
                 .Select(l => new DeliveryLogSummary(
@@ -624,11 +624,11 @@ public record QueueStatusResponse(int Depth);
 public record MessageSummary(
     long Id, string MessageId, string Sender, string Recipients, int SizeBytes,
     MessageStatus Status, int RetryCount, string? LastError,
-    DateTime CreatedUtc, DateTime? NextRetryUtc, DateTime? CompletedUtc);
+    DateTimeOffset CreatedUtc, DateTimeOffset? NextRetryUtc, DateTimeOffset? CompletedUtc);
 
 public record UserSummary(
     int Id, string Username, bool IsEnabled, string? AllowedSenderAddresses,
-    int? RateLimitPerMinute, int? RateLimitPerDay, DateTime CreatedUtc);
+    int? RateLimitPerMinute, int? RateLimitPerDay, DateTimeOffset CreatedUtc);
 
 public record CreateUserRequest(string Username, string Password);
 
@@ -640,7 +640,7 @@ public record DkimGenerateRequest(string Domain, string Selector, int KeySize = 
 
 public record DeliveryLogSummary(
     long Id, long QueuedMessageId, string Recipient, string StatusCode,
-    string StatusMessage, string? RemoteServer, DateTime TimestampUtc);
+    string StatusMessage, string? RemoteServer, DateTimeOffset TimestampUtc);
 
 public record CreateAcceptedDomainRequest(string Domain);
 public record CreateAcceptedSenderDomainRequest(string Domain);
@@ -649,6 +649,6 @@ public record UpdateTenantRequest(string Name, bool IsEnabled);
 
 public record ApiKeySummary(
     int Id, int? TenantId, string Name, string KeyPrefix, string Role,
-    bool IsEnabled, DateTime CreatedUtc, DateTime? ExpiresUtc, DateTime? LastUsedUtc);
-public record CreateApiKeyRequest(string Name, string Role, int? TenantId, DateTime? ExpiresUtc);
+    bool IsEnabled, DateTimeOffset CreatedUtc, DateTimeOffset? ExpiresUtc, DateTimeOffset? LastUsedUtc);
+public record CreateApiKeyRequest(string Name, string Role, int? TenantId, DateTimeOffset? ExpiresUtc);
 public record CreatedApiKeyResponse(int Id, string Name, string KeyPrefix, string Role, int? TenantId, string Key);

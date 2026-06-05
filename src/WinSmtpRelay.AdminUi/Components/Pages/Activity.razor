@@ -134,7 +134,7 @@
     private void AddEvent(string icon, string text, string cssClass)
     {
         if (_disposed) return;
-        events.Insert(0, new ActivityEvent(DateTime.UtcNow, icon, text, cssClass));
+        events.Insert(0, new ActivityEvent(DateTimeOffset.UtcNow, icon, text, cssClass));
         if (events.Count > MaxEvents)
             events.RemoveAt(events.Count - 1);
         InvokeAsync(StateHasChanged);
@@ -149,5 +149,5 @@
             await hubConnection.DisposeAsync();
     }
 
-    private record ActivityEvent(DateTime Timestamp, string Icon, string Text, string CssClass);
+    private record ActivityEvent(DateTimeOffset Timestamp, string Icon, string Text, string CssClass);
 }

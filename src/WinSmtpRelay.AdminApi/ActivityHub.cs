@@ -21,7 +21,7 @@ public class ActivityNotifier(IHubContext<ActivityHub> hub) : IActivityNotifier
             Sender = sender,
             Recipients = recipients,
             SizeBytes = sizeBytes,
-            TimestampUtc = DateTime.UtcNow
+            TimestampUtc = DateTimeOffset.UtcNow
         });
     }
 
@@ -33,7 +33,7 @@ public class ActivityNotifier(IHubContext<ActivityHub> hub) : IActivityNotifier
             Recipient = recipient,
             StatusCode = statusCode,
             RemoteServer = remoteServer,
-            TimestampUtc = DateTime.UtcNow
+            TimestampUtc = DateTimeOffset.UtcNow
         });
     }
 
@@ -43,7 +43,7 @@ public class ActivityNotifier(IHubContext<ActivityHub> hub) : IActivityNotifier
         {
             SourceIp = sourceIp,
             EventType = eventType,
-            TimestampUtc = DateTime.UtcNow
+            TimestampUtc = DateTimeOffset.UtcNow
         });
     }
 

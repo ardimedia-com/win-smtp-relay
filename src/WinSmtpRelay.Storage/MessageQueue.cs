@@ -15,11 +15,18 @@ public class MessageQueue(RelayDbContext db) : IMessageQueue
 
     public async Task<IReadOnlyList<QueuedMessage>> GetPendingAsync(int maxCount, CancellationToken cancellationToken = default)
     {
-        return await db.QueuedMessages
-            .Where(m => m.Status == MessageStatus.Queued && (m.NextRetryUtc == null || m.NextRetryUtc <= DateTime.UtcNow))
-            .OrderBy(m => m.NextRetryUtc ?? m.CreatedUtc)
-            .Take(maxCount)
+        // SQLite/EF can't translate a range comparison on the nullable DateTimeOffset column combined
+        // with an OR-null, so load the (small) Queued set ordered by Id and filter eligibility — no
+        // retry scheduled, or the retry time has passed — in memory.
+        var now = DateTimeOffset.UtcNow;
+        var queued = await db.QueuedMessages
+            .Where(m => m.Status == MessageStatus.Queued)
+            .OrderBy(m => m.Id)
             .ToListAsync(cancellationToken);
+        return queued
+            .Where(m => m.NextRetryUtc is null || m.NextRetryUtc <= now)
+            .Take(maxCount)
+            .ToList();
     }
 
     public async Task UpdateStatusAsync(long messageId, MessageStatus status, string? error = null, CancellationToken cancellationToken = default)
@@ -29,7 +36,7 @@ public class MessageQueue(RelayDbContext db) : IMessageQueue
             .ExecuteUpdateAsync(s => s
                 .SetProperty(m => m.Status, status)
                 .SetProperty(m => m.LastError, error)
-                .SetProperty(m => m.CompletedUtc, status is MessageStatus.Delivered or MessageStatus.Bounced ? DateTime.UtcNow : (DateTime?)null),
+                .SetProperty(m => m.CompletedUtc, status is MessageStatus.Delivered or MessageStatus.Bounced ? DateTimeOffset.UtcNow : (DateTimeOffset?)null),
                 cancellationToken);
     }
 
@@ -43,7 +50,7 @@ public class MessageQueue(RelayDbContext db) : IMessageQueue
         return await db.QueuedMessages.CountAsync(m => m.Status == MessageStatus.Queued, cancellationToken);
     }
 
-    public async Task SetRetryAsync(long messageId, int retryCount, DateTime nextRetryUtc, CancellationToken cancellationToken = default)
+    public async Task SetRetryAsync(long messageId, int retryCount, DateTimeOffset nextRetryUtc, CancellationToken cancellationToken = default)
     {
         await db.QueuedMessages
             .Where(m => m.Id == messageId)
@@ -61,7 +68,7 @@ public class MessageQueue(RelayDbContext db) : IMessageQueue
     public async Task<IReadOnlyList<QueuedMessage>> GetRecentAsync(int maxCount, CancellationToken cancellationToken = default)
     {
         return await db.QueuedMessages
-            .OrderByDescending(m => m.CreatedUtc)
+            .OrderByDescending(m => m.Id)
             .Take(maxCount)
             .ToListAsync(cancellationToken);
     }
@@ -70,7 +77,7 @@ public class MessageQueue(RelayDbContext db) : IMessageQueue
     {
         return await db.QueuedMessages
             .Where(m => m.Status != MessageStatus.Delivered)
-            .OrderByDescending(m => m.CreatedUtc)
+            .OrderByDescending(m => m.Id)
             .Take(maxCount)
             .ToListAsync(cancellationToken);
     }

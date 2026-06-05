@@ -41,7 +41,7 @@ public class AdminSeeder(IServiceScopeFactory scopeFactory, ILogger<AdminSeeder>
                 Name = TenantDefaults.DefaultName,
                 Slug = TenantDefaults.DefaultSlug,
                 IsEnabled = true,
-                CreatedUtc = DateTime.UtcNow
+                CreatedUtc = DateTimeOffset.UtcNow
             });
             await db.SaveChangesAsync(cancellationToken);
         }
@@ -60,7 +60,7 @@ public class AdminSeeder(IServiceScopeFactory scopeFactory, ILogger<AdminSeeder>
             TenantId = null,
             DisplayName = "Administrator",
             MustChangePassword = true,
-            CreatedUtc = DateTime.UtcNow
+            CreatedUtc = DateTimeOffset.UtcNow
         };
 
         var result = await userManager.CreateAsync(admin, password);

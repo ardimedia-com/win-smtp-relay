@@ -21,7 +21,7 @@ public class PortalSettingsService(RelayDbContext db) : IPortalSettingsService
         settings.SelfServiceSignupEnabled = enabled;
         // Bumps UpdatedUtc past the seed sentinel so the configuration seeder stops applying
         // the appsettings value on restart — the database becomes authoritative once edited.
-        settings.UpdatedUtc = DateTime.UtcNow;
+        settings.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
     }
 
@@ -35,7 +35,7 @@ public class PortalSettingsService(RelayDbContext db) : IPortalSettingsService
         }
 
         settings.SignupFromAddress = string.IsNullOrWhiteSpace(fromAddress) ? null : fromAddress.Trim();
-        settings.UpdatedUtc = DateTime.UtcNow;
+        settings.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
     }
 
@@ -49,7 +49,7 @@ public class PortalSettingsService(RelayDbContext db) : IPortalSettingsService
         }
 
         settings.SignupMaxAttemptsPerIpPerHour = Math.Max(0, maxPerHour);
-        settings.UpdatedUtc = DateTime.UtcNow;
+        settings.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
     }
 }

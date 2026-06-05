@@ -8,5 +8,5 @@ public class DkimDomain : ITenantOwned
     public required string Selector { get; set; }
     public required string PrivateKeyPath { get; set; }
     public bool IsEnabled { get; set; } = true;
-    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

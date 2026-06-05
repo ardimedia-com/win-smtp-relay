@@ -22,7 +22,7 @@ public class BackupMxSettingsService(RelayDbContext db, IRuntimeConfigCache cach
         settings.Domains = domains?.Trim() ?? "";
         settings.RetryIntervalMinutes = Math.Max(1, retryIntervalMinutes);
         settings.MaxHoldHours = Math.Max(1, maxHoldHours);
-        settings.UpdatedUtc = DateTime.UtcNow;
+        settings.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
         // The SMTP/delivery hot path caches these — refresh so the change takes effect now.

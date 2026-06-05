@@ -40,14 +40,9 @@ public sealed class BrowserTimeService
         Changed?.Invoke();
     }
 
-    /// <summary>Converts a (UTC) timestamp to the browser's local time; returns UTC until the zone is known.</summary>
-    public DateTime ToLocal(DateTime value)
-    {
-        var utc = value.Kind == DateTimeKind.Local
-            ? value.ToUniversalTime()
-            : DateTime.SpecifyKind(value, DateTimeKind.Utc);
-        return _tz is null ? utc : TimeZoneInfo.ConvertTimeFromUtc(utc, _tz);
-    }
+    /// <summary>Converts a timestamp to the browser's local time; returns UTC until the zone is known.</summary>
+    public DateTimeOffset ToLocal(DateTimeOffset value)
+        => _tz is null ? value.ToUniversalTime() : TimeZoneInfo.ConvertTime(value, _tz);
 
-    public string Format(DateTime value, string format) => ToLocal(value).ToString(format);
+    public string Format(DateTimeOffset value, string format) => ToLocal(value).ToString(format);
 }

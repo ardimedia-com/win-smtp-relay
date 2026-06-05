@@ -22,7 +22,7 @@ public class EmailAuthSettingsService(RelayDbContext db, IRuntimeConfigCache cac
         settings.SpfEnabled = spfEnabled;
         settings.DmarcEnabled = dmarcEnabled;
         settings.Enforcement = enforcement;
-        settings.UpdatedUtc = DateTime.UtcNow;
+        settings.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
 
         // The SMTP hot path caches these settings — refresh so the policy change takes effect now.
