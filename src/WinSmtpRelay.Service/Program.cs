@@ -163,9 +163,21 @@ if (adminUiConfig.Enabled)
         .AddInteractiveServerRenderMode();
 
     if (!adminHttpsActive)
+    {
+        // The admin plane carries full-authority cookies/API keys. Plain HTTP is tolerated only on
+        // loopback (local/dev); refuse to serve it on any network-reachable address so the credentials
+        // are never interceptable on the wire.
+        var bindsToLoopback = System.Net.IPAddress.TryParse(adminUiConfig.BindAddress, out var bindIp)
+            && System.Net.IPAddress.IsLoopback(bindIp);
+        if (!bindsToLoopback)
+            throw new InvalidOperationException(
+                $"Admin UI is set to bind to '{adminUiConfig.BindAddress}' without HTTPS. The admin plane " +
+                "must not be served over plain HTTP on a network-reachable address — configure " +
+                "AdminUi:CertificatePath/CertificatePassword, or bind to 127.0.0.1.");
         app.Logger.LogWarning(
-            "Admin UI is serving over plain HTTP — no HTTPS certificate is configured. " +
+            "Admin UI is serving over plain HTTP on loopback — no HTTPS certificate is configured. " +
             "Set AdminUi:CertificatePath/CertificatePassword for production deployments.");
+    }
     app.Logger.LogInformation("Admin UI listening on {Scheme}://{Address}:{Port}",
         adminHttpsActive ? "https" : "http", adminUiConfig.BindAddress, adminUiConfig.Port);
 }

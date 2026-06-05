@@ -75,7 +75,14 @@ public class SmtpRelayServer : BackgroundService
                 builder.Endpoint(new IPEndPoint(listenAddress, endpoint.Port));
 
                 if (endpoint.RequireAuth)
+                {
+                    // AuthenticationRequired makes the library refuse MAIL FROM until the session has
+                    // authenticated (530). AllowUnsecureAuthentication(false) additionally forbids AUTH
+                    // over a non-TLS connection. Without AuthenticationRequired a client could simply
+                    // skip AUTH and still relay if it passed the IP rules.
+                    builder.AuthenticationRequired();
                     builder.AllowUnsecureAuthentication(false);
+                }
 
                 if (certificate != null && (endpoint.ImplicitTls || endpoint.RequireTls))
                     builder.Certificate(certificate);
@@ -84,6 +91,21 @@ public class SmtpRelayServer : BackgroundService
             _logger.LogInformation(
                 "Configured SMTP endpoint on {Address}:{Port} (ImplicitTls={ImplicitTls}, RequireTls={RequireTls}, Auth={RequireAuth})",
                 endpoint.Address, endpoint.Port, endpoint.ImplicitTls, endpoint.RequireTls, endpoint.RequireAuth);
+        }
+
+        // Open-relay backstop: warn loudly if nothing constrains unauthenticated submission at all.
+        if (!endpoints.Any(e => e.RequireAuth) && _config.AllowedNetworks.Count == 0)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var cache = scope.ServiceProvider.GetRequiredService<IRuntimeConfigCache>();
+            var ipRules = await cache.GetIpAccessRulesAsync(stoppingToken);
+            var senderDomains = await cache.GetAcceptedSenderDomainsAsync(stoppingToken);
+            if (!ipRules.Any(r => r.Action == IpAccessAction.Allow) && senderDomains.Count == 0)
+                _logger.LogWarning(
+                    "OPEN RELAY RISK: the SMTP listener accepts unauthenticated mail from ANY source IP — no " +
+                    "receive connector requires AUTH, AllowedNetworks is empty, there are no Allow IP access " +
+                    "rules, and no accepted sender domains are configured. Add an IP allow-list, accepted " +
+                    "sender domains, or require authentication on a receive connector.");
         }
 
         var options = optionsBuilder.Build();

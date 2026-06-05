@@ -63,6 +63,9 @@ public static class RelayAuthExtensions
             options.Cookie.Name = "WinSmtpRelay.Admin";
             options.Cookie.HttpOnly = true;
             options.Cookie.SameSite = SameSiteMode.Strict;
+            // Secure on HTTPS; plain HTTP is only ever permitted on loopback (startup refuses non-loopback
+            // HTTP, see Program.cs), so the full-authority admin cookie is never sent cleartext over the
+            // network. SameAsRequest (not Always) keeps loopback-HTTP local/dev sign-in working.
             options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
             options.LoginPath = "/account/login";
             options.LogoutPath = "/account/logout";
