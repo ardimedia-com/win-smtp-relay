@@ -28,7 +28,16 @@
 }
 else
 {
-    <div style="max-width:560px;">
+    <BbTabs DefaultValue="dns" @bind-Value="activeTab">
+        <BbTabsList>
+            <BbTabsTrigger Value="dns">Sending identity</BbTabsTrigger>
+            <BbTabsTrigger Value="email-auth">Email auth</BbTabsTrigger>
+            <BbTabsTrigger Value="signup">Signup</BbTabsTrigger>
+            <BbTabsTrigger Value="backup-mx">Backup MX</BbTabsTrigger>
+            <BbTabsTrigger Value="statistics">Statistics</BbTabsTrigger>
+        </BbTabsList>
+
+        <BbTabsContent Value="signup">
     <BbCard>
         <BbCardHeader>
             <BbCardTitle>Self-service signup</BbCardTitle>
@@ -77,8 +86,10 @@ else
             }
         </BbCardContent>
     </BbCard>
+        </BbTabsContent>
 
-    <BbCard Class="mt-1">
+        <BbTabsContent Value="email-auth">
+    <BbCard>
         <BbCardHeader>
             <BbCardTitle>Inbound email authentication</BbCardTitle>
         </BbCardHeader>
@@ -108,8 +119,10 @@ else
             }
         </BbCardContent>
     </BbCard>
+        </BbTabsContent>
 
-    <BbCard Class="mt-1">
+        <BbTabsContent Value="backup-mx">
+    <BbCard>
         <BbCardHeader>
             <BbCardTitle>Backup MX</BbCardTitle>
         </BbCardHeader>
@@ -139,8 +152,10 @@ else
             }
         </BbCardContent>
     </BbCard>
+        </BbTabsContent>
 
-    <BbCard Class="mt-1">
+        <BbTabsContent Value="statistics">
+    <BbCard>
         <BbCardHeader>
             <BbCardTitle>Statistics retention</BbCardTitle>
         </BbCardHeader>
@@ -165,8 +180,10 @@ else
             }
         </BbCardContent>
     </BbCard>
+        </BbTabsContent>
 
-    <BbCard Class="mt-1">
+        <BbTabsContent Value="dns">
+    <BbCard>
         <BbCardHeader>
             <BbCardTitle>DNS recommendations (SPF / DMARC)</BbCardTitle>
         </BbCardHeader>
@@ -237,10 +254,17 @@ else
             }
         </BbCardContent>
     </BbCard>
-    </div>
+        </BbTabsContent>
+    </BbTabs>
 }
 
 @code {
+    // Deep-linkable tab, e.g. /settings?tab=dns (used by the Setup checklist).
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? Tab { get; set; }
+
+    private string activeTab = "dns";
+
     private bool signupEnabled;
     private string? signupFromAddress;
     private string signupMaxPerHour = "5";
@@ -277,6 +301,8 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        activeTab = Tab is "signup" or "email-auth" or "backup-mx" or "statistics" or "dns" ? Tab : "dns";
+
         using var scope = ScopeFactory.CreateScope();
         var sp = scope.ServiceProvider;
 

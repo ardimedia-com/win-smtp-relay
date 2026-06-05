@@ -118,7 +118,7 @@ public class TenantReadinessService(
                         : hasSendingIps
                             ? "Sending IP set; add your public hostname"
                             : "Set your public hostname and sending IP — Settings can auto-detect the IP. Drives SPF and the Health checks.",
-                "/settings", "Settings"),
+                "/settings?tab=dns", "Settings"),
 
             // ----- Optional: sensible defaults already apply -----
             new("outbound", "Outbound delivery", SetupGroup.Optional,
