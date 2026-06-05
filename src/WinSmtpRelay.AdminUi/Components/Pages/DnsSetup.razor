@@ -124,7 +124,7 @@ else
                 <li><strong>Public hostname (A/AAAA)</strong> — must resolve to your sending IP; used in SPF (<code>a:</code>) and as the EHLO name.</li>
                 <li><strong>Reverse DNS (PTR)</strong> — each sending IP should have a PTR matching the hostname (FCrDNS). Missing/mismatched reverse DNS is a top reason mail is rejected or spam-foldered.</li>
                 <li><strong>SPF coverage</strong> — a tenant's egress IP must be listed in your sending IPs, or mail from it fails SPF.</li>
-                <li><strong>Blocklist (DNSBL)</strong> — each sending IP is checked against Spamhaus and SpamCop. A listing means receivers like Microsoft 365 will reject your mail (SMTP 5.7.1); use the delisting link and send from a clean IP.</li>
+                <li><strong>Blocklist (DNSBL)</strong> — each sending IP is checked against Spamhaus ZEN and SpamCop. <strong>Listed</strong> (red) means receivers like Microsoft 365 will reject your mail (SMTP 5.7.1) — use the delisting link and send from a clean IP. A <strong>&ldquo;could not query&rdquo;</strong> result is <em>not</em> a clean pass: Spamhaus refuses lookups from public resolvers (e.g. 8.8.8.8 / 1.1.1.1) with a special code, which this page reports honestly rather than as &ldquo;not listed&rdquo;. To get a real answer, run the relay where its DNS resolver is the server&rsquo;s own/ISP resolver (or use a Spamhaus DQS key).</li>
             </ul>
             <p class="text-muted">Status reflects live DNS and is subject to TTL/propagation — after publishing a change, allow time and Re-check.</p>
         </div>
