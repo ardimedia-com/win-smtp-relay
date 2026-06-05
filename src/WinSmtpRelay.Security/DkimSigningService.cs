@@ -103,36 +103,57 @@ public class DkimSigningService
 
     private DkimSigner? GetOrBuildDbSigner(DkimDomain dkim)
     {
-        var key = $"{dkim.Domain}|{dkim.Selector}|{dkim.PrivateKeyPath}";
-        if (_dbSigners.TryGetValue(key, out var cached))
-            return cached;
-
-        if (!File.Exists(dkim.PrivateKeyPath))
+        // Prefer the DB-stored PEM (keeps key material off the host filesystem); fall back to a legacy
+        // on-disk path. Cache by the key source so a regenerated key produces a fresh signer.
+        var source = !string.IsNullOrWhiteSpace(dkim.PrivateKeyPem) ? dkim.PrivateKeyPem : dkim.PrivateKeyPath;
+        if (string.IsNullOrWhiteSpace(source))
         {
-            _logger.LogWarning("DKIM private key not found for {Domain}: {Path}", dkim.Domain, dkim.PrivateKeyPath);
-            return null; // not cached, so a later-created key file is picked up
+            _logger.LogWarning("DKIM domain {Domain} has neither a stored key nor a key path", dkim.Domain);
+            return null;
         }
+
+        var cacheKey = $"{dkim.Domain}|{dkim.Selector}|{source}";
+        if (_dbSigners.TryGetValue(cacheKey, out var cached))
+            return cached;
 
         try
         {
-            var signer = new DkimSigner(LoadPrivateKey(dkim.PrivateKeyPath), dkim.Domain, dkim.Selector)
+            AsymmetricKeyParameter privateKey;
+            if (!string.IsNullOrWhiteSpace(dkim.PrivateKeyPem))
+            {
+                privateKey = ParsePrivateKeyPem(dkim.PrivateKeyPem);
+            }
+            else if (File.Exists(dkim.PrivateKeyPath!))
+            {
+                privateKey = ParsePrivateKeyPem(File.ReadAllText(dkim.PrivateKeyPath!));
+            }
+            else
+            {
+                _logger.LogWarning("DKIM private key file not found for {Domain}: {Path}", dkim.Domain, dkim.PrivateKeyPath);
+                return null; // not cached, so a later-created key is picked up
+            }
+
+            var signer = new DkimSigner(privateKey, dkim.Domain, dkim.Selector)
             {
                 HeaderCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Relaxed,
                 BodyCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Relaxed
             };
-            _dbSigners[key] = signer;
+            _dbSigners[cacheKey] = signer;
             return signer;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load DKIM key for {Domain} from {Path}", dkim.Domain, dkim.PrivateKeyPath);
+            _logger.LogError(ex, "Failed to load DKIM key for {Domain}", dkim.Domain);
             return null;
         }
     }
 
     private static AsymmetricKeyParameter LoadPrivateKey(string path)
+        => ParsePrivateKeyPem(File.ReadAllText(path));
+
+    private static AsymmetricKeyParameter ParsePrivateKeyPem(string pem)
     {
-        using var reader = new StreamReader(path);
+        using var reader = new StringReader(pem);
         var pemReader = new PemReader(reader);
         var keyObject = pemReader.ReadObject();
 
@@ -140,7 +161,7 @@ public class DkimSigningService
         {
             AsymmetricCipherKeyPair keyPair => keyPair.Private,
             AsymmetricKeyParameter key => key,
-            _ => throw new InvalidOperationException($"Unexpected key type: {keyObject.GetType()}")
+            _ => throw new InvalidOperationException($"Unexpected key type: {keyObject?.GetType()}")
         };
     }
 }

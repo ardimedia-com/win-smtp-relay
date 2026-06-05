@@ -236,10 +236,10 @@ public class DnsSetupService(
                 "No DKIM key is configured for this domain — set one up on the DKIM page.");
 
         var name = $"{dkim.Selector}._domainkey.{domain}";
-        var expected = TryDeriveDkimTxt(dkim.PrivateKeyPath);
+        var expected = TryDeriveDkimTxt(dkim);
         if (expected is null)
             return new DnsRecordResult("DKIM", name, "", null, DnsRecordStatus.NotConfigured,
-                "The DKIM private key file is missing or unreadable.");
+                "The DKIM private key is missing or unreadable.");
 
         var live = await ResolveTxtAsync(name, t => t.Contains("p=", StringComparison.OrdinalIgnoreCase), ct);
         if (live is null)
@@ -505,20 +505,27 @@ public class DnsSetupService(
         }
     }
 
-    /// <summary>Derives "v=DKIM1; k=rsa; p=&lt;SubjectPublicKeyInfo base64&gt;" from a stored private key. Returns null if the file is missing/unreadable.</summary>
-    private string? TryDeriveDkimTxt(string privateKeyPath)
+    /// <summary>Derives "v=DKIM1; k=rsa; p=&lt;SubjectPublicKeyInfo base64&gt;" from the domain's private key —
+    /// the DB-stored PEM if present, else the legacy on-disk path. Returns null if neither is available/readable.</summary>
+    private string? TryDeriveDkimTxt(DkimDomain dkim)
     {
         try
         {
-            if (!File.Exists(privateKeyPath))
+            string pem;
+            if (!string.IsNullOrWhiteSpace(dkim.PrivateKeyPem))
+                pem = dkim.PrivateKeyPem;
+            else if (!string.IsNullOrWhiteSpace(dkim.PrivateKeyPath) && File.Exists(dkim.PrivateKeyPath))
+                pem = File.ReadAllText(dkim.PrivateKeyPath);
+            else
                 return null;
+
             using var rsa = RSA.Create();
-            rsa.ImportFromPem(File.ReadAllText(privateKeyPath)); // handles PKCS#1 and PKCS#8
+            rsa.ImportFromPem(pem); // handles PKCS#1 and PKCS#8
             return "v=DKIM1; k=rsa; p=" + Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to derive DKIM public key from {Path}", privateKeyPath);
+            logger.LogWarning(ex, "Failed to derive DKIM public key for {Domain}", dkim.Domain);
             return null;
         }
     }

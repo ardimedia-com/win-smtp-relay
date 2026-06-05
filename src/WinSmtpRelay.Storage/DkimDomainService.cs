@@ -40,6 +40,7 @@ public class DkimDomainService(RelayDbContext db) : IDkimDomainService
         existing.Domain = dkim.Domain;
         existing.Selector = dkim.Selector;
         existing.PrivateKeyPath = dkim.PrivateKeyPath;
+        existing.PrivateKeyPem = dkim.PrivateKeyPem;
         existing.IsEnabled = dkim.IsEnabled;
 
         await db.SaveChangesAsync(ct);
