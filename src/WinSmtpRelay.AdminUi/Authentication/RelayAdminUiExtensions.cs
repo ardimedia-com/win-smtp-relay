@@ -19,6 +19,8 @@ public static class RelayAdminUiExtensions
         services.AddSingleton<Services.ISignupRateLimiter, Services.SignupRateLimiter>();
         // Per-circuit browser time zone, so UTC timestamps render in the viewer's local time.
         services.AddScoped<Services.BrowserTimeService>();
+        // Proposes the relay's public IP (via an external lookup) when configuring Sending IPs.
+        services.AddScoped<Services.PublicIpDetector>();
         return services;
     }
 }

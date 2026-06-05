@@ -3,6 +3,7 @@
 @using WinSmtpRelay.Core.Configuration
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
+@inject WinSmtpRelay.AdminUi.Services.PublicIpDetector IpDetector
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -181,6 +182,24 @@ else
             <div class="form-group" style="margin-top:0.75rem;">
                 <BbLabel>Sending IP addresses (delimited)</BbLabel>
                 <BbInput @bind-Value="dnsSendingIps" Placeholder="203.0.113.10; 2001:db8::1" />
+                <div style="margin-top:0.35rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;font-size:0.8rem;">
+                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="DetectIpAsync" Disabled="@detectingIp">
+                        <LucideIcon Name="globe" /> @(detectingIp ? "Detecting…" : "Detect public IP")
+                    </BbButton>
+                    @foreach (var ip in detectedIps)
+                    {
+                        var alreadyAdded = SendingIpsContains(ip);
+                        <span class="mono text-muted">@ip</span>
+                        <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => AddDetectedIp(ip)" Disabled="@alreadyAdded">
+                            @(alreadyAdded ? "Added" : "Add")
+                        </BbButton>
+                    }
+                    @if (detectedNone)
+                    {
+                        <span class="text-muted">Could not detect a public IP (no internet, or the lookup was blocked).</span>
+                    }
+                </div>
+                <p class="text-muted" style="font-size:0.75rem;margin-top:0.25rem;">Detected by asking an external service (api.ipify.org) for this server's public address — a proposal; confirm it's the IP your outbound mail actually uses.</p>
             </div>
             <div class="form-group" style="margin-top:0.75rem;">
                 <BbLabel>SPF includes (delimited)</BbLabel>
@@ -252,6 +271,10 @@ else
     private string dnsDmarcPct = "100";
     private string? dnsStatus;
 
+    private bool detectingIp;
+    private List<string> detectedIps = [];
+    private bool detectedNone;
+
     protected override async Task OnInitializedAsync()
     {
         using var scope = ScopeFactory.CreateScope();
@@ -287,6 +310,53 @@ else
         dnsDmarcPct = dns.DmarcPercentage.ToString();
 
         isLoading = false;
+    }
+
+    // Best-effort public-IP detection after first paint, to propose a Sending IP.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await DetectIpAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task DetectIpAsync()
+    {
+        detectingIp = true;
+        detectedNone = false;
+        StateHasChanged();
+        try
+        {
+            detectedIps = [.. await IpDetector.DetectAsync()];
+            detectedNone = detectedIps.Count == 0;
+        }
+        catch
+        {
+            detectedIps = [];
+            detectedNone = true;
+        }
+        finally
+        {
+            detectingIp = false;
+        }
+    }
+
+    private static List<string> SplitIps(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : [.. value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+
+    private bool SendingIpsContains(string ip) =>
+        SplitIps(dnsSendingIps).Contains(ip, StringComparer.OrdinalIgnoreCase);
+
+    private void AddDetectedIp(string ip)
+    {
+        var parts = SplitIps(dnsSendingIps);
+        if (!parts.Contains(ip, StringComparer.OrdinalIgnoreCase))
+            parts.Add(ip);
+        dnsSendingIps = string.Join("; ", parts);
     }
 
     private async Task SaveEmailAuthAsync()
