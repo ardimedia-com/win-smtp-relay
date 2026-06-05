@@ -149,4 +149,26 @@ public class DnsSetupServiceTests
 
         Assert.AreEqual(live, DnsSetupService.BuildMergedSpf(live, expected));
     }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CountSpfLookupTerms_CountsLookupMechanismsAndRedirect_IgnoresIpAndAll()
+    {
+        // a(1) mx(1) include(1) include(1) = 4; ip4/ip6/all/v= cost nothing.
+        Assert.AreEqual(4, DnsSetupService.CountSpfLookupTerms(
+            "v=spf1 a mx ip4:85.31.156.82 ip6:2001:db8::1 include:spf.protection.outlook.com include:spf.mandrillapp.com ~all"));
+        // redirect= modifier counts as one lookup.
+        Assert.AreEqual(1, DnsSetupService.CountSpfLookupTerms("v=spf1 redirect=_spf.example.com"));
+        // ip4/ip6/all only — zero lookups.
+        Assert.AreEqual(0, DnsSetupService.CountSpfLookupTerms("v=spf1 ip4:203.0.113.10 ip6:2001:db8::1 -all"));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CountSpfLookupTerms_HandlesQualifiersAndScopedMechanisms()
+    {
+        // -include, ?exists, ~mx, +a with a CIDR all count; ptr counts; the leading qualifier is ignored.
+        Assert.AreEqual(5, DnsSetupService.CountSpfLookupTerms(
+            "v=spf1 +a/24 ~mx -include:_spf.example.net ?exists:%{i}.example.com ptr -all"));
+    }
 }

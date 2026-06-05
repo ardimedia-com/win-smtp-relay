@@ -119,19 +119,102 @@ public class DnsSetupService(
 
         var expected = BuildRecommendedSpf();
         if (live is null)
-            return new DnsRecordResult("SPF", domain, expected, null, DnsRecordStatus.Missing, "No SPF record is published.");
+            return new DnsRecordResult("SPF", domain, expected, null, DnsRecordStatus.Missing,
+                "No SPF record is published." + await LookupWarningAsync(expected, ct));
 
         var covers = SpfCovers(live, expected);
         if (covers)
             return new DnsRecordResult("SPF", domain, expected, live, DnsRecordStatus.Ok,
-                "The published SPF record authorises this relay.");
+                "The published SPF record authorises this relay." + await LookupWarningAsync(live, ct));
 
         // A domain may have only ONE SPF record, so the operator must not replace the published one
         // (that would drop their other senders). Offer a merged record: their record plus the relay's
         // missing mechanisms, inserted before the trailing "all" — copy this as the single new value.
+        var merged = BuildMergedSpf(live, expected);
         return new DnsRecordResult("SPF", domain, expected, live, DnsRecordStatus.Mismatch,
-            "The published SPF record does not authorise this relay's senders. SPF allows only one record per domain — publish the merged \"To publish\" value below (your record plus the relay's missing parts); do not replace your existing record.",
-            BuildMergedSpf(live, expected));
+            "The published SPF record does not authorise this relay's senders. SPF allows only one record per domain — publish the merged \"To publish\" value below (your record plus the relay's missing parts); do not replace your existing record."
+                + await LookupWarningAsync(merged, ct),
+            merged);
+    }
+
+    private const int SpfMaxLookups = 10;
+
+    // Appends a warning when an SPF record needs more than the RFC 7208 limit of 10 DNS-querying terms
+    // (counting nested include:/redirect= targets). An over-limit record fails evaluation with a permerror,
+    // so receivers treat it as if no SPF were published.
+    private async Task<string> LookupWarningAsync(string record, CancellationToken ct)
+    {
+        var count = await EstimateSpfLookupCountAsync(record, ct);
+        return count > SpfMaxLookups
+            ? $" Note: this record needs about {count} DNS lookups; SPF allows at most {SpfMaxLookups} (over-limit records fail with a permerror) — consolidate include: mechanisms or rely on ip4/ip6."
+            : "";
+    }
+
+    // Lookup-causing SPF terms per RFC 7208 §4.6.4: the mechanisms a, mx, ptr, exists, include, and the
+    // redirect modifier. ip4/ip6/all and the v= version tag never cost a lookup.
+    private static readonly string[] SpfLookupMechanisms = ["a", "mx", "ptr", "exists", "include"];
+
+    /// <summary>Counts the DNS-querying terms in a single SPF record (top level only — not following includes).</summary>
+    public static int CountSpfLookupTerms(string record)
+    {
+        var count = 0;
+        foreach (var raw in record.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (raw.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var eq = raw.IndexOf('=');
+            if (eq > 0)
+            {
+                // Modifier (name=value): only redirect= triggers a lookup.
+                if (raw[..eq].Equals("redirect", StringComparison.OrdinalIgnoreCase))
+                    count++;
+                continue;
+            }
+            // Mechanism: drop an optional qualifier (+ - ~ ?), then take the leading letters as its name.
+            var token = raw.Length > 0 && raw[0] is '+' or '-' or '~' or '?' ? raw[1..] : raw;
+            var name = new string([.. token.TakeWhile(char.IsLetter)]).ToLowerInvariant();
+            if (SpfLookupMechanisms.Contains(name))
+                count++;
+        }
+        return count;
+    }
+
+    // The include:/redirect= targets in an SPF record (the domains whose own SPF records are evaluated).
+    private static IEnumerable<string> SpfIncludeTargets(string record)
+    {
+        foreach (var raw in record.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var token = raw.Length > 0 && raw[0] is '+' or '-' or '~' or '?' ? raw[1..] : raw;
+            if (token.StartsWith("include:", StringComparison.OrdinalIgnoreCase))
+                yield return token[8..].Trim();
+            else if (token.StartsWith("redirect=", StringComparison.OrdinalIgnoreCase))
+                yield return token[9..].Trim();
+        }
+    }
+
+    // Estimates the total SPF DNS-lookup count, following include:/redirect= targets recursively (the
+    // limit is global across the whole evaluation tree). Bounded by a visited set and the RFC recursion
+    // depth; void/failed lookups simply contribute their term count without recursing further.
+    private async Task<int> EstimateSpfLookupCountAsync(string record, CancellationToken ct)
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return await WalkAsync(record, 0);
+
+        async Task<int> WalkAsync(string rec, int depth)
+        {
+            var total = CountSpfLookupTerms(rec);
+            if (depth >= SpfMaxLookups)
+                return total; // stop recursing — already past any valid record
+            foreach (var target in SpfIncludeTargets(rec))
+            {
+                if (string.IsNullOrWhiteSpace(target) || !visited.Add(target))
+                    continue;
+                var txt = await ResolveTxtAsync(target, t => t.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase), ct);
+                if (txt is not null)
+                    total += await WalkAsync(txt, depth + 1);
+            }
+            return total;
+        }
     }
 
     private async Task<DnsRecordResult> CheckDmarcAsync(string domain, CancellationToken ct)
