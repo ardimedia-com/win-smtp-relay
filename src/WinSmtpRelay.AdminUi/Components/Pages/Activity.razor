@@ -134,10 +134,18 @@
     private void AddEvent(string icon, string text, string cssClass)
     {
         if (_disposed) return;
-        events.Insert(0, new ActivityEvent(DateTimeOffset.UtcNow, icon, text, cssClass));
-        if (events.Count > MaxEvents)
-            events.RemoveAt(events.Count - 1);
-        InvokeAsync(StateHasChanged);
+        // SignalR handlers run off the circuit's sync context; marshal the list mutation AND the
+        // render onto the dispatcher so the non-thread-safe List is only ever touched there (the
+        // renderer and ClearFeed also run on the dispatcher), avoiding torn state / "collection
+        // modified" while enumerating.
+        _ = InvokeAsync(() =>
+        {
+            if (_disposed) return;
+            events.Insert(0, new ActivityEvent(DateTimeOffset.UtcNow, icon, text, cssClass));
+            if (events.Count > MaxEvents)
+                events.RemoveAt(events.Count - 1);
+            StateHasChanged();
+        });
     }
 
     private void ClearFeed() => events.Clear();

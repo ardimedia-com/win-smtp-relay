@@ -106,7 +106,7 @@ public class RelayMessageStore : MessageStore
 
         // Fire notifications (fire-and-forget, do not block SMTP response)
         _ = _webhookService.NotifyMessageReceivedAsync(messageId, sender, recipients, rawMessage.Length, sourceIp, CancellationToken.None);
-        _ = _activityNotifier.NotifyMessageReceivedAsync(messageId, sender, recipients, rawMessage.Length);
+        _ = _activityNotifier.NotifyMessageReceivedAsync(messageId, sender, recipients, rawMessage.Length, tenantId);
 
         return SmtpResponse.Ok;
     }

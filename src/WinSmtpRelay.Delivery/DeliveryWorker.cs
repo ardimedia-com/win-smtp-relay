@@ -123,7 +123,7 @@ public class DeliveryWorker(
                     foreach (var recipient in recipients)
                     {
                         await LogDeliveryAsync(db, message.Id, recipient, "550", $"Filtered: {result.RejectReason}", null, message.TenantId);
-                        _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, recipient, "550", null);
+                        _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, recipient, "550", null, message.TenantId);
                     }
 
                     return;
@@ -144,7 +144,7 @@ public class DeliveryWorker(
             foreach (var dr in deliveryResults)
             {
                 await LogDeliveryAsync(db, message.Id, dr.Recipient, dr.StatusCode, dr.StatusMessage, dr.RemoteServer, message.TenantId);
-                _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, dr.Recipient, dr.StatusCode, dr.RemoteServer);
+                _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, dr.Recipient, dr.StatusCode, dr.RemoteServer, message.TenantId);
             }
 
             logger.LogInformation("Message {MessageId} (id={QueueId}) delivered successfully",
@@ -161,7 +161,7 @@ public class DeliveryWorker(
                 foreach (var dr in dex.Results)
                 {
                     await LogDeliveryAsync(db, message.Id, dr.Recipient, dr.StatusCode, dr.StatusMessage, dr.RemoteServer, message.TenantId);
-                    _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, dr.Recipient, dr.StatusCode, dr.RemoteServer);
+                    _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, dr.Recipient, dr.StatusCode, dr.RemoteServer, message.TenantId);
                 }
             }
             else
@@ -171,7 +171,7 @@ public class DeliveryWorker(
                 foreach (var recipient in recipients)
                 {
                     await LogDeliveryAsync(db, message.Id, recipient, "500", ex.Message, null, message.TenantId);
-                    _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, recipient, "500", null);
+                    _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, recipient, "500", null, message.TenantId);
                 }
             }
 

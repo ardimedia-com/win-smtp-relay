@@ -250,19 +250,18 @@ else
     private System.Threading.Timer? uptimeTimer;
     private System.Threading.Timer? minuteRefreshTimer;
     private System.Threading.Timer? _chartDebounceTimer;
+    private int _minuteRefreshing; // re-entrancy gate for the per-second minute timer
 
     protected override async Task OnInitializedAsync()
     {
         // Re-render chart labels in local time once the browser time zone is detected.
         BrowserTime.Changed += OnTimeZoneChanged;
 
-        // Load stat cards + recent messages
-        queueDepth = QueueDepthRecorder.CurrentDepth;
+        // Load stat cards + recent messages (queue depth is tenant-scoped — see ReadQueueDepthAsync)
+        queueDepth = await ReadQueueDepthAsync();
         using (var scope = ScopeFactory.CreateScope())
         {
             var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
-            if (queueDepth == 0)
-                queueDepth = await queue.GetQueueDepthAsync();
             recentMessages = await queue.GetRecentAsync(10);
         }
 
@@ -295,12 +294,23 @@ else
         minuteRefreshTimer = new System.Threading.Timer(async _ =>
         {
             if (_disposed) return;
-            queueDepth = QueueDepthRecorder.CurrentDepth;
-            if (activeTab == "minute")
+            // A periodic timer fires again even if the previous async callback hasn't finished; gate
+            // re-entrancy so overlapping runs don't race on the shared chart/queue-depth state.
+            if (Interlocked.Exchange(ref _minuteRefreshing, 1) == 1) return;
+            try
             {
-                await LoadChartDataAsync();
-                if (!_disposed) await InvokeAsync(StateHasChanged);
+                var depth = await ReadQueueDepthAsync();
+                if (_disposed) return;
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    queueDepth = depth;
+                    if (activeTab == "minute")
+                        await LoadChartDataAsync();
+                    StateHasChanged();
+                });
             }
+            finally { Interlocked.Exchange(ref _minuteRefreshing, 0); }
         }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
 
@@ -332,7 +342,7 @@ else
             if (_disposed) return;
             InvokeAsync(async () =>
             {
-                queueDepth = QueueDepthRecorder.CurrentDepth;
+                queueDepth = await ReadQueueDepthAsync();
                 await RefreshRecentMessagesAsync();
                 StateHasChanged();
             });
@@ -343,7 +353,7 @@ else
             if (_disposed) return;
             InvokeAsync(async () =>
             {
-                queueDepth = QueueDepthRecorder.CurrentDepth;
+                queueDepth = await ReadQueueDepthAsync();
                 await RefreshRecentMessagesAsync();
                 StateHasChanged();
             });
@@ -442,18 +452,34 @@ else
         StateHasChanged();
     });
 
+    // Tenant-scoped queue depth: a tenant admin sees only their own pending count, never the host-wide
+    // total. Only host scope uses the background recorder (which counts across all tenants).
+    private async Task<int> ReadQueueDepthAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var current = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
+        if (current.IsHostScope)
+            return QueueDepthRecorder.CurrentDepth;
+        var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
+        return await queue.GetQueueDepthAsync();
+    }
+
     private async Task LoadChartDataAsync()
     {
+        // Compute off the dispatcher, then assign the shared render fields ON the dispatcher, so timer
+        // callbacks (which run on the thread pool) never tear state the renderer is reading.
+        var forMinute = activeTab == "minute";
+        object[] data = [];
         try
         {
             using var scope = ScopeFactory.CreateScope();
             var stats = scope.ServiceProvider.GetRequiredService<IStatisticsService>();
 
-            if (activeTab == "minute")
+            if (forMinute)
             {
                 var buckets = await stats.GetLiveStatisticsAsync();
                 var depthHistory = QueueDepthRecorder.GetHistory();
-                minuteChartData = buckets.Select(b =>
+                data = buckets.Select(b =>
                 {
                     var depth = depthHistory.TryGetValue(b.Label, out var v) ? v : 0;
                     return (object)new { label = BrowserTime.Format(b.TimestampUtc, "HH:mm:ss"), sent = b.Sent, failed = b.Failed, queue = depth };
@@ -462,7 +488,7 @@ else
             else if (activeTab == "month")
             {
                 var monthly = await stats.GetMonthlyStatisticsAsync();
-                chartData = monthly.Select(m => (object)new { label = m.Date, sent = m.Sent, failed = m.Failed }).ToArray();
+                data = monthly.Select(m => (object)new { label = m.Date, sent = m.Sent, failed = m.Failed }).ToArray();
             }
             else
             {
@@ -472,14 +498,21 @@ else
                     "day" => await stats.GetDailyStatisticsAsync(),
                     _ => await stats.GetHourlyStatisticsAsync()
                 };
-                chartData = buckets.Select(b => (object)new { label = BrowserTime.Format(b.TimestampUtc, "HH:mm"), sent = b.Sent, failed = b.Failed }).ToArray();
+                data = buckets.Select(b => (object)new { label = BrowserTime.Format(b.TimestampUtc, "HH:mm"), sent = b.Sent, failed = b.Failed }).ToArray();
             }
         }
         catch
         {
-            chartData = [];
-            minuteChartData = [];
+            data = [];
         }
+
+        await InvokeAsync(() =>
+        {
+            if (_disposed) return;
+            if (forMinute) minuteChartData = data;
+            else chartData = data;
+            StateHasChanged();
+        });
     }
 
     private static string GetBadgeCss(MessageStatus status) => status switch
