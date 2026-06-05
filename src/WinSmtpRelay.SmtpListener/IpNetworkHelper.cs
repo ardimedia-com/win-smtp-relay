@@ -21,7 +21,18 @@ public static class IpNetworkHelper
         if (!IPAddress.TryParse(parts[0], out var networkAddress))
             return false;
 
-        int prefixLength = parts.Length > 1 ? int.Parse(parts[1]) : (networkAddress.AddressFamily == AddressFamily.InterNetworkV6 ? 128 : 32);
+        int prefixLength;
+        if (parts.Length > 1)
+        {
+            // CIDR rules come from admin input and this runs on the SMTP hot path — a malformed or
+            // negative prefix must never throw; treat it as a non-match.
+            if (!int.TryParse(parts[1], out prefixLength) || prefixLength < 0)
+                return false;
+        }
+        else
+        {
+            prefixLength = networkAddress.AddressFamily == AddressFamily.InterNetworkV6 ? 128 : 32;
+        }
 
         // Normalize IPv4-mapped IPv6 addresses
         if (clientIp.IsIPv4MappedToIPv6)
@@ -34,6 +45,11 @@ public static class IpNetworkHelper
 
         var clientBytes = clientIp.GetAddressBytes();
         var networkBytes = networkAddress.GetAddressBytes();
+
+        // A prefix longer than the (possibly v4-normalized) address can never match — guards the
+        // byte loop below against an out-of-range index.
+        if (prefixLength > clientBytes.Length * 8)
+            return false;
 
         int fullBytes = prefixLength / 8;
         int remainingBits = prefixLength % 8;

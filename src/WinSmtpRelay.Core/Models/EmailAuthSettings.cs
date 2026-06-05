@@ -36,8 +36,11 @@ public class EmailAuthSettings
     /// <summary>
     /// Strict tenant binding for <em>unauthenticated</em> submission: derive the owning tenant from the
     /// matching tenant-scoped Allow IP rule (not from the sender domain) and reject when the MAIL FROM
-    /// domain belongs to a different tenant — closing cross-tenant sender-domain spoofing. Authenticated
-    /// sessions are unaffected (their tenant comes from the SMTP user).
+    /// domain belongs to a different tenant — closing cross-tenant sender-domain spoofing. A client that
+    /// is only permitted by the shared host baseline (a default-tenant Allow rule) cannot be bound to a
+    /// specific tenant: it may send only as an unclaimed or host-owned domain, otherwise it is rejected —
+    /// such senders must authenticate, or have their IP added to that tenant's own Allow rule.
+    /// Authenticated sessions are unaffected (their tenant comes from the SMTP user).
     /// </summary>
     public bool BindTenantToAllowIpRule { get; set; }
 

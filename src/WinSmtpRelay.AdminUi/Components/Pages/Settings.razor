@@ -139,8 +139,10 @@ else
                 For mail submitted <strong>without SMTP AUTH</strong>: by default the tenant is guessed from the
                 MAIL FROM domain (falling back to the default tenant). The first toggle instead derives the tenant
                 from the tenant's own allow IP rule and rejects a MAIL FROM domain owned by another tenant — closing
-                cross-tenant spoofing. The second rejects mail that can't be attributed at all. Authenticated
-                sessions are unaffected (their tenant comes from the SMTP user).
+                cross-tenant spoofing. A client allowed only by a host-wide (shared) IP rule isn't bound to any
+                tenant: it may send only as an unclaimed/host domain, otherwise it's rejected — give each tenant
+                its own allow IP rule, or use SMTP AUTH. The second toggle rejects mail that can't be attributed at
+                all. Authenticated sessions are unaffected (their tenant comes from the SMTP user).
             </p>
 
             <BbButton Variant="ButtonVariant.Default" @onclick="SaveEmailAuthAsync" Class="mt-1">

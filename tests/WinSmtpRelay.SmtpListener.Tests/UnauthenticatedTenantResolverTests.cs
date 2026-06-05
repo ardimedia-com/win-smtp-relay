@@ -126,11 +126,33 @@ public class UnauthenticatedTenantResolverTests
 
     [TestMethod]
     [TestCategory("Unit")]
-    public void Decide_BindToIp_NoIpBinding_FallsBackToDomain()
+    public void Decide_BindToIp_NoIpBinding_RealTenantDomain_IsRejected()
     {
-        // IP didn't bind a tenant (e.g. only host-baseline allowed); attribution falls back to the domain.
-        Assert.AreEqual((TenantB, Outcome.Resolved),
+        // The IP didn't bind a tenant (e.g. only the shared host baseline allowed). Trusting a real
+        // tenant's sender domain here would reopen cross-tenant spoofing, so it is rejected.
+        Assert.AreEqual((null, Outcome.CrossTenantDomain),
             UnauthenticatedTenantResolver.Decide(domainTenant: TenantB, ipTenant: null, ipAmbiguous: false,
+                bindTenantToAllowIpRule: true, rejectUnresolvedTenant: false));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Decide_BindToIp_NoIpBinding_HostOwnedDomain_AttributedToHost()
+    {
+        // A host/default-owned (shared) domain from a host-baseline client is fine → attributed to host.
+        Assert.AreEqual((Host, Outcome.Resolved),
+            UnauthenticatedTenantResolver.Decide(domainTenant: Host, ipTenant: null, ipAmbiguous: false,
+                bindTenantToAllowIpRule: true, rejectUnresolvedTenant: false));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Decide_BindToIp_HostOwnedDomain_ViaIpBoundTenant_Resolves()
+    {
+        // A shared (default-tenant-owned) sender domain must NOT be treated as a competing claim, so a
+        // client correctly bound to TenantA may send from it. (Regression: previously a false CrossTenant.)
+        Assert.AreEqual((TenantA, Outcome.Resolved),
+            UnauthenticatedTenantResolver.Decide(domainTenant: Host, ipTenant: TenantA, ipAmbiguous: false,
                 bindTenantToAllowIpRule: true, rejectUnresolvedTenant: false));
     }
 

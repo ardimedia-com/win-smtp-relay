@@ -28,6 +28,20 @@ public class IpNetworkHelperTests
 
     [TestMethod]
     [TestCategory("Unit")]
+    [DataRow("10.0.0.0/")]      // empty prefix
+    [DataRow("10.0.0.0/abc")]   // non-numeric prefix
+    [DataRow("10.0.0.0/-1")]    // negative prefix
+    [DataRow("10.0.0.0/33")]    // IPv4 prefix out of range (would index past the byte array)
+    [DataRow("10.0.0.0/40")]
+    [DataRow("not-an-ip/24")]   // malformed network address
+    public void IsInNetwork_MalformedCidr_ReturnsFalse_WithoutThrowing(string cidr)
+    {
+        // Admin-entered CIDR runs on the SMTP hot path — a bad rule must never throw, only not match.
+        Assert.IsFalse(IpNetworkHelper.IsInNetwork(IPAddress.Parse("10.0.0.5"), cidr));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
     public void IsInAnyNetwork_ReturnsTrueWhenMatchFound()
     {
         var address = IPAddress.Parse("192.168.1.50");
