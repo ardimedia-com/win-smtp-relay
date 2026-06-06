@@ -1,6 +1,8 @@
 @inherits LayoutComponentBase
+@using WinSmtpRelay.Core.Interfaces
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ICurrentTenant CurrentTenant
 @inject WinSmtpRelay.AdminUi.Services.BrowserTimeService BrowserTime
 
 <BbTooltipProvider>
@@ -15,6 +17,7 @@
         </BbSidebarHeader>
 
         <BbSidebarContent>
+            @* Monitoring — meaningful in any scope (host = aggregate across all tenants, tenant = scoped). *@
             <BbSidebarGroup>
                 <BbSidebarGroupLabel>Monitor</BbSidebarGroupLabel>
                 <BbSidebarMenu>
@@ -30,12 +33,16 @@
                             <span>Live Activity</span>
                         </BbSidebarMenuButton>
                     </BbSidebarMenuItem>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="setup">
-                            <LucideIcon Name="list-checks" />
-                            <span>Setup</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
+                    @* Setup is a per-tenant onboarding checklist — only meaningful for a specific tenant. *@
+                    @if (IsTenantScope)
+                    {
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="setup">
+                                <LucideIcon Name="list-checks" />
+                                <span>Setup</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                    }
                     <BbSidebarMenuItem>
                         <BbSidebarMenuButton Href="health">
                             <LucideIcon Name="heart-pulse" />
@@ -63,84 +70,68 @@
                 </BbSidebarMenu>
             </BbSidebarGroup>
 
-            <BbSidebarGroup>
-                <BbSidebarGroupLabel>Configuration</BbSidebarGroupLabel>
-                <BbSidebarMenu>
-                    <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin" Context="rcAuth">
+            @* Per-tenant configuration — only meaningful when a specific tenant is in scope. In the
+               "All tenants" (host) view these are hidden; select a tenant in the switcher to manage them. *@
+            @if (IsTenantScope)
+            {
+                <BbSidebarGroup>
+                    <BbSidebarGroupLabel>Configuration</BbSidebarGroupLabel>
+                    <BbSidebarMenu>
                         <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="connectors/receive">
-                                <LucideIcon Name="plug" />
-                                <span>Receive Connectors</span>
+                            <BbSidebarMenuButton Href="connectors/send">
+                                <LucideIcon Name="send" />
+                                <span>Send Connectors</span>
                             </BbSidebarMenuButton>
                         </BbSidebarMenuItem>
-                    </AuthorizeView>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="connectors/send">
-                            <LucideIcon Name="send" />
-                            <span>Send Connectors</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="domains/sender">
-                            <LucideIcon Name="at-sign" />
-                            <span>Accepted Domains (Sender)</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="domains">
-                            <LucideIcon Name="globe" />
-                            <span>Accepted Domains (Recipient)</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="ip-rules">
-                            <LucideIcon Name="shield" />
-                            <span>IP Access Rules</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="dkim">
-                            <LucideIcon Name="shield-check" />
-                            <span>DKIM</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="rate-limits">
-                            <LucideIcon Name="gauge" />
-                            <span>Rate Limits</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="filters">
-                            <LucideIcon Name="filter" />
-                            <span>Message Filters</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="smtpusers">
-                            <LucideIcon Name="users" />
-                            <span>SMTP Users</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                </BbSidebarMenu>
-            </BbSidebarGroup>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="domains/sender">
+                                <LucideIcon Name="at-sign" />
+                                <span>Accepted Domains (Sender)</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="domains">
+                                <LucideIcon Name="globe" />
+                                <span>Accepted Domains (Recipient)</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="ip-rules">
+                                <LucideIcon Name="shield" />
+                                <span>IP Access Rules</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        @* DKIM key management is host-admin-gated (interim). *@
+                        <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin" Context="dkimAuth">
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="dkim">
+                                    <LucideIcon Name="shield-check" />
+                                    <span>DKIM</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                        </AuthorizeView>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="filters">
+                                <LucideIcon Name="filter" />
+                                <span>Message Filters</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="smtpusers">
+                                <LucideIcon Name="users" />
+                                <span>SMTP Users</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                    </BbSidebarMenu>
+                </BbSidebarGroup>
+            }
 
-            <BbSidebarGroup>
-                <BbSidebarGroupLabel>Admin</BbSidebarGroupLabel>
-                <BbSidebarMenu>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="startupconfig">
-                            <LucideIcon Name="settings" />
-                            <span>Startup Config</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="logs">
-                            <LucideIcon Name="file-text" />
-                            <span>Event Log</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                    <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="adminAuth">
+            @* Account & access management — full admins only; meaningful in either scope (host admins
+               and host-level keys in host scope; the selected tenant's admins and keys in tenant scope). *@
+            <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="acctAuth">
+                <BbSidebarGroup>
+                    <BbSidebarGroupLabel>Accounts</BbSidebarGroupLabel>
+                    <BbSidebarMenu>
                         <BbSidebarMenuItem>
                             <BbSidebarMenuButton Href="adminusers">
                                 <LucideIcon Name="user-cog" />
@@ -153,17 +144,14 @@
                                 <span>API Keys</span>
                             </BbSidebarMenuButton>
                         </BbSidebarMenuItem>
-                    </AuthorizeView>
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="update">
-                            <LucideIcon Name="download" />
-                            <span>Update</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
-                </BbSidebarMenu>
-            </BbSidebarGroup>
+                    </BbSidebarMenu>
+                </BbSidebarGroup>
+            </AuthorizeView>
 
-            <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin">
+            @* Host-level configuration and operations — not tenant-specific, so shown only in the
+               "All tenants" (host) view. Host administrators only. *@
+            @if (IsHostScope)
+            {
                 <BbSidebarGroup>
                     <BbSidebarGroupLabel>Host</BbSidebarGroupLabel>
                     <BbSidebarMenu>
@@ -179,9 +167,39 @@
                                 <span>Settings</span>
                             </BbSidebarMenuButton>
                         </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="connectors/receive">
+                                <LucideIcon Name="plug" />
+                                <span>Receive Connectors</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="rate-limits">
+                                <LucideIcon Name="gauge" />
+                                <span>Rate Limits</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="startupconfig">
+                                <LucideIcon Name="settings" />
+                                <span>Startup Config</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="logs">
+                                <LucideIcon Name="file-text" />
+                                <span>Event Log</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="update">
+                                <LucideIcon Name="download" />
+                                <span>Update</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
                     </BbSidebarMenu>
                 </BbSidebarGroup>
-            </AuthorizeView>
+            }
         </BbSidebarContent>
 
         <BbSidebarFooter>
@@ -233,6 +251,14 @@
 @code {
     [CascadingParameter]
     private Task<AuthenticationState>? AuthState { get; set; }
+
+    // Scope/"mode" for nav visibility:
+    //   IsHostScope   = host admin viewing "All tenants" (host-level config/ops belong here)
+    //   IsTenantScope = a specific tenant is active — a host admin who picked a tenant, or a tenant
+    //                   admin/viewer (always scoped). Per-tenant configuration belongs here.
+    // The two are mutually exclusive: a host admin in "All tenants" has no TenantId; everyone else does.
+    private bool IsHostScope => CurrentTenant.IsHostScope;
+    private bool IsTenantScope => CurrentTenant.TenantId is not null;
 
     protected override async Task OnInitializedAsync()
     {

@@ -4,6 +4,7 @@
 @using System.Net.NetworkInformation
 @using System.Net.Sockets
 @using WinSmtpRelay.Core.Configuration
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IOptions<SmtpListenerOptions> SmtpOptions
 @inject IOptions<DeliveryOptions> DeliveryOpts
 @inject IOptions<TlsOptions> TlsOpts
