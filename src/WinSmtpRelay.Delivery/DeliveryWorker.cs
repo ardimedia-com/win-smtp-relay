@@ -125,8 +125,13 @@ public class DeliveryWorker(
             {
                 if (await suppression.IsSuppressedAsync(r, message.TenantId, cancellationToken))
                 {
-                    await LogDeliveryAsync(db, message.Id, r, "550", "Suppressed: address previously hard-bounced or complained", null, message.TenantId);
-                    _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, r, "550", null, message.TenantId);
+                    // Record the skip once (first attempt only) so the reporting digest doesn't re-count
+                    // the same suppressed recipient on every retry of a mixed message.
+                    if (message.RetryCount == 0)
+                    {
+                        await LogDeliveryAsync(db, message.Id, r, "550", "Suppressed: address previously hard-bounced or complained", null, message.TenantId);
+                        _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, r, "550", null, message.TenantId);
+                    }
                     logger.LogInformation("Message {MessageId}: recipient {Recipient} skipped (suppressed)", message.MessageId, r);
                 }
                 else

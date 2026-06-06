@@ -140,6 +140,15 @@ public class SmtpDeliveryService : IDeliveryService
                 return await SendViaSmtpAsync(mimeMessage, sender, recipients, mxHost, 25, null, null,
                     _config.OpportunisticTls, _config.ConnectTimeoutSeconds, egressEndPoint, cancellationToken);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The SERVICE is shutting down (outer token cancelled) — not a delivery failure. Propagate
+                // so DeliveryWorker requeues the message cleanly instead of "trying next", wrapping it as a
+                // bounce, and logging a bogus failed attempt. (A per-attempt connect TIMEOUT cancels only
+                // the inner linked token, so cancellationToken.IsCancellationRequested is false there and we
+                // fall through to the next MX as before.)
+                throw;
+            }
             catch (Exception ex)
             {
                 lastException = ex;
@@ -151,8 +160,15 @@ public class SmtpDeliveryService : IDeliveryService
         // All MX hosts exhausted. Use the server's real status code if one actually rejected us; a
         // connection/timeout/DNS failure is TRANSIENT (421) — not a permanent 550 — so a momentary
         // outage of the destination is retried, not silently bounced.
-        var errorMessage = lastException?.Message ?? "All MX hosts exhausted";
         var statusCode = lastException is SmtpCommandException sce ? ((int)sce.StatusCode).ToString() : "421";
+        // Surface a human-readable reason — the raw OperationCanceledException message is just
+        // "A task was canceled", which reads as a mystery in the Journal/Event Log.
+        var errorMessage = lastException switch
+        {
+            null => "no MX host could be reached",
+            OperationCanceledException => $"the connection timed out after {_config.ConnectTimeoutSeconds}s",
+            _ => lastException.Message
+        };
         return recipients.Select(r => new DeliveryResult
         {
             Recipient = r,

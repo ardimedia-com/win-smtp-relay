@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A delivery interrupted by a **service shutdown** is now requeued cleanly instead of being recorded as a failed attempt and bounced/retried. The per-MX delivery loop previously swallowed the shutdown's `OperationCanceledException` and re-wrapped it as a `DeliveryException` (status 421), so the delivery worker's clean-shutdown handling never triggered; the loop now propagates the cancellation when the service is stopping.
+- A delivery **timeout** now reads "the connection timed out after Ns" in the Journal and Event Log, instead of the opaque raw exception text "A task was canceled".
+- The email-reporting digest no longer **re-counts a suppressed recipient on every retry** of a mixed message — a suppressed-skip is logged once (on the first attempt), so the "Suppressed" tally is no longer inflated by `retries × suppressed`.
 - The `badge-info` (Update page "update available") and `badge-destructive` (IP-rules "Deny") badge variants had no CSS and rendered as a plain uncoloured badge; they now have their own styling (info = blue, destructive = red), in both light and dark themes.
 - Dark mode lost when switching tenants (and on other enhanced navigations): Blazor enhanced navigation patches the DOM to match the server response, which has no theme attributes, so it stripped the client-applied `dark` class and `data-theme`. The stored per-browser theme is now re-applied on Blazor's `enhancedload` event so it survives enhanced navigation and the tenant switcher's form post.
 - Native `<select>` dropdowns (e.g. the host tenant switcher) were unreadable in dark mode — the OS-drawn option popup stayed light with near-white text. Added `color-scheme` to the light/dark roots so the browser paints native controls (option popups, scrollbars, carets) in the matching scheme, and pinned option colours to the themed popover.
