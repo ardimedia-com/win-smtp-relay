@@ -262,6 +262,18 @@ h1:focus-visible {
     border: 1px solid var(--border);
 }
 
+.badge-status.badge-info {
+    background: color-mix(in oklch, var(--chart-1) 12%, transparent);
+    color: var(--chart-1);
+    border: 1px solid color-mix(in oklch, var(--chart-1) 25%, transparent);
+}
+
+.badge-status.badge-destructive {
+    background: color-mix(in oklch, var(--destructive) 12%, transparent);
+    color: var(--destructive);
+    border: 1px solid color-mix(in oklch, var(--destructive) 25%, transparent);
+}
+
 /* Utility */
 .mono { font-family: monospace; }
 .text-muted { color: var(--muted-foreground); }
