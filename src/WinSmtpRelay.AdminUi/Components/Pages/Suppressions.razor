@@ -48,13 +48,13 @@ else
             }
             @foreach (var e in rows)
             {
-                <BbTableRow Item="@e">
+                <BbTableRow Item="@e" class="list-row-clickable" @onclick="() => ShowDetail(e)">
                     <BbTableCell><code>@e.Address</code></BbTableCell>
                     <BbTableCell><span class="badge-status @ReasonCss(e.Reason)">@e.Reason</span></BbTableCell>
                     <BbTableCell style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@(e.Detail ?? "—")</BbTableCell>
                     <BbTableCell><LocalTime Utc="@e.CreatedUtc" /></BbTableCell>
                     <BbTableCell>
-                        <div class="list-row-actions">
+                        <div class="list-row-actions" @onclick:stopPropagation="true">
                             <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Remove (re-enable delivery)"
                                     @onclick="() => { removeId = e.Id; removeAddress = e.Address; showRemove = true; }">
                                 <LucideIcon Name="trash-2" />
@@ -80,12 +80,48 @@ else
     </BbAlertDialogContent>
 </BbAlertDialog>
 
+<BbDialog @bind-Open="showDetail">
+    <BbDialogContent>
+        <BbDialogHeader>
+            <BbDialogTitle>Suppressed address</BbDialogTitle>
+            <BbDialogDescription>This relay will not deliver to this recipient.</BbDialogDescription>
+        </BbDialogHeader>
+        @if (selected is not null)
+        {
+            <div style="font-size:0.875rem;line-height:1.6;">
+                <p style="margin:0 0 0.5rem;"><strong>Address:</strong> <code>@selected.Address</code></p>
+                <p style="margin:0 0 0.5rem;"><strong>Reason:</strong> <span class="badge-status @ReasonCss(selected.Reason)">@selected.Reason</span></p>
+                <p style="margin:0 0 0.5rem;"><strong>Detail:</strong> @(selected.Detail ?? "—")</p>
+                <p style="margin:0;"><strong>Added:</strong> <LocalTime Utc="@selected.CreatedUtc" /></p>
+            </div>
+        }
+        <BbDialogFooter>
+            @if (selected is not null)
+            {
+                <BbButton Variant="ButtonVariant.Destructive"
+                        @onclick="@(() => { removeId = selected.Id; removeAddress = selected.Address; showDetail = false; showRemove = true; })">
+                    <LucideIcon Name="trash-2" /> Remove
+                </BbButton>
+            }
+            <BbDialogClose><BbButton Variant="ButtonVariant.Outline">Close</BbButton></BbDialogClose>
+        </BbDialogFooter>
+    </BbDialogContent>
+</BbDialog>
+
 @code {
     private IReadOnlyList<SuppressionEntry> rows = [];
     private bool isLoading = true;
     private bool showRemove;
     private int removeId;
     private string? removeAddress;
+    private bool showDetail;
+    private SuppressionEntry? selected;
+
+    private void ShowDetail(SuppressionEntry e)
+    {
+        selected = e;
+        showDetail = true;
+    }
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();
 

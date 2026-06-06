@@ -257,7 +257,7 @@ else
         <BbCardContent>
             <p class="text-muted" style="font-size:0.8rem;margin-bottom:0.75rem;">
                 These describe the relay's sending identity and drive the recommended records shown on the
-                <a href="/health">Health</a> page. They don't change how mail is processed.
+                <a href="/deliverability">Deliverability</a> page. They don't change how mail is processed.
             </p>
             <div class="settings-group">
                 <div class="settings-group-title">Basic</div>
@@ -587,7 +587,7 @@ else
             DmarcPercentage = pct
         });
         dnsDmarcPct = pct.ToString();
-        dnsStatus = "DNS recommendation settings saved. The Health page reflects them on its next check.";
+        dnsStatus = "DNS recommendation settings saved. The Deliverability page reflects them on its next check.";
     }
 
     private async Task SaveReportingAsync()

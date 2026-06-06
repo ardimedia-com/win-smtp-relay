@@ -236,8 +236,8 @@ else
                     </div>
                 }
                 <div style="margin-top:0.75rem;">
-                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/health"))">
-                        Open Health page <LucideIcon Name="chevron-right" Size="14" />
+                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/deliverability"))">
+                        Open Deliverability page <LucideIcon Name="chevron-right" Size="14" />
                     </BbButton>
                 </div>
             </BbCardContent>
@@ -367,7 +367,7 @@ else
             // A DNS lookup failure should not break the page; show it as unknown.
             dnsResults = [];
             dnsItem = new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
-                SetupStatus.Todo, "Could not check DNS just now — try Re-check", "/health", "Health");
+                SetupStatus.Todo, "Could not check DNS just now — try Re-check", "/deliverability", "Deliverability");
         }
         finally
         {
@@ -391,7 +391,7 @@ else
 
         if (publishable.Count == 0)
             return new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
-                SetupStatus.Todo, "Set up DKIM and the DNS recommendation settings to generate records", "/health", "Health");
+                SetupStatus.Todo, "Set up DKIM and the DNS recommendation settings to generate records", "/deliverability", "Deliverability");
 
         var ok = publishable.Count(r => r.Status == DnsRecordStatus.Ok);
         var total = publishable.Count;
@@ -400,7 +400,7 @@ else
             ? $"All {total} records published across {results.Count} domain{(results.Count == 1 ? "" : "s")}"
             : $"{ok} of {total} records published";
         return new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
-            status, detail, "/health", "Health");
+            status, detail, "/deliverability", "Deliverability");
     }
 
     private void Recompute()

@@ -1,4 +1,5 @@
 @page "/health"
+@page "/deliverability"
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @implements IDisposable
@@ -11,13 +12,13 @@
     <BbBreadcrumbList>
         <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
         <BbBreadcrumbSeparator />
-        <BbBreadcrumbItem><BbBreadcrumbPage>Health</BbBreadcrumbPage></BbBreadcrumbItem>
+        <BbBreadcrumbItem><BbBreadcrumbPage>Deliverability</BbBreadcrumbPage></BbBreadcrumbItem>
     </BbBreadcrumbList>
 </BbBreadcrumb>
 
 <div class="page-header page-header-row">
     <div>
-        <h1>Health</h1>
+        <h1>Deliverability</h1>
         <p>The DNS your domains and sending IPs need so mail is trusted and delivered — SPF, DKIM, DMARC, MX, reverse DNS, and the public hostname. Status reflects live DNS; publish the expected values at your provider and Re-check.</p>
     </div>
     <div class="flex gap-1 items-center">
@@ -239,7 +240,7 @@ else
 <BbDialog @bind-Open="showHelp">
     <BbDialogContent>
         <BbDialogHeader>
-            <BbDialogTitle>About Health</BbDialogTitle>
+            <BbDialogTitle>About Deliverability</BbDialogTitle>
             <BbDialogDescription>What to verify so your mail is accepted</BbDialogDescription>
         </BbDialogHeader>
         <div style="font-size:0.875rem;line-height:1.6;">

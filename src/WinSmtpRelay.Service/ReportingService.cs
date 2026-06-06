@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WinSmtpRelay.Core.Interfaces;
+using WinSmtpRelay.Core.Mail;
 using WinSmtpRelay.Core.Models;
 using WinSmtpRelay.Storage;
 
@@ -220,35 +221,10 @@ public class ReportingService(
         return true;
     }
 
-    private static async Task SendAsync(IMessageQueue queue, string from, string to, string subject, string body, CancellationToken ct)
-    {
-        from = Header(from);
-        to = Header(to);
-        subject = Header(subject);
-        var messageId = $"<{Guid.NewGuid():N}@winsmtprelay>";
-        var raw = Encoding.UTF8.GetBytes(
-            $"From: {from}\r\n" +
-            $"To: {to}\r\n" +
-            $"Subject: {subject}\r\n" +
-            $"Date: {DateTimeOffset.UtcNow:r}\r\n" +
-            $"Message-ID: {messageId}\r\n" +
-            "MIME-Version: 1.0\r\n" +
-            "Content-Type: text/plain; charset=utf-8\r\n" +
-            "\r\n" +
-            body);
-        await queue.EnqueueAsync(new QueuedMessage
-        {
-            MessageId = messageId,
-            Sender = from,
-            Recipients = to,
-            RawMessage = raw,
-            SizeBytes = raw.Length,
-            TenantId = TenantDefaults.DefaultTenantId,
-            NextRetryUtc = DateTimeOffset.UtcNow
-        }, ct);
-    }
-
-    private static string Header(string value) => value.Replace("\r", "").Replace("\n", "").Trim();
+    // All system mail (digest + alerts) goes through the single RFC822 composer so header
+    // sanitization and the header set stay identical to the account/verification mail.
+    private static Task SendAsync(IMessageQueue queue, string from, string to, string subject, string body, CancellationToken ct)
+        => SystemEmail.EnqueueAsync(queue, from, to, subject, body, TenantDefaults.DefaultTenantId, ct);
 
     private static List<string> SplitList(string? value) =>
         string.IsNullOrWhiteSpace(value)
