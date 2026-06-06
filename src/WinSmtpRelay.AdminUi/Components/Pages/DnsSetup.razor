@@ -4,6 +4,7 @@
 @implements IDisposable
 @inject ITenantScopeFactory ScopeFactory
 @inject IPublicSuffixService PublicSuffix
+@inject WinSmtpRelay.AdminUi.Services.PublicIpDetector IpDetector
 @inject IJSRuntime JS
 
 <BbBreadcrumb>
@@ -92,6 +93,7 @@ else
         </BbTabsList>
 
         <BbTabsContent Value="ip">
+            @if (outboundIpGroup is not null) { @groupCard(outboundIpGroup) }
             @if (hostnameGroup is not null) { @groupCard(hostnameGroup) }
             @if (ipGroups.Count == 0)
             {
@@ -228,6 +230,7 @@ else
     // Ad-hoc / candidate domain checks the operator ran by hand. Kept separate from the configured
     // senderGroups so "Re-check all" can refresh the configured domains without discarding these.
     private List<CheckGroup> adHocGroups = [];
+    private CheckGroup? outboundIpGroup;
     private CheckGroup? hostnameGroup;
     private List<DomainCandidate> candidateDomains = [];
     private List<string> candidateIps = [];
@@ -294,6 +297,14 @@ else
             // ----- IP addresses: public hostname + reverse DNS per sending/egress IP -----
             var settings = await sp.GetRequiredService<IDnsSettingsService>().GetAsync();
             var sendingIps = SplitList(settings.SendingIpAddresses);
+
+            // Detected outbound IP vs the configured sending IPs — flags a stale config when this server's
+            // public IP has changed (e.g. a dynamic ISP address), which the per-IP checks below cannot show
+            // because they only validate whatever is configured.
+            outboundIpGroup = new CheckGroup("Outbound IP",
+                "What this server actually sends from, compared with your configured sending IPs",
+                [BuildOutboundIpCheck(await IpDetector.DetectAsync(ct), sendingIps)]);
+
             hostnameGroup = new CheckGroup(
                 string.IsNullOrWhiteSpace(settings.PublicHostname) ? "(public hostname)" : settings.PublicHostname,
                 "Public hostname — used in SPF (a:) and as the EHLO name",
@@ -395,6 +406,26 @@ else
         if (string.IsNullOrWhiteSpace(email)) return null;
         var at = email.LastIndexOf('@');
         return at < 0 || at == email.Length - 1 ? null : email[(at + 1)..].Trim().TrimEnd('.').ToLowerInvariant();
+    }
+
+    private static DnsRecordResult BuildOutboundIpCheck(IReadOnlyList<string> detected, List<string> configured)
+    {
+        var configuredStr = configured.Count > 0 ? string.Join(", ", configured) : "";
+        if (detected.Count == 0)
+            return new("Detected outbound IP", "(external lookup)", configuredStr, null, DnsRecordStatus.NotConfigured,
+                "Could not detect this server's public IP (no internet, or the lookup was blocked). Best-effort only.");
+
+        var detectedStr = string.Join(", ", detected);
+        var matches = detected.Any(d => configured.Any(c => IpEquals(c, d)));
+        return matches
+            ? new("Detected outbound IP", "(external lookup)", configuredStr, detectedStr, DnsRecordStatus.Ok,
+                "This server's detected public IP is one of your configured sending IPs.")
+            : new("Detected outbound IP", "(external lookup)", configuredStr.Length == 0 ? "(none configured)" : configuredStr,
+                detectedStr, DnsRecordStatus.Mismatch,
+                "This server's outbound IP does not match any configured sending IP. If your IP changed (e.g. a dynamic ISP " +
+                "address), update Settings → Sending identity — otherwise the A / reverse-DNS / SPF-coverage checks below are " +
+                "validating the wrong address. (Best-effort: detected via an external HTTP lookup, which normally egresses from " +
+                "the same public IP as SMTP.)");
     }
 
     private static DnsRecordResult SpfCoverage(string ip, bool inSpf) => new(
