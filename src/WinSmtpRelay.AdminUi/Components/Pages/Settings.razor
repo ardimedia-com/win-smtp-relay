@@ -43,41 +43,50 @@ else
             <BbCardTitle>Self-service signup</BbCardTitle>
         </BbCardHeader>
         <BbCardContent>
-            <div style="display:flex;align-items:center;gap:0.75rem;">
-                <BbSwitch Checked="signupEnabled" CheckedChanged="OnToggleAsync" id="signup-toggle" />
-                <span>Allow anonymous organizations to sign up at <span class="mono">/signup</span></span>
-            </div>
-            <p class="text-muted" style="font-size:0.8rem;margin-top:0.75rem;">
-                When enabled, a "Create an organization" link appears on the sign-in page. A new signup creates a
-                <strong>disabled</strong> tenant that must be confirmed by email verification or host approval before it can sign in.
-            </p>
-
-            <div class="form-group" style="margin-top:1.25rem;">
-                <BbLabel>Verification email from-address</BbLabel>
-                <div style="display:flex;gap:0.5rem;align-items:center;">
-                    <BbInput @bind-Value="signupFromAddress" Placeholder="noreply@yourdomain.tld" />
-                    <BbButton Variant="ButtonVariant.Default" @onclick="SaveFromAddressAsync">
-                        <LucideIcon Name="save" /> Save
-                    </BbButton>
+            <div class="settings-group">
+                <div class="settings-group-title">Self-service signup</div>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <BbSwitch Checked="signupEnabled" CheckedChanged="OnToggleAsync" id="signup-toggle" />
+                    <span>Allow anonymous organizations to sign up at <span class="mono">/signup</span></span>
                 </div>
-                <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;">
-                    From-address for signup verification and password-reset emails, sent through this relay's own
-                    delivery pipeline. Leave blank to use the <span class="mono">appsettings</span> value. The domain
-                    should be one this relay is configured to send for (accepted sender domain, ideally with DKIM).
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.75rem;margin-bottom:0;">
+                    When enabled, a "Create an organization" link appears on the sign-in page. A new signup creates a
+                    <strong>disabled</strong> tenant that must be confirmed by email verification or host approval before it can sign in.
                 </p>
             </div>
 
-            <div class="form-group" style="margin-top:1.25rem;">
-                <BbLabel>Signup attempts per IP per hour</BbLabel>
-                <div style="display:flex;gap:0.5rem;align-items:center;">
-                    <BbInput Type="InputType.Number" @bind-Value="signupMaxPerHour" />
-                    <BbButton Variant="ButtonVariant.Default" @onclick="SaveThrottleAsync">
-                        <LucideIcon Name="save" /> Save
-                    </BbButton>
+            <div class="settings-group">
+                <div class="settings-group-title">Verification email</div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <BbLabel>From-address</BbLabel>
+                    <div style="display:flex;gap:0.5rem;align-items:center;">
+                        <BbInput @bind-Value="signupFromAddress" Placeholder="noreply@yourdomain.tld" />
+                        <BbButton Variant="ButtonVariant.Default" @onclick="SaveFromAddressAsync">
+                            <LucideIcon Name="save" /> Save
+                        </BbButton>
+                    </div>
+                    <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;margin-bottom:0;">
+                        From-address for signup verification and password-reset emails, sent through this relay's own
+                        delivery pipeline. Leave blank to use the <span class="mono">appsettings</span> value. The domain
+                        should be one this relay is configured to send for (accepted sender domain, ideally with DKIM).
+                    </p>
                 </div>
-                <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;">
-                    Abuse limit on the anonymous signup page, per client IP. Set to <span class="mono">0</span> to disable the throttle.
-                </p>
+            </div>
+
+            <div class="settings-group">
+                <div class="settings-group-title">Abuse protection</div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <BbLabel>Signup attempts per IP per hour</BbLabel>
+                    <div style="display:flex;gap:0.5rem;align-items:center;">
+                        <BbInput Type="InputType.Number" @bind-Value="signupMaxPerHour" />
+                        <BbButton Variant="ButtonVariant.Default" @onclick="SaveThrottleAsync">
+                            <LucideIcon Name="save" /> Save
+                        </BbButton>
+                    </div>
+                    <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;margin-bottom:0;">
+                        Abuse limit on the anonymous signup page, per client IP. Set to <span class="mono">0</span> to disable the throttle.
+                    </p>
+                </div>
             </div>
 
             @if (!string.IsNullOrEmpty(statusMessage))
@@ -94,56 +103,63 @@ else
             <BbCardTitle>Inbound email authentication</BbCardTitle>
         </BbCardHeader>
         <BbCardContent>
-            <div style="display:flex;align-items:center;gap:0.75rem;">
-                <BbSwitch Checked="spfEnabled" CheckedChanged="(bool v) => spfEnabled = v" id="spf-toggle" />
-                <span>Run SPF checks on inbound mail</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
-                <BbSwitch Checked="dmarcEnabled" CheckedChanged="(bool v) => dmarcEnabled = v" id="dmarc-toggle" />
-                <span>Run DMARC checks on inbound mail</span>
-            </div>
-            <div class="form-group" style="margin-top:1rem;">
-                <BbLabel>Enforcement on failure</BbLabel>
-                <select class="account-input" @bind="enforcement">
-                    <option value="@EnforcementMode.LogOnly">Log only — accept and record the result</option>
-                    <option value="@EnforcementMode.Reject">Reject — return 550 on SPF/DMARC failure</option>
-                    <option value="@EnforcementMode.Quarantine">Quarantine — accept but flag the message</option>
-                </select>
+            <div class="settings-group">
+                <div class="settings-group-title">Inbound checks</div>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <BbSwitch Checked="spfEnabled" CheckedChanged="(bool v) => spfEnabled = v" id="spf-toggle" />
+                    <span>Run SPF checks on inbound mail</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
+                    <BbSwitch Checked="dmarcEnabled" CheckedChanged="(bool v) => dmarcEnabled = v" id="dmarc-toggle" />
+                    <span>Run DMARC checks on inbound mail</span>
+                </div>
+                <div class="form-group" style="margin-top:1rem;">
+                    <BbLabel>Enforcement on failure</BbLabel>
+                    <select class="account-input" @bind="enforcement">
+                        <option value="@EnforcementMode.LogOnly">Log only — accept and record the result</option>
+                        <option value="@EnforcementMode.Reject">Reject — return 550 on SPF/DMARC failure</option>
+                        <option value="@EnforcementMode.Quarantine">Quarantine — accept but flag the message</option>
+                    </select>
+                </div>
             </div>
 
-            <div class="settings-subhead">Domain ownership</div>
-            <div style="display:flex;align-items:center;gap:0.75rem;">
-                <BbSwitch Checked="requireSenderVerification" CheckedChanged="(bool v) => requireSenderVerification = v" id="require-sender-verify" />
-                <span>Require verified ownership for accepted <strong>sender</strong> domains</span>
+            <div class="settings-group">
+                <div class="settings-group-title">Domain ownership</div>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <BbSwitch Checked="requireSenderVerification" CheckedChanged="(bool v) => requireSenderVerification = v" id="require-sender-verify" />
+                    <span>Require verified ownership for accepted <strong>sender</strong> domains</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
+                    <BbSwitch Checked="requireRecipientVerification" CheckedChanged="(bool v) => requireRecipientVerification = v" id="require-recipient-verify" />
+                    <span>Require verified ownership for accepted <strong>recipient</strong> domains</span>
+                </div>
+                <p class="text-muted" style="font-size:0.78rem;margin-top:0.35rem;margin-bottom:0;">
+                    When on, a configured domain must have its ownership verified (a DNS TXT record, checked on the
+                    Accepted Domains pages) before the relay accepts mail from/for it. Applies only among configured
+                    domains — an empty list still means "accept all", and backup-MX domains are unaffected.
+                </p>
             </div>
-            <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
-                <BbSwitch Checked="requireRecipientVerification" CheckedChanged="(bool v) => requireRecipientVerification = v" id="require-recipient-verify" />
-                <span>Require verified ownership for accepted <strong>recipient</strong> domains</span>
-            </div>
-            <p class="text-muted" style="font-size:0.78rem;margin-top:0.35rem;">
-                When on, a configured domain must have its ownership verified (a DNS TXT record, checked on the
-                Accepted Domains pages) before the relay accepts mail from/for it. Applies only among configured
-                domains — an empty list still means "accept all", and backup-MX domains are unaffected.
-            </p>
 
-            <div class="settings-subhead">Tenant binding (unauthenticated submission)</div>
-            <div style="display:flex;align-items:center;gap:0.75rem;">
-                <BbSwitch Checked="bindTenantToAllowIpRule" CheckedChanged="(bool v) => bindTenantToAllowIpRule = v" id="bind-tenant-ip" />
-                <span>Bind the tenant to the matching allow IP rule (reject cross-tenant sender domains)</span>
+            <div class="settings-group">
+                <div class="settings-group-title">Tenant binding (unauthenticated submission)</div>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <BbSwitch Checked="bindTenantToAllowIpRule" CheckedChanged="(bool v) => bindTenantToAllowIpRule = v" id="bind-tenant-ip" />
+                    <span>Bind the tenant to the matching allow IP rule (reject cross-tenant sender domains)</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
+                    <BbSwitch Checked="rejectUnresolvedTenant" CheckedChanged="(bool v) => rejectUnresolvedTenant = v" id="reject-unresolved-tenant" />
+                    <span>Reject when no tenant can be determined (instead of using the default tenant)</span>
+                </div>
+                <p class="text-muted" style="font-size:0.78rem;margin-top:0.35rem;margin-bottom:0;">
+                    For mail submitted <strong>without SMTP AUTH</strong>: by default the tenant is guessed from the
+                    MAIL FROM domain (falling back to the default tenant). The first toggle instead derives the tenant
+                    from the tenant's own allow IP rule and rejects a MAIL FROM domain owned by another tenant — closing
+                    cross-tenant spoofing. A client allowed only by a host-wide (shared) IP rule isn't bound to any
+                    tenant: it may send only as an unclaimed/host domain, otherwise it's rejected — give each tenant
+                    its own allow IP rule, or use SMTP AUTH. The second toggle rejects mail that can't be attributed at
+                    all. Authenticated sessions are unaffected (their tenant comes from the SMTP user).
+                </p>
             </div>
-            <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
-                <BbSwitch Checked="rejectUnresolvedTenant" CheckedChanged="(bool v) => rejectUnresolvedTenant = v" id="reject-unresolved-tenant" />
-                <span>Reject when no tenant can be determined (instead of using the default tenant)</span>
-            </div>
-            <p class="text-muted" style="font-size:0.78rem;margin-top:0.35rem;">
-                For mail submitted <strong>without SMTP AUTH</strong>: by default the tenant is guessed from the
-                MAIL FROM domain (falling back to the default tenant). The first toggle instead derives the tenant
-                from the tenant's own allow IP rule and rejects a MAIL FROM domain owned by another tenant — closing
-                cross-tenant spoofing. A client allowed only by a host-wide (shared) IP rule isn't bound to any
-                tenant: it may send only as an unclaimed/host domain, otherwise it's rejected — give each tenant
-                its own allow IP rule, or use SMTP AUTH. The second toggle rejects mail that can't be attributed at
-                all. Authenticated sessions are unaffected (their tenant comes from the SMTP user).
-            </p>
 
             <BbButton Variant="ButtonVariant.Default" @onclick="SaveEmailAuthAsync" Class="mt-1">
                 <LucideIcon Name="save" /> Save
@@ -162,22 +178,32 @@ else
             <BbCardTitle>Backup MX</BbCardTitle>
         </BbCardHeader>
         <BbCardContent>
-            <div style="display:flex;align-items:center;gap:0.75rem;">
-                <BbSwitch Checked="bmEnabled" CheckedChanged="(bool v) => bmEnabled = v" id="backupmx-toggle" />
-                <span>Accept and hold mail for backup-MX domains when the primary is unreachable</span>
+            <div class="settings-group">
+                <div class="settings-group-title">Backup MX</div>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <BbSwitch Checked="bmEnabled" CheckedChanged="(bool v) => bmEnabled = v" id="backupmx-toggle" />
+                    <span>Accept and hold mail for backup-MX domains when the primary is unreachable</span>
+                </div>
+                <div class="form-group" style="margin-top:1rem;margin-bottom:0;">
+                    <BbLabel>Backup-MX domains</BbLabel>
+                    <BbInput @bind-Value="bmDomains" Placeholder="example.com; example.net" />
+                </div>
             </div>
-            <div class="form-group" style="margin-top:1rem;">
-                <BbLabel>Backup-MX domains</BbLabel>
-                <BbInput @bind-Value="bmDomains" Placeholder="example.com; example.net" />
+
+            <div class="settings-group">
+                <div class="settings-group-title">Retry policy</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <BbLabel>Retry interval (minutes)</BbLabel>
+                        <BbInput Type="InputType.Number" @bind-Value="bmRetryInterval" />
+                    </div>
+                    <div class="form-group">
+                        <BbLabel>Max hold time (hours)</BbLabel>
+                        <BbInput Type="InputType.Number" @bind-Value="bmMaxHold" />
+                    </div>
+                </div>
             </div>
-            <div class="form-group" style="margin-top:0.75rem;">
-                <BbLabel>Retry interval (minutes)</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="bmRetryInterval" />
-            </div>
-            <div class="form-group" style="margin-top:0.75rem;">
-                <BbLabel>Max hold time (hours)</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="bmMaxHold" />
-            </div>
+
             <BbButton Variant="ButtonVariant.Default" @onclick="SaveBackupMxAsync" Class="mt-1">
                 <LucideIcon Name="save" /> Save
             </BbButton>
@@ -195,20 +221,25 @@ else
             <BbCardTitle>Statistics retention</BbCardTitle>
         </BbCardHeader>
         <BbCardContent>
-            <div class="form-group">
-                <BbLabel>Retention (days)</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="statRetentionDays" />
-            </div>
-            <div class="form-group" style="margin-top:0.75rem;">
-                <BbLabel>Daily aggregation time (UTC, HH:mm)</BbLabel>
-                <BbInput @bind-Value="statAggTime" Placeholder="00:00" />
+            <div class="settings-group">
+                <div class="settings-group-title">Retention</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <BbLabel>Retention (days)</BbLabel>
+                        <BbInput Type="InputType.Number" @bind-Value="statRetentionDays" />
+                    </div>
+                    <div class="form-group">
+                        <BbLabel>Daily aggregation time (UTC, HH:mm)</BbLabel>
+                        <BbInput @bind-Value="statAggTime" Placeholder="00:00" />
+                    </div>
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">
+                    Daily statistics older than the retention window are purged by the background aggregator, which runs at the configured UTC time.
+                </p>
             </div>
             <BbButton Variant="ButtonVariant.Default" @onclick="SaveStatisticsAsync" Class="mt-1">
                 <LucideIcon Name="save" /> Save
             </BbButton>
-            <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;">
-                Daily statistics older than the retention window are purged by the background aggregator, which runs at the configured UTC time.
-            </p>
             @if (!string.IsNullOrEmpty(statisticsStatus))
             {
                 <p class="text-muted" style="margin-top:0.5rem;">@statisticsStatus</p>
