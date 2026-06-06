@@ -42,12 +42,12 @@ else
         <BbCardContent>
             <div class="form-grid">
                 <div class="form-group">
-                    <BbLabel>Domain Pattern</BbLabel>
-                    <BbInput @bind-Value="domainPattern" Placeholder="*.example.com" />
+                    <BbLabel For="domain-pattern">Domain Pattern</BbLabel>
+                    <BbInput Id="domain-pattern" @bind-Value="domainPattern" Placeholder="*.example.com" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Send Connector</BbLabel>
-                    <BbNativeSelect @bind-Value="connectorId">
+                    <BbLabel For="send-connector">Send Connector</BbLabel>
+                    <BbNativeSelect Id="send-connector" @bind-Value="connectorId">
                         @foreach (var c in connectors)
                         {
                             <option value="@c.Id">@c.Name</option>
@@ -55,8 +55,8 @@ else
                     </BbNativeSelect>
                 </div>
                 <div class="form-group">
-                    <BbLabel>Sort Order</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
+                    <BbLabel For="sort-order">Sort Order</BbLabel>
+                    <BbInput Id="sort-order" Type="InputType.Number" @bind-Value="sortOrder" />
                 </div>
             </div>
         </BbCardContent>

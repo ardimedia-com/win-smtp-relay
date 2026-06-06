@@ -37,32 +37,32 @@ else
         <BbCardContent>
             <div class="form-grid">
                 <div class="form-group col-span-full">
-                    <BbLabel>Header Name</BbLabel>
-                    <BbInput @bind-Value="headerName" Placeholder="X-Custom-Header" />
+                    <BbLabel For="header-name">Header Name</BbLabel>
+                    <BbInput Id="header-name" @bind-Value="headerName" Placeholder="X-Custom-Header" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Action</BbLabel>
-                    <BbNativeSelect @bind-Value="action">
+                    <BbLabel For="action">Action</BbLabel>
+                    <BbNativeSelect Id="action" @bind-Value="action">
                         <option value="Set">Set</option>
                         <option value="Remove">Remove</option>
                         <option value="Append">Append</option>
                     </BbNativeSelect>
                 </div>
                 <div class="form-group">
-                    <BbLabel>Match Value (optional, exact match)</BbLabel>
-                    <BbInput @bind-Value="matchValue" Placeholder="exact current header value" />
+                    <BbLabel For="match-value">Match Value (optional, exact match)</BbLabel>
+                    <BbInput Id="match-value" @bind-Value="matchValue" Placeholder="exact current header value" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>New Value</BbLabel>
-                    <BbInput @bind-Value="newValue" Placeholder="new value" />
+                    <BbLabel For="new-value">New Value</BbLabel>
+                    <BbInput Id="new-value" @bind-Value="newValue" Placeholder="new value" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Sort Order</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
+                    <BbLabel For="sort-order">Sort Order</BbLabel>
+                    <BbInput Id="sort-order" Type="InputType.Number" @bind-Value="sortOrder" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Enabled</BbLabel>
-                    <BbNativeSelect @bind-Value="enabled">
+                    <BbLabel For="enabled">Enabled</BbLabel>
+                    <BbNativeSelect Id="enabled" @bind-Value="enabled">
                         <option value="true">Yes</option>
                         <option value="false">No</option>
                     </BbNativeSelect>

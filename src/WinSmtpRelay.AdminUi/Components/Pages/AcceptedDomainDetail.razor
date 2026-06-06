@@ -38,8 +38,8 @@ else
     <BbCard>
         <BbCardContent>
             <div class="form-group" style="max-width:420px;">
-                <BbLabel>Domain</BbLabel>
-                <BbInput @bind-Value="domain" Placeholder="example.com" Disabled="@(!IsNew)" />
+                <BbLabel For="domain">Domain</BbLabel>
+                <BbInput Id="domain" @bind-Value="domain" Placeholder="example.com" Disabled="@(!IsNew)" />
             </div>
 
             @if (!IsNew)

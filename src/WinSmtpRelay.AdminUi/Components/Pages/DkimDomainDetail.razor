@@ -37,27 +37,27 @@ else
     <BbCard>
         <BbCardContent>
             <div class="form-group" style="max-width:420px;">
-                <BbLabel>Domain</BbLabel>
-                <BbInput @bind-Value="domain" Placeholder="example.com" Disabled="@(!IsNew)" />
+                <BbLabel For="domain">Domain</BbLabel>
+                <BbInput Id="domain" @bind-Value="domain" Placeholder="example.com" Disabled="@(!IsNew)" />
             </div>
             <div style="display:flex;gap:1rem;flex-wrap:wrap;">
                 <div class="form-group">
-                    <BbLabel>Selector</BbLabel>
-                    <BbInput @bind-Value="selector" Placeholder="default" />
+                    <BbLabel For="selector">Selector</BbLabel>
+                    <BbInput Id="selector" @bind-Value="selector" Placeholder="default" />
                 </div>
                 @if (IsNew)
                 {
                     <div class="form-group">
-                        <BbLabel>Key size</BbLabel>
-                        <BbNativeSelect @bind-Value="keySize">
+                        <BbLabel For="key-size">Key size</BbLabel>
+                        <BbNativeSelect Id="key-size" @bind-Value="keySize">
                             <option value="2048">2048-bit</option>
                             <option value="4096">4096-bit</option>
                         </BbNativeSelect>
                     </div>
                 }
                 <div class="form-group">
-                    <BbLabel>Enabled</BbLabel>
-                    <BbNativeSelect @bind-Value="enabled">
+                    <BbLabel For="enabled">Enabled</BbLabel>
+                    <BbNativeSelect Id="enabled" @bind-Value="enabled">
                         <option value="true">Yes</option>
                         <option value="false">No</option>
                     </BbNativeSelect>

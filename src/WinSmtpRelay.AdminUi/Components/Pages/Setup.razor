@@ -81,12 +81,12 @@ else
             <BbCardContent>
                 <div class="test-send-row">
                     <div class="form-group">
-                        <BbLabel>From</BbLabel>
-                        <BbInput @bind-Value="testFrom" Placeholder="test@your-domain.com" />
+                        <BbLabel For="from">From</BbLabel>
+                        <BbInput Id="from" @bind-Value="testFrom" Placeholder="test@your-domain.com" />
                     </div>
                     <div class="form-group">
-                        <BbLabel>To</BbLabel>
-                        <BbInput @bind-Value="testTo" Placeholder="you@example.com" />
+                        <BbLabel For="to">To</BbLabel>
+                        <BbInput Id="to" @bind-Value="testTo" Placeholder="you@example.com" />
                     </div>
                     <div class="test-send-action">
                         <BbButton Variant="ButtonVariant.Default" @onclick="SendTestAsync" Disabled="@testSending">

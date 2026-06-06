@@ -36,49 +36,49 @@ else
         <BbCardContent>
             <div class="form-grid">
                 <div class="form-group col-span-full">
-                    <BbLabel>Name</BbLabel>
-                    <BbInput @bind-Value="name" Placeholder="Default" />
+                    <BbLabel For="name">Name</BbLabel>
+                    <BbInput Id="name" @bind-Value="name" Placeholder="Default" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Bind Address</BbLabel>
-                    <BbInput @bind-Value="address" Placeholder="0.0.0.0" />
+                    <BbLabel For="bind-address">Bind Address</BbLabel>
+                    <BbInput Id="bind-address" @bind-Value="address" Placeholder="0.0.0.0" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Port</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="port" />
+                    <BbLabel For="port">Port</BbLabel>
+                    <BbInput Id="port" Type="InputType.Number" @bind-Value="port" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Require TLS</BbLabel>
-                    <BbNativeSelect @bind-Value="requireTls">
+                    <BbLabel For="require-tls">Require TLS</BbLabel>
+                    <BbNativeSelect Id="require-tls" @bind-Value="requireTls">
                         <option value="false">No</option>
                         <option value="true">Yes (STARTTLS)</option>
                     </BbNativeSelect>
                 </div>
                 <div class="form-group">
-                    <BbLabel>Implicit TLS</BbLabel>
-                    <BbNativeSelect @bind-Value="implicitTls">
+                    <BbLabel For="implicit-tls">Implicit TLS</BbLabel>
+                    <BbNativeSelect Id="implicit-tls" @bind-Value="implicitTls">
                         <option value="false">No</option>
                         <option value="true">Yes</option>
                     </BbNativeSelect>
                 </div>
                 <div class="form-group">
-                    <BbLabel>Require Auth</BbLabel>
-                    <BbNativeSelect @bind-Value="requireAuth">
+                    <BbLabel For="require-auth">Require Auth</BbLabel>
+                    <BbNativeSelect Id="require-auth" @bind-Value="requireAuth">
                         <option value="false">No</option>
                         <option value="true">Yes</option>
                     </BbNativeSelect>
                 </div>
                 <div class="form-group">
-                    <BbLabel>Max Message Size (MB)</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="maxSizeMb" />
+                    <BbLabel For="max-message-size">Max Message Size (MB)</BbLabel>
+                    <BbInput Id="max-message-size" Type="InputType.Number" @bind-Value="maxSizeMb" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Max Connections</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="maxConn" />
+                    <BbLabel For="max-connections">Max Connections</BbLabel>
+                    <BbInput Id="max-connections" Type="InputType.Number" @bind-Value="maxConn" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Enabled</BbLabel>
-                    <BbNativeSelect @bind-Value="enabled">
+                    <BbLabel For="enabled">Enabled</BbLabel>
+                    <BbNativeSelect Id="enabled" @bind-Value="enabled">
                         <option value="true">Yes</option>
                         <option value="false">No</option>
                     </BbNativeSelect>

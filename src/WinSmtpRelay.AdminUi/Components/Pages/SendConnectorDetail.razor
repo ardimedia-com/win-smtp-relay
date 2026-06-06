@@ -37,61 +37,61 @@ else
         <BbCardContent>
             <div class="form-grid">
                 <div class="form-group col-span-full">
-                    <BbLabel>Name</BbLabel>
-                    <BbInput @bind-Value="name" Placeholder="Default" />
+                    <BbLabel For="name">Name</BbLabel>
+                    <BbInput Id="name" @bind-Value="name" Placeholder="Default" />
                 </div>
                 <div class="form-group col-span-full">
-                    <BbLabel>Smart Host (empty = direct MX)</BbLabel>
-                    <BbInput @bind-Value="smartHost" Placeholder="smtp.example.com" />
+                    <BbLabel For="smart-host">Smart Host (empty = direct MX)</BbLabel>
+                    <BbInput Id="smart-host" @bind-Value="smartHost" Placeholder="smtp.example.com" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Port</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="port" />
+                    <BbLabel For="port">Port</BbLabel>
+                    <BbInput Id="port" Type="InputType.Number" @bind-Value="port" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Username</BbLabel>
-                    <BbInput @bind-Value="username" />
+                    <BbLabel For="username">Username</BbLabel>
+                    <BbInput Id="username" @bind-Value="username" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Password</BbLabel>
-                    <BbInput Type="InputType.Password" @bind-Value="password" />
+                    <BbLabel For="password">Password</BbLabel>
+                    <BbInput Id="password" Type="InputType.Password" @bind-Value="password" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Opportunistic TLS</BbLabel>
-                    <BbNativeSelect @bind-Value="opportunisticTls">
+                    <BbLabel For="opportunistic-tls">Opportunistic TLS</BbLabel>
+                    <BbNativeSelect Id="opportunistic-tls" @bind-Value="opportunisticTls">
                         <option value="true">Yes</option>
                         <option value="false">No</option>
                     </BbNativeSelect>
                 </div>
                 <div class="form-group">
-                    <BbLabel>Require TLS</BbLabel>
-                    <BbNativeSelect @bind-Value="requireTls">
+                    <BbLabel For="require-tls">Require TLS</BbLabel>
+                    <BbNativeSelect Id="require-tls" @bind-Value="requireTls">
                         <option value="false">No</option>
                         <option value="true">Yes</option>
                     </BbNativeSelect>
                 </div>
                 <div class="form-group">
-                    <BbLabel>Default</BbLabel>
-                    <BbNativeSelect @bind-Value="isDefault">
+                    <BbLabel For="default">Default</BbLabel>
+                    <BbNativeSelect Id="default" @bind-Value="isDefault">
                         <option value="false">No</option>
                         <option value="true">Yes</option>
                     </BbNativeSelect>
                 </div>
                 <div class="form-group">
-                    <BbLabel>Concurrent Deliveries</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="concurrency" />
+                    <BbLabel For="concurrent-deliveries">Concurrent Deliveries</BbLabel>
+                    <BbInput Id="concurrent-deliveries" Type="InputType.Number" @bind-Value="concurrency" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Max Retry Hours</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="maxRetry" />
+                    <BbLabel For="max-retry-hours">Max Retry Hours</BbLabel>
+                    <BbInput Id="max-retry-hours" Type="InputType.Number" @bind-Value="maxRetry" />
                 </div>
                 <div class="form-group col-span-full">
-                    <BbLabel>Retry Intervals (minutes, comma-separated)</BbLabel>
-                    <BbInput @bind-Value="retryIntervals" Placeholder="1,5,30,120,480,1440" />
+                    <BbLabel For="retry-intervals">Retry Intervals (minutes, comma-separated)</BbLabel>
+                    <BbInput Id="retry-intervals" @bind-Value="retryIntervals" Placeholder="1,5,30,120,480,1440" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Enabled</BbLabel>
-                    <BbNativeSelect @bind-Value="enabled">
+                    <BbLabel For="enabled">Enabled</BbLabel>
+                    <BbNativeSelect Id="enabled" @bind-Value="enabled">
                         <option value="true">Yes</option>
                         <option value="false">No</option>
                     </BbNativeSelect>

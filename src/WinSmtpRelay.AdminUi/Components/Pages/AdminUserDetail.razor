@@ -45,9 +45,9 @@ else if (createdPassword is not null)
                     <strong>@secretDescription</strong>
                 </div>
                 <div class="form-group">
-                    <BbLabel>One-time password</BbLabel>
+                    <BbLabel For="one-time-password">One-time password</BbLabel>
                     <div style="display:flex;gap:0.5rem;align-items:center;">
-                        <BbInput Value="@createdPassword" ReadOnly="true" Class="mono" />
+                        <BbInput Id="one-time-password" Value="@createdPassword" ReadOnly="true" Class="mono" />
                         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopyAsync">
                             <LucideIcon Name="copy" /> Copy
                         </BbButton>
@@ -65,14 +65,14 @@ else if (IsNew)
         <BbCard>
             <BbCardContent>
                 <div class="form-group">
-                    <BbLabel>Email</BbLabel>
-                    <BbInput @bind-Value="newEmail" Placeholder="admin@tenant.example" />
+                    <BbLabel For="email">Email</BbLabel>
+                    <BbInput Id="email" @bind-Value="newEmail" Placeholder="admin@tenant.example" />
                 </div>
                 @if (CurrentTenant.FilterEnabled)
                 {
                     <div class="form-group">
-                        <BbLabel>Role</BbLabel>
-                        <select class="account-input" @bind="newRole">
+                        <BbLabel For="role">Role</BbLabel>
+                        <select class="account-input" id="role" @bind="newRole">
                             <option value="@RelayRoles.TenantAdmin">Tenant Admin (read/write)</option>
                             <option value="@RelayRoles.TenantViewer">Tenant Viewer (read-only)</option>
                         </select>

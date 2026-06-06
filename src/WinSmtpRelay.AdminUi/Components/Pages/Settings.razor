@@ -47,7 +47,7 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Self-service signup</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="signupEnabled" CheckedChanged="OnToggleAsync" id="signup-toggle" />
+                    <BbSwitch Checked="signupEnabled" CheckedChanged="OnToggleAsync" id="signup-toggle" AriaLabel="Allow anonymous organizations to sign up" />
                     <span>Allow anonymous organizations to sign up at <span class="mono">/signup</span></span>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.75rem;margin-bottom:0;">
@@ -59,9 +59,9 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Verification email</div>
                 <div class="form-group" style="margin-bottom:0;">
-                    <BbLabel>From-address</BbLabel>
+                    <BbLabel For="from-address">From-address</BbLabel>
                     <div style="display:flex;gap:0.5rem;align-items:center;">
-                        <BbInput @bind-Value="signupFromAddress" Placeholder="noreply@yourdomain.tld" />
+                        <BbInput Id="from-address" @bind-Value="signupFromAddress" Placeholder="noreply@yourdomain.tld" />
                         <BbButton Variant="ButtonVariant.Default" @onclick="SaveFromAddressAsync">
                             <LucideIcon Name="save" /> Save
                         </BbButton>
@@ -77,9 +77,9 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Abuse protection</div>
                 <div class="form-group" style="margin-bottom:0;">
-                    <BbLabel>Signup attempts per IP per hour</BbLabel>
+                    <BbLabel For="signup-attempts-per-ip-per-hour">Signup attempts per IP per hour</BbLabel>
                     <div style="display:flex;gap:0.5rem;align-items:center;">
-                        <BbInput Type="InputType.Number" @bind-Value="signupMaxPerHour" />
+                        <BbInput Id="signup-attempts-per-ip-per-hour" Type="InputType.Number" @bind-Value="signupMaxPerHour" />
                         <BbButton Variant="ButtonVariant.Default" @onclick="SaveThrottleAsync">
                             <LucideIcon Name="save" /> Save
                         </BbButton>
@@ -107,16 +107,16 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Inbound checks</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="spfEnabled" CheckedChanged="(bool v) => spfEnabled = v" id="spf-toggle" />
+                    <BbSwitch Checked="spfEnabled" CheckedChanged="(bool v) => spfEnabled = v" id="spf-toggle" AriaLabel="Run SPF checks on inbound mail" />
                     <span>Run SPF checks on inbound mail</span>
                 </div>
                 <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
-                    <BbSwitch Checked="dmarcEnabled" CheckedChanged="(bool v) => dmarcEnabled = v" id="dmarc-toggle" />
+                    <BbSwitch Checked="dmarcEnabled" CheckedChanged="(bool v) => dmarcEnabled = v" id="dmarc-toggle" AriaLabel="Run DMARC checks on inbound mail" />
                     <span>Run DMARC checks on inbound mail</span>
                 </div>
                 <div class="form-group" style="margin-top:1rem;">
-                    <BbLabel>Enforcement on failure</BbLabel>
-                    <select class="account-input" @bind="enforcement">
+                    <BbLabel For="enforcement">Enforcement on failure</BbLabel>
+                    <select class="account-input" id="enforcement" @bind="enforcement">
                         <option value="@EnforcementMode.LogOnly">Log only — accept and record the result</option>
                         <option value="@EnforcementMode.Reject">Reject — return 550 on SPF/DMARC failure</option>
                         <option value="@EnforcementMode.Quarantine">Quarantine — accept but flag the message</option>
@@ -127,11 +127,11 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Domain ownership</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="requireSenderVerification" CheckedChanged="(bool v) => requireSenderVerification = v" id="require-sender-verify" />
+                    <BbSwitch Checked="requireSenderVerification" CheckedChanged="(bool v) => requireSenderVerification = v" id="require-sender-verify" AriaLabel="Require verified ownership for accepted sender domains" />
                     <span>Require verified ownership for accepted <strong>sender</strong> domains</span>
                 </div>
                 <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
-                    <BbSwitch Checked="requireRecipientVerification" CheckedChanged="(bool v) => requireRecipientVerification = v" id="require-recipient-verify" />
+                    <BbSwitch Checked="requireRecipientVerification" CheckedChanged="(bool v) => requireRecipientVerification = v" id="require-recipient-verify" AriaLabel="Require verified ownership for accepted recipient domains" />
                     <span>Require verified ownership for accepted <strong>recipient</strong> domains</span>
                 </div>
                 <p class="text-muted" style="font-size:0.78rem;margin-top:0.35rem;margin-bottom:0;">
@@ -144,11 +144,11 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Tenant binding (unauthenticated submission)</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="bindTenantToAllowIpRule" CheckedChanged="(bool v) => bindTenantToAllowIpRule = v" id="bind-tenant-ip" />
+                    <BbSwitch Checked="bindTenantToAllowIpRule" CheckedChanged="(bool v) => bindTenantToAllowIpRule = v" id="bind-tenant-ip" AriaLabel="Bind the tenant to the matching allow IP rule" />
                     <span>Bind the tenant to the matching allow IP rule (reject cross-tenant sender domains)</span>
                 </div>
                 <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
-                    <BbSwitch Checked="rejectUnresolvedTenant" CheckedChanged="(bool v) => rejectUnresolvedTenant = v" id="reject-unresolved-tenant" />
+                    <BbSwitch Checked="rejectUnresolvedTenant" CheckedChanged="(bool v) => rejectUnresolvedTenant = v" id="reject-unresolved-tenant" AriaLabel="Reject when no tenant can be determined" />
                     <span>Reject when no tenant can be determined (instead of using the default tenant)</span>
                 </div>
                 <p class="text-muted" style="font-size:0.78rem;margin-top:0.35rem;margin-bottom:0;">
@@ -182,12 +182,12 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Backup MX</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="bmEnabled" CheckedChanged="(bool v) => bmEnabled = v" id="backupmx-toggle" />
+                    <BbSwitch Checked="bmEnabled" CheckedChanged="(bool v) => bmEnabled = v" id="backupmx-toggle" AriaLabel="Accept and hold mail for backup-MX domains when the primary is unreachable" />
                     <span>Accept and hold mail for backup-MX domains when the primary is unreachable</span>
                 </div>
                 <div class="form-group" style="margin-top:1rem;margin-bottom:0;">
-                    <BbLabel>Backup-MX domains</BbLabel>
-                    <BbInput @bind-Value="bmDomains" Placeholder="example.com; example.net" />
+                    <BbLabel For="backup-mx-domains">Backup-MX domains</BbLabel>
+                    <BbInput Id="backup-mx-domains" @bind-Value="bmDomains" Placeholder="example.com; example.net" />
                 </div>
             </div>
 
@@ -195,12 +195,12 @@ else
                 <div class="settings-group-title">Retry policy</div>
                 <div class="form-grid">
                     <div class="form-group">
-                        <BbLabel>Retry interval (minutes)</BbLabel>
-                        <BbInput Type="InputType.Number" @bind-Value="bmRetryInterval" />
+                        <BbLabel For="retry-interval">Retry interval (minutes)</BbLabel>
+                        <BbInput Id="retry-interval" Type="InputType.Number" @bind-Value="bmRetryInterval" />
                     </div>
                     <div class="form-group">
-                        <BbLabel>Max hold time (hours)</BbLabel>
-                        <BbInput Type="InputType.Number" @bind-Value="bmMaxHold" />
+                        <BbLabel For="max-hold-time">Max hold time (hours)</BbLabel>
+                        <BbInput Id="max-hold-time" Type="InputType.Number" @bind-Value="bmMaxHold" />
                     </div>
                 </div>
             </div>
@@ -226,12 +226,12 @@ else
                 <div class="settings-group-title">Retention</div>
                 <div class="form-grid">
                     <div class="form-group">
-                        <BbLabel>Retention (days)</BbLabel>
-                        <BbInput Type="InputType.Number" @bind-Value="statRetentionDays" />
+                        <BbLabel For="retention">Retention (days)</BbLabel>
+                        <BbInput Id="retention" Type="InputType.Number" @bind-Value="statRetentionDays" />
                     </div>
                     <div class="form-group">
-                        <BbLabel>Daily aggregation time (UTC, HH:mm)</BbLabel>
-                        <BbInput @bind-Value="statAggTime" Placeholder="00:00" />
+                        <BbLabel For="daily-aggregation-time">Daily aggregation time (UTC, HH:mm)</BbLabel>
+                        <BbInput Id="daily-aggregation-time" @bind-Value="statAggTime" Placeholder="00:00" />
                     </div>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">
@@ -262,12 +262,12 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Basic</div>
                 <div class="form-group">
-                    <BbLabel>Public hostname</BbLabel>
-                    <BbInput @bind-Value="dnsPublicHostname" Placeholder="relay.example.com" />
+                    <BbLabel For="public-hostname">Public hostname</BbLabel>
+                    <BbInput Id="public-hostname" @bind-Value="dnsPublicHostname" Placeholder="relay.example.com" />
                 </div>
                 <div class="form-group" style="margin-top:0.75rem;">
-                    <BbLabel>Sending IP addresses (delimited)</BbLabel>
-                    <BbInput @bind-Value="dnsSendingIps" Placeholder="203.0.113.10; 2001:db8::1" />
+                    <BbLabel For="sending-ip-addresses">Sending IP addresses (delimited)</BbLabel>
+                    <BbInput Id="sending-ip-addresses" @bind-Value="dnsSendingIps" Placeholder="203.0.113.10; 2001:db8::1" />
                     <div style="margin-top:0.35rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;font-size:0.8rem;">
                         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="DetectIpAsync" Disabled="@detectingIp">
                             <LucideIcon Name="globe" /> @(detectingIp ? "Detecting…" : "Detect public IP")
@@ -291,12 +291,12 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">SPF</div>
                 <div class="form-group">
-                    <BbLabel>SPF includes (delimited)</BbLabel>
-                    <BbInput @bind-Value="dnsSpfIncludes" Placeholder="_spf.example.net" />
+                    <BbLabel For="spf-includes">SPF includes (delimited)</BbLabel>
+                    <BbInput Id="spf-includes" @bind-Value="dnsSpfIncludes" Placeholder="_spf.example.net" />
                 </div>
                 <div class="form-group" style="margin-top:0.75rem;">
-                    <BbLabel>SPF "all" qualifier</BbLabel>
-                    <select class="account-input" @bind="dnsSpfAll">
+                    <BbLabel For="spf-all">SPF "all" qualifier</BbLabel>
+                    <select class="account-input" id="spf-all" @bind="dnsSpfAll">
                         <option value="~all">~all (softfail)</option>
                         <option value="-all">-all (hardfail)</option>
                     </select>
@@ -305,20 +305,20 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">DMARC</div>
                 <div class="form-group">
-                    <BbLabel>DMARC report address (rua)</BbLabel>
-                    <BbInput @bind-Value="dnsDmarcEmail" Placeholder="dmarc@example.com" />
+                    <BbLabel For="dmarc-report-address">DMARC report address (rua)</BbLabel>
+                    <BbInput Id="dmarc-report-address" @bind-Value="dnsDmarcEmail" Placeholder="dmarc@example.com" />
                 </div>
                 <div class="form-group" style="margin-top:0.75rem;">
-                    <BbLabel>DMARC policy</BbLabel>
-                    <select class="account-input" @bind="dnsDmarcPolicy">
+                    <BbLabel For="dmarc-policy">DMARC policy</BbLabel>
+                    <select class="account-input" id="dmarc-policy" @bind="dnsDmarcPolicy">
                         <option value="none">none</option>
                         <option value="quarantine">quarantine</option>
                         <option value="reject">reject</option>
                     </select>
                 </div>
                 <div class="form-group" style="margin-top:0.75rem;">
-                    <BbLabel>DMARC percentage (1-100)</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="dnsDmarcPct" />
+                    <BbLabel For="dmarc-percentage">DMARC percentage (1-100)</BbLabel>
+                    <BbInput Id="dmarc-percentage" Type="InputType.Number" @bind-Value="dnsDmarcPct" />
                 </div>
             </div>
             <BbButton Variant="ButtonVariant.Default" @onclick="SaveDnsAsync" Class="mt-1">
@@ -341,7 +341,7 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Reports &amp; alerts</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="reportEnabled" CheckedChanged="(bool v) => reportEnabled = v" id="report-toggle" />
+                    <BbSwitch Checked="reportEnabled" CheckedChanged="(bool v) => reportEnabled = v" id="report-toggle" AriaLabel="Send a daily activity digest and immediate incident alerts" />
                     <span>Send a daily activity digest and immediate incident alerts</span>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;margin-bottom:0;">
@@ -354,20 +354,20 @@ else
                 <div class="settings-group-title">Delivery</div>
                 <div class="form-grid">
                     <div class="form-group">
-                        <BbLabel>Report recipient</BbLabel>
-                        <BbInput @bind-Value="reportRecipient" Placeholder="ops@yourdomain.tld" />
+                        <BbLabel For="report-recipient">Report recipient</BbLabel>
+                        <BbInput Id="report-recipient" @bind-Value="reportRecipient" Placeholder="ops@yourdomain.tld" />
                     </div>
                     <div class="form-group">
-                        <BbLabel>From-address (optional)</BbLabel>
-                        <BbInput @bind-Value="reportFrom" Placeholder="(uses the signup from-address)" />
+                        <BbLabel For="report-from">From-address (optional)</BbLabel>
+                        <BbInput Id="report-from" @bind-Value="reportFrom" Placeholder="(uses the signup from-address)" />
                     </div>
                     <div class="form-group">
-                        <BbLabel>Daily digest time (UTC, HH:mm)</BbLabel>
-                        <BbInput @bind-Value="reportDailyTime" Placeholder="06:00" />
+                        <BbLabel For="daily-digest-time">Daily digest time (UTC, HH:mm)</BbLabel>
+                        <BbInput Id="daily-digest-time" @bind-Value="reportDailyTime" Placeholder="06:00" />
                     </div>
                     <div class="form-group">
-                        <BbLabel>Bounce-rate alert threshold (%)</BbLabel>
-                        <BbInput Type="InputType.Number" @bind-Value="reportBounceThreshold" />
+                        <BbLabel For="bounce-rate-alert-threshold">Bounce-rate alert threshold (%)</BbLabel>
+                        <BbInput Id="bounce-rate-alert-threshold" Type="InputType.Number" @bind-Value="reportBounceThreshold" />
                     </div>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">

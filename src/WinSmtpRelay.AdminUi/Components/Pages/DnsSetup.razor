@@ -157,8 +157,8 @@ else
                 <BbCardHeader><BbCardTitle>Check a domain</BbCardTitle></BbCardHeader>
                 <BbCardContent>
                     <div class="form-group" style="max-width:480px;">
-                        <BbLabel>Domain</BbLabel>
-                        <BbInput @bind-Value="adHocDomain" Placeholder="example.com" />
+                        <BbLabel For="domain">Domain</BbLabel>
+                        <BbInput Id="domain" @bind-Value="adHocDomain" Placeholder="example.com" />
                         @if (adHocError is not null)
                         {
                             <p class="text-danger" style="font-size:0.8rem;margin-top:0.25rem;">@adHocError</p>

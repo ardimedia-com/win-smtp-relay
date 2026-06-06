@@ -39,24 +39,24 @@ else
         <BbCardContent>
             <div class="form-grid">
                 <div class="form-group">
-                    <BbLabel>Max Connections per IP per Minute</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="maxConnPerIp" />
+                    <BbLabel For="max-connections-per-ip-per-minute">Max Connections per IP per Minute</BbLabel>
+                    <BbInput Id="max-connections-per-ip-per-minute" Type="InputType.Number" @bind-Value="maxConnPerIp" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Max Messages per Sender per Minute</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="maxMsgPerMin" />
+                    <BbLabel For="max-messages-per-sender-per-minute">Max Messages per Sender per Minute</BbLabel>
+                    <BbInput Id="max-messages-per-sender-per-minute" Type="InputType.Number" @bind-Value="maxMsgPerMin" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Max Messages per Sender per Day</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="maxMsgPerDay" />
+                    <BbLabel For="max-messages-per-sender-per-day">Max Messages per Sender per Day</BbLabel>
+                    <BbInput Id="max-messages-per-sender-per-day" Type="InputType.Number" @bind-Value="maxMsgPerDay" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Failed Auth Ban Threshold (attempts)</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="banThreshold" />
+                    <BbLabel For="failed-auth-ban-threshold">Failed Auth Ban Threshold (attempts)</BbLabel>
+                    <BbInput Id="failed-auth-ban-threshold" Type="InputType.Number" @bind-Value="banThreshold" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Failed Auth Ban Duration (minutes)</BbLabel>
-                    <BbInput Type="InputType.Number" @bind-Value="banMinutes" />
+                    <BbLabel For="failed-auth-ban-duration">Failed Auth Ban Duration (minutes)</BbLabel>
+                    <BbInput Id="failed-auth-ban-duration" Type="InputType.Number" @bind-Value="banMinutes" />
                 </div>
             </div>
         </BbCardContent>

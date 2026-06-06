@@ -36,14 +36,14 @@ else
         <BbCardContent>
             <div class="form-grid">
             <div class="form-group">
-                <BbLabel>Name</BbLabel>
-                <BbInput @bind-Value="name" Placeholder="Acme Corp" />
+                <BbLabel For="name">Name</BbLabel>
+                <BbInput Id="name" @bind-Value="name" Placeholder="Acme Corp" />
             </div>
             <div class="form-group">
-                <BbLabel>Slug</BbLabel>
+                <BbLabel For="slug">Slug</BbLabel>
                 @if (IsNew)
                 {
-                    <BbInput @bind-Value="slug" Placeholder="acme" />
+                    <BbInput Id="slug" @bind-Value="slug" Placeholder="acme" />
                 }
                 else
                 {
@@ -54,14 +54,14 @@ else
             @if (!IsNew)
             {
                 <div class="form-group">
-                    <BbLabel>Enabled</BbLabel>
+                    <BbLabel For="enabled">Enabled</BbLabel>
                     @if (IsDefault)
                     {
                         <div><span class="badge-status">Enabled</span> <span class="text-muted" style="font-size:0.78rem;">(the default tenant cannot be disabled)</span></div>
                     }
                     else
                     {
-                        <BbNativeSelect @bind-Value="enabled">
+                        <BbNativeSelect Id="enabled" @bind-Value="enabled">
                             <option value="true">Enabled</option>
                             <option value="false">Disabled</option>
                         </BbNativeSelect>
@@ -69,8 +69,8 @@ else
                     }
                 </div>
                 <div class="form-group" style="max-width:320px;">
-                    <BbLabel>Egress IP address</BbLabel>
-                    <BbInput @bind-Value="egress" Placeholder="(OS default)" />
+                    <BbLabel For="egress-ip-address">Egress IP address</BbLabel>
+                    <BbInput Id="egress-ip-address" @bind-Value="egress" Placeholder="(OS default)" />
                     <p class="text-muted" style="font-size:0.78rem;margin-top:0.25rem;">Outbound mail for this tenant binds to this source IP. The host must own it; leave blank for the OS default.</p>
                 </div>
                 <div class="form-group">

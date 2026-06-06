@@ -38,8 +38,8 @@ else if (IsNew)
     <BbCard>
         <BbCardContent>
             <div class="form-group">
-                <BbLabel>Domain</BbLabel>
-                <BbInput @bind-Value="newDomain" Placeholder="example.com" />
+                <BbLabel For="domain">Domain</BbLabel>
+                <BbInput Id="domain" @bind-Value="newDomain" Placeholder="example.com" />
             </div>
         </BbCardContent>
         <BbCardFooter>
@@ -61,8 +61,8 @@ else
     <BbCard>
         <BbCardContent>
             <div class="form-group">
-                <BbLabel>Domain</BbLabel>
-                <BbInput Value="@domain" ReadOnly="true" />
+                <BbLabel For="domain">Domain</BbLabel>
+                <BbInput Id="domain" Value="@domain" ReadOnly="true" />
             </div>
 
             @if (verifiedUtc is not null)

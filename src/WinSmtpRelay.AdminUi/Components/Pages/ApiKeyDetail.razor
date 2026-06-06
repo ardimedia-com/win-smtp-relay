@@ -46,9 +46,9 @@ else if (createdSecret is not null)
                     The plaintext key is not stored; only a hash is kept. If you lose it you must create a new key.
                 </div>
                 <div class="form-group">
-                    <BbLabel>Secret</BbLabel>
+                    <BbLabel For="secret">Secret</BbLabel>
                     <div style="display:flex;gap:0.5rem;align-items:center;">
-                        <BbInput Value="@createdSecret" ReadOnly="true" Class="mono" />
+                        <BbInput Id="secret" Value="@createdSecret" ReadOnly="true" Class="mono" />
                         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopySecretAsync">
                             <LucideIcon Name="copy" /> Copy
                         </BbButton>
@@ -71,12 +71,12 @@ else if (IsNew)
         <BbCard>
             <BbCardContent>
                 <div class="form-group">
-                    <BbLabel>Name</BbLabel>
-                    <BbInput @bind-Value="newName" Placeholder="ci-pipeline" />
+                    <BbLabel For="name">Name</BbLabel>
+                    <BbInput Id="name" @bind-Value="newName" Placeholder="ci-pipeline" />
                 </div>
                 <div class="form-group">
-                    <BbLabel>Role</BbLabel>
-                    <select class="account-input" @bind="newRole">
+                    <BbLabel For="role">Role</BbLabel>
+                    <select class="account-input" id="role" @bind="newRole">
                         <option value="@RelayRoles.TenantViewer">Viewer (read-only)</option>
                         <option value="@RelayRoles.TenantAdmin">Admin (read/write)</option>
                     </select>
