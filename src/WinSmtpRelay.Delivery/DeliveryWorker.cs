@@ -102,7 +102,7 @@ public class DeliveryWorker(
         logger.LogInformation("Delivery worker shutting down");
     }
 
-    private async Task ProcessMessageAsync(QueuedMessage message, CancellationToken cancellationToken)
+    internal async Task ProcessMessageAsync(QueuedMessage message, CancellationToken cancellationToken)
     {
         var config = options.Value;
 
