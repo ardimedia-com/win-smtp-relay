@@ -213,4 +213,46 @@ public class IpAccessEvaluatorTests
         Assert.IsTrue(Relay("10.0.0.5", tenantId: 2, [], rule));
         Assert.IsFalse(Relay("10.0.0.5", tenantId: 3, [], rule));
     }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Relay_NearAnyRulePair_NotAllowed()
+    {
+        // 0.0.0.0/1 + 128.0.0.0/1 cover the whole address space but each is non-zero prefix. They must
+        // still NOT authorize relaying (no open relay via a near-"any" pair).
+        Assert.IsFalse(Relay("203.0.113.5", TenantDefaults.DefaultTenantId, [],
+            TRule(TenantDefaults.DefaultTenantId, "0.0.0.0/1", IpAccessAction.Allow, 0),
+            TRule(TenantDefaults.DefaultTenantId, "128.0.0.0/1", IpAccessAction.Allow, 1)));
+        // Same for IPv6 halves.
+        Assert.IsFalse(Relay("2001:db8::1", TenantDefaults.DefaultTenantId, [],
+            TRule(TenantDefaults.DefaultTenantId, "::/1", IpAccessAction.Allow, 0),
+            TRule(TenantDefaults.DefaultTenantId, "8000::/1", IpAccessAction.Allow, 1)));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Relay_SpecificEnoughPrefix_Allowed()
+    {
+        // /8 is the IPv4 minimum that authorizes relay; a /24 certainly does.
+        Assert.IsTrue(Relay("10.0.0.5", TenantDefaults.DefaultTenantId, [],
+            TRule(TenantDefaults.DefaultTenantId, "10.0.0.0/8", IpAccessAction.Allow, 0)));
+        Assert.IsTrue(Relay("192.168.1.5", TenantDefaults.DefaultTenantId, [],
+            TRule(TenantDefaults.DefaultTenantId, "192.168.1.0/24", IpAccessAction.Allow, 0)));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void IsTooBroadForRelay_Boundaries()
+    {
+        Assert.IsTrue(IpAccessEvaluator.IsTooBroadForRelay("0.0.0.0/0"));
+        Assert.IsTrue(IpAccessEvaluator.IsTooBroadForRelay("0.0.0.0/1"));
+        Assert.IsTrue(IpAccessEvaluator.IsTooBroadForRelay("10.0.0.0/7"));
+        Assert.IsFalse(IpAccessEvaluator.IsTooBroadForRelay("10.0.0.0/8"));
+        Assert.IsFalse(IpAccessEvaluator.IsTooBroadForRelay("1.2.3.4/32"));
+        Assert.IsFalse(IpAccessEvaluator.IsTooBroadForRelay("1.2.3.4")); // bare host
+        Assert.IsTrue(IpAccessEvaluator.IsTooBroadForRelay("::/0"));
+        Assert.IsTrue(IpAccessEvaluator.IsTooBroadForRelay("::/15"));
+        Assert.IsFalse(IpAccessEvaluator.IsTooBroadForRelay("2001:db8::/32"));
+        Assert.IsTrue(IpAccessEvaluator.IsTooBroadForRelay("garbage")); // malformed → fail safe
+    }
 }

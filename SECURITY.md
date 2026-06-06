@@ -24,8 +24,8 @@ vector and get your sending IP blocklisted. Operate it responsibly.
 
 By design, **relaying to an external (non-hosted) recipient always requires SMTP authentication or an
 explicit allow-IP rule**. This protection is enforced in code and **cannot be disabled by
-configuration** — an empty configuration, or a single `0.0.0.0/0` / `::/0` allow rule, will *not* relay
-to the outside world. Even so:
+configuration** — an empty configuration, or an overly-broad allow rule (`0.0.0.0/0`, `::/0`, or a
+near-"any" combination such as `0.0.0.0/1` + `128.0.0.0/1`), will *not* relay to the outside world. Even so:
 
 - Prefer **SMTP authentication** for clients that submit mail.
 - If you authorize by IP, add **specific** allow-IP rules (the narrowest range that works) — never rely

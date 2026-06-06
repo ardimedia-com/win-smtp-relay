@@ -77,12 +77,12 @@ public static class IpAccessEvaluator
         {
             if (!IpNetworkHelper.IsInNetwork(clientIp, rule.Network))
                 continue;
-            // First matching rule decides. An "any" Allow rule does NOT grant relay rights.
-            return rule.Action == IpAccessAction.Allow && !IsAnyNetwork(rule.Network);
+            // First matching rule decides. An overly-broad Allow rule does NOT grant relay rights.
+            return rule.Action == IpAccessAction.Allow && !IsTooBroadForRelay(rule.Network);
         }
 
-        // No DB rule matched — honour explicit, non-"any" entries in the static appsettings allow-list.
-        return staticAllowedNetworks.Any(n => !IsAnyNetwork(n) && IpNetworkHelper.IsInNetwork(clientIp, n));
+        // No DB rule matched — honour specific-enough entries in the static appsettings allow-list.
+        return staticAllowedNetworks.Any(n => !IsTooBroadForRelay(n) && IpNetworkHelper.IsInNetwork(clientIp, n));
     }
 
     /// <summary>True for a CIDR covering the entire address space (prefix length 0), e.g. 0.0.0.0/0 or ::/0.</summary>
@@ -90,5 +90,40 @@ public static class IpAccessEvaluator
     {
         var parts = cidr.Split('/');
         return parts.Length > 1 && int.TryParse(parts[1], out var prefix) && prefix == 0;
+    }
+
+    // Minimum prefix lengths an allow rule must have to authorize RELAYING. Anything broader (a smaller
+    // prefix) is treated as effectively "any" and does NOT grant relay — this closes the loophole where
+    // a pair like 0.0.0.0/1 + 128.0.0.0/1 (each non-zero, so not "any") would together cover the whole
+    // address space and re-create an open relay. Inbound acceptance is unaffected; only external relay
+    // authorization is gated this strictly.
+    private const int MinRelayPrefixV4 = 8;
+    private const int MinRelayPrefixV6 = 16;
+
+    /// <summary>
+    /// True if a CIDR is too broad to authorize relaying (prefix shorter than the per-family minimum),
+    /// or is malformed (fail-safe: a rule we can't parse never grants relay).
+    /// </summary>
+    public static bool IsTooBroadForRelay(string cidr)
+    {
+        var parts = cidr.Split('/');
+        if (!IPAddress.TryParse(parts[0].Trim(), out var addr))
+            return true;
+
+        var isV6 = addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && !addr.IsIPv4MappedToIPv6;
+        var max = isV6 ? 128 : 32;
+
+        int prefix;
+        if (parts.Length > 1)
+        {
+            if (!int.TryParse(parts[1], out prefix) || prefix < 0 || prefix > max)
+                return true; // malformed prefix → fail safe
+        }
+        else
+        {
+            prefix = max; // a bare address is a single host (/32 or /128)
+        }
+
+        return prefix < (isV6 ? MinRelayPrefixV6 : MinRelayPrefixV4);
     }
 }

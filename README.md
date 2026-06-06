@@ -151,8 +151,8 @@ For automation, create an API key and pass it as `X-Api-Key: <key>` (or `Authori
 
 A mail relay can be abused if misconfigured. WIN-SMTP-RELAY is **closed by default**: relaying to an
 external (non-hosted) recipient always requires SMTP authentication or an explicit allow-IP rule, and
-this cannot be disabled by configuration — an empty config, or a `0.0.0.0/0` allow rule, will not relay
-to the outside world.
+this cannot be disabled by configuration — an empty config, or an overly-broad allow rule (`0.0.0.0/0`
+or a near-"any" combination), will not relay to the outside world.
 
 When operating it, also:
 
