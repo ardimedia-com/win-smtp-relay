@@ -7,7 +7,11 @@
     /* Semantic "warning/amber" colour, used as foreground text/icon AND tint base across badges,
        setup tiles and dashboard stats. Kept separate from the data-viz --chart-* palette so the dark
        themes can give it a readable light value without recolouring charts. */
-    --warning: oklch(0.6900 0.1700 60.0000);
+    --warning: oklch(0.5500 0.1600 55.0000);
+    /* Semantic "success/delivered" green, independent of the brand (--primary, achromatic in the mono
+       themes) and the data-viz palette (--chart-2 is red-orange in the default theme). Defined only on
+       :root / .dark so it cascades to every colour theme. */
+    --success: oklch(0.5500 0.1500 150.0000);
     --background: oklch(1.0000 0 0);
     --foreground: oklch(0.1448 0 0);
     --card: oklch(1.0000 0 0);
@@ -69,6 +73,7 @@
     /* Light amber so warning text/icons stay readable on the dark cards/backgrounds of every dark
        theme (a .dark element never re-declares --warning, so this value cascades to all dark themes). */
     --warning: oklch(0.8000 0.1400 75.0000);
+    --success: oklch(0.7200 0.1600 155.0000);
     --background: oklch(0.1448 0 0);
     --foreground: oklch(0.9851 0 0);
     --card: oklch(0.2134 0 0);

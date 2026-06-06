@@ -64,6 +64,10 @@ else
                     <LucideIcon Name="save" /> Save
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
+                @if (!string.IsNullOrEmpty(statusMessage))
+                {
+                    <span class="text-danger" style="margin-left:0.5rem">@statusMessage</span>
+                }
             </div>
         </BbCardFooter>
     </BbCard>
@@ -80,6 +84,7 @@ else
     private string toAddress = "";
     private string sortOrder = "0";
     private string enabled = "true";
+    private string? statusMessage;
 
     protected override async Task OnInitializedAsync()
     {
@@ -106,13 +111,27 @@ else
 
     private async Task SaveAsync()
     {
+        // From Pattern is applied as a regex at delivery time (SenderRewriteFilter). Validate it here so
+        // an invalid pattern is rejected at save instead of silently throwing during delivery and
+        // breaking this tenant's mail flow with no feedback.
+        var pattern = fromPattern.Trim();
+        try
+        {
+            _ = new System.Text.RegularExpressions.Regex(pattern);
+        }
+        catch (ArgumentException ex)
+        {
+            statusMessage = $"Invalid From Pattern (regex): {ex.Message}";
+            return;
+        }
+
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
 
         var entry = new SenderRewriteEntry
         {
             Id = Id ?? 0,
-            FromPattern = fromPattern.Trim(),
+            FromPattern = pattern,
             ToAddress = toAddress.Trim(),
             SortOrder = int.TryParse(sortOrder, out var s) ? s : 0,
             IsEnabled = enabled == "true"

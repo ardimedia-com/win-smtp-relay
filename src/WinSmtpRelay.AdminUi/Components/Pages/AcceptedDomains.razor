@@ -115,7 +115,7 @@ else
         </BbDialogHeader>
         <div style="font-size:0.875rem;line-height:1.6;">
             <p>Accepted recipient domains define which recipient domain addresses the relay will accept during the SMTP <code>RCPT TO</code> command.</p>
-            <p>If the list is <strong>empty</strong>, the relay accepts mail for <em>all</em> recipient domains &mdash; an open relay for any client permitted to submit (authenticated users, and any source IP allowed by the IP access rules).</p>
+            <p>If the list is <strong>empty</strong>, the relay accepts inbound mail for <em>all</em> recipient domains. This is <strong>not</strong> an open relay: delivering to an <em>external</em> (non-hosted) domain still requires SMTP authentication or an explicit allow-IP rule &mdash; a broad/&ldquo;any&rdquo; rule does not authorize relaying.</p>
             <p>If one or more domains are listed, only recipients at those domains are accepted. All other recipient domain addresses are rejected with a 550 error.</p>
         </div>
         <BbDialogFooter>

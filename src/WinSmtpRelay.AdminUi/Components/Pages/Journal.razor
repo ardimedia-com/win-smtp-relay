@@ -19,7 +19,7 @@
 <div class="page-header page-header-row">
     <div>
         <h1>Message Journal</h1>
-        <p>Per-message delivery audit trail</p>
+        <p>Per-recipient delivery audit trail</p>
     </div>
     <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
         <LucideIcon Name="info" /> About this page
@@ -110,7 +110,7 @@ else
             </p>
             <h4 style="margin-top:1rem;">What each column means</h4>
             <ul style="padding-left:1.25rem;">
-                <li><strong>Time (UTC)</strong> &mdash; when the delivery attempt was made.</li>
+                <li><strong>Time</strong> &mdash; when the delivery attempt was made, shown in your browser's local time zone (hover for the exact UTC value).</li>
                 <li><strong>Msg ID</strong> &mdash; links back to the queued message by its internal queue ID.</li>
                 <li><strong>Recipient</strong> &mdash; the email address this attempt targeted.</li>
                 <li><strong>Status</strong> &mdash; the SMTP status code returned by the remote server (250 = success, 4xx = temporary failure, 5xx = permanent failure).</li>

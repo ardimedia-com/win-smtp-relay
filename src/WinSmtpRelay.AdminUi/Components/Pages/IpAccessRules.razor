@@ -52,7 +52,7 @@ else
             @if (rules.Count == 0)
             {
                 <BbTableRow TData="IpAccessRule">
-                    <BbTableCell colspan="5" style="text-align:center;">No IP rules configured &mdash; all connections accepted</BbTableCell>
+                    <BbTableCell colspan="5" style="text-align:center;">No IP rules configured &mdash; connections fall back to the <code>AllowedNetworks</code> list (private ranges by default); others are denied. External relaying still needs authentication or an explicit allow rule.</BbTableCell>
                 </BbTableRow>
             }
             @foreach (var rule in rules)

@@ -73,7 +73,7 @@
 .activity-text { flex: 1; word-break: break-all; }
 
 .activity-received { color: var(--primary); }
-.activity-delivered { color: var(--chart-2); }
+.activity-delivered { color: var(--success); }
 .activity-error { color: var(--destructive); }
 .activity-connection { color: var(--muted-foreground); }
 
@@ -239,9 +239,9 @@ h1:focus-visible {
 }
 
 .badge-status.badge-success {
-    background: color-mix(in oklch, var(--primary) 12%, transparent);
-    color: var(--primary);
-    border: 1px solid color-mix(in oklch, var(--primary) 25%, transparent);
+    background: color-mix(in oklch, var(--success) 14%, transparent);
+    color: var(--success);
+    border: 1px solid color-mix(in oklch, var(--success) 30%, transparent);
 }
 
 .badge-status.badge-error {
