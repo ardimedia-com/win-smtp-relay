@@ -34,32 +34,32 @@ else
 {
     <BbCard>
         <BbCardContent>
-            <div class="form-group">
-                <BbLabel>Username</BbLabel>
-                <BbInput @bind-Value="username" Placeholder="username" Disabled="@(!IsNew)" />
-            </div>
-            <div class="form-group">
-                <BbLabel>@(IsNew ? "Password" : "New Password")</BbLabel>
-                <BbInput Type="InputType.Password" @bind-Value="password"
-                         Placeholder="@(IsNew ? "password" : "leave blank to keep current")" />
-            </div>
-            <div class="form-group">
-                <BbLabel>Enabled</BbLabel>
-                <BbNativeSelect @bind-Value="enabled">
-                    <option value="true">Yes</option>
-                    <option value="false">No</option>
-                </BbNativeSelect>
-            </div>
-            <div class="form-group">
-                <BbLabel>Allowed Sender Addresses</BbLabel>
-                <BbInput @bind-Value="allowedSenders" Placeholder="user@example.com;noreply@example.com" />
-            </div>
-            <div style="display:flex;gap:1rem;">
-                <div class="form-group" style="flex:1">
+            <div class="form-grid">
+                <div class="form-group">
+                    <BbLabel>Username</BbLabel>
+                    <BbInput @bind-Value="username" Placeholder="username" Disabled="@(!IsNew)" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>@(IsNew ? "Password" : "New Password")</BbLabel>
+                    <BbInput Type="InputType.Password" @bind-Value="password"
+                             Placeholder="@(IsNew ? "password" : "leave blank to keep current")" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Enabled</BbLabel>
+                    <BbNativeSelect @bind-Value="enabled">
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </BbNativeSelect>
+                </div>
+                <div class="form-group col-span-full">
+                    <BbLabel>Allowed Sender Addresses</BbLabel>
+                    <BbInput @bind-Value="allowedSenders" Placeholder="user@example.com;noreply@example.com" />
+                </div>
+                <div class="form-group">
                     <BbLabel>Rate Limit per Minute</BbLabel>
                     <BbInput Type="InputType.Number" @bind-Value="ratePerMinuteStr" Placeholder="unlimited" />
                 </div>
-                <div class="form-group" style="flex:1">
+                <div class="form-group">
                     <BbLabel>Rate Limit per Day</BbLabel>
                     <BbInput Type="InputType.Number" @bind-Value="ratePerDayStr" Placeholder="unlimited" />
                 </div>

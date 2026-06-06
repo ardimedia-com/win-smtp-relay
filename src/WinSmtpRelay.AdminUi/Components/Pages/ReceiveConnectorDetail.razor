@@ -34,21 +34,19 @@ else
 {
     <BbCard>
         <BbCardContent>
-            <div class="form-group">
-                <BbLabel>Name</BbLabel>
-                <BbInput @bind-Value="name" Placeholder="Default" />
-            </div>
-            <div style="display:flex;gap:1rem;">
-                <div class="form-group" style="flex:2">
+            <div class="form-grid">
+                <div class="form-group col-span-full">
+                    <BbLabel>Name</BbLabel>
+                    <BbInput @bind-Value="name" Placeholder="Default" />
+                </div>
+                <div class="form-group">
                     <BbLabel>Bind Address</BbLabel>
                     <BbInput @bind-Value="address" Placeholder="0.0.0.0" />
                 </div>
-                <div class="form-group" style="flex:1">
+                <div class="form-group">
                     <BbLabel>Port</BbLabel>
                     <BbInput Type="InputType.Number" @bind-Value="port" />
                 </div>
-            </div>
-            <div style="display:flex;gap:1rem;flex-wrap:wrap;">
                 <div class="form-group">
                     <BbLabel>Require TLS</BbLabel>
                     <BbNativeSelect @bind-Value="requireTls">
@@ -70,23 +68,21 @@ else
                         <option value="true">Yes</option>
                     </BbNativeSelect>
                 </div>
-            </div>
-            <div style="display:flex;gap:1rem;">
-                <div class="form-group" style="flex:1">
+                <div class="form-group">
                     <BbLabel>Max Message Size (MB)</BbLabel>
                     <BbInput Type="InputType.Number" @bind-Value="maxSizeMb" />
                 </div>
-                <div class="form-group" style="flex:1">
+                <div class="form-group">
                     <BbLabel>Max Connections</BbLabel>
                     <BbInput Type="InputType.Number" @bind-Value="maxConn" />
                 </div>
-            </div>
-            <div class="form-group">
-                <BbLabel>Enabled</BbLabel>
-                <BbNativeSelect @bind-Value="enabled">
-                    <option value="true">Yes</option>
-                    <option value="false">No</option>
-                </BbNativeSelect>
+                <div class="form-group">
+                    <BbLabel>Enabled</BbLabel>
+                    <BbNativeSelect @bind-Value="enabled">
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </BbNativeSelect>
+                </div>
             </div>
         </BbCardContent>
         <BbCardFooter>

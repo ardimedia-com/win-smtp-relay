@@ -33,24 +33,26 @@ else
 {
     <BbCard>
         <BbCardContent>
-            <div class="form-group">
-                <BbLabel>Network (CIDR)</BbLabel>
-                <BbInput @bind-Value="network" Placeholder="10.0.0.0/8" />
-            </div>
-            <div class="form-group">
-                <BbLabel>Action</BbLabel>
-                <BbNativeSelect @bind-Value="action">
-                    <option value="Allow">Allow</option>
-                    <option value="Deny">Deny</option>
-                </BbNativeSelect>
-            </div>
-            <div class="form-group">
-                <BbLabel>Sort Order</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
-            </div>
-            <div class="form-group">
-                <BbLabel>Description (optional)</BbLabel>
-                <BbInput @bind-Value="description" Placeholder="Internal network" />
+            <div class="form-grid">
+                <div class="form-group">
+                    <BbLabel>Network (CIDR)</BbLabel>
+                    <BbInput @bind-Value="network" Placeholder="10.0.0.0/8" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Action</BbLabel>
+                    <BbNativeSelect @bind-Value="action">
+                        <option value="Allow">Allow</option>
+                        <option value="Deny">Deny</option>
+                    </BbNativeSelect>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Sort Order</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
+                </div>
+                <div class="form-group col-span-full">
+                    <BbLabel>Description (optional)</BbLabel>
+                    <BbInput @bind-Value="description" Placeholder="Internal network" />
+                </div>
             </div>
         </BbCardContent>
         <BbCardFooter>
