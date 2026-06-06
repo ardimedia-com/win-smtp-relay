@@ -525,8 +525,14 @@ public static class AdminEndpoints
         // (it would let them probe server files or reference another tenant's key) — host admins only.
         var ep = group.MapGroup("/dkim/domains").RequireAuthorization(AuthorizationPolicies.HostAdmin);
 
+        // The list never returns key material (PrivateKeyPem / PrivateKeyPath): the private key is the only
+        // DKIM secret and must not leak over the wire. Project to a summary DTO that exposes only whether a
+        // key is configured (HasPrivateKey).
         ep.MapGet("/", async (IDkimDomainService svc, CancellationToken ct) =>
-            Results.Ok(await svc.GetAllAsync(ct)));
+        {
+            var domains = await svc.GetAllAsync(ct);
+            return Results.Ok(domains.Select(DkimDomainSummary.From));
+        });
 
         ep.MapPost("/", async (DkimDomain dkim, IDkimDomainService svc, CancellationToken ct) =>
         {
@@ -640,6 +646,21 @@ public record UpdateUserRequest(
     int? RateLimitPerMinute, int? RateLimitPerDay);
 
 public record DkimGenerateRequest(string Domain, string Selector, int KeySize = 2048);
+
+/// <summary>
+/// Safe projection of a <see cref="DkimDomain"/> for API responses. Deliberately omits the private-key
+/// material (PrivateKeyPem / PrivateKeyPath) — the only DKIM secret — exposing only whether a key is
+/// configured via <see cref="HasPrivateKey"/>.
+/// </summary>
+public record DkimDomainSummary(
+    int Id, int TenantId, string Domain, string Selector,
+    bool IsEnabled, bool HasPrivateKey, DateTimeOffset CreatedUtc)
+{
+    public static DkimDomainSummary From(DkimDomain d) => new(
+        d.Id, d.TenantId, d.Domain, d.Selector, d.IsEnabled,
+        !string.IsNullOrEmpty(d.PrivateKeyPem) || !string.IsNullOrEmpty(d.PrivateKeyPath),
+        d.CreatedUtc);
+}
 
 public record DeliveryLogSummary(
     long Id, long QueuedMessageId, string Recipient, string StatusCode,
