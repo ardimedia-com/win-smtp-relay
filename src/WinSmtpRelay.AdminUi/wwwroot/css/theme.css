@@ -1,4 +1,13 @@
 :root {
+    /* Tell the browser to render native UI (the <select> option popup, scrollbars, text-field
+       carets, autofill, date pickers) in the light scheme. The .dark rule below flips this to
+       dark — without it, native controls (e.g. the tenant-switcher <select> dropdown) keep a
+       light/white popup in dark mode, leaving near-white option text unreadable. */
+    color-scheme: light;
+    /* Semantic "warning/amber" colour, used as foreground text/icon AND tint base across badges,
+       setup tiles and dashboard stats. Kept separate from the data-viz --chart-* palette so the dark
+       themes can give it a readable light value without recolouring charts. */
+    --warning: oklch(0.6900 0.1700 60.0000);
     --background: oklch(1.0000 0 0);
     --foreground: oklch(0.1448 0 0);
     --card: oklch(1.0000 0 0);
@@ -54,6 +63,12 @@
 }
 
 .dark {
+    /* Render native UI (option popups, scrollbars, carets) in the dark scheme. .dark is applied to
+       <html>, so this covers the dark variants of every colour theme (.dark[data-theme="..."]). */
+    color-scheme: dark;
+    /* Light amber so warning text/icons stay readable on the dark cards/backgrounds of every dark
+       theme (a .dark element never re-declares --warning, so this value cascades to all dark themes). */
+    --warning: oklch(0.8000 0.1400 75.0000);
     --background: oklch(0.1448 0 0);
     --foreground: oklch(0.9851 0 0);
     --card: oklch(0.2134 0 0);

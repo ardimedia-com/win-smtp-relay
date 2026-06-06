@@ -12,7 +12,7 @@
     margin-top: 0.25rem;
 }
 
-.stat-value.warning { color: var(--chart-3); }
+.stat-value.warning { color: var(--warning); }
 
 /* Chart inline counter */
 .chart-counter {
@@ -33,7 +33,7 @@
     font-weight: 700;
 }
 
-.chart-counter-value.warning { color: var(--chart-3); }
+.chart-counter-value.warning { color: var(--warning); }
 
 /* Search bar */
 .search-bar {
@@ -79,7 +79,7 @@
 
 /* Log row styles */
 .row-error { background: color-mix(in oklch, var(--destructive) 10%, transparent); }
-.row-warning { background: color-mix(in oklch, var(--chart-3) 10%, transparent); }
+.row-warning { background: color-mix(in oklch, var(--warning) 10%, transparent); }
 .log-handled { opacity: 0.4; }
 .log-row-clickable { cursor: pointer; }
 
@@ -251,9 +251,9 @@ h1:focus-visible {
 }
 
 .badge-status.badge-warning {
-    background: color-mix(in oklch, var(--chart-3, orange) 12%, transparent);
-    color: var(--chart-3, orange);
-    border: 1px solid color-mix(in oklch, var(--chart-3, orange) 25%, transparent);
+    background: color-mix(in oklch, var(--warning, orange) 12%, transparent);
+    color: var(--warning, orange);
+    border: 1px solid color-mix(in oklch, var(--warning, orange) 25%, transparent);
 }
 
 .badge-status.badge-muted {
@@ -431,6 +431,34 @@ h1:focus-visible {
     outline: none;
 }
 
+/* Native <select> option popups are OS-drawn. color-scheme (theme.css) makes the browser paint
+   them in the right light/dark scheme; these explicit colours harden the result so the option
+   list always uses the themed popover background/foreground (e.g. the tenant switcher in dark
+   mode) instead of a default white popup with near-white text. */
+.tenant-switcher select option,
+select option {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+}
+
+/* Detail/settings forms: span the full content width and flow fields into responsive columns so wide
+   screens are used instead of a narrow capped column. Apply to the field container inside a card; a
+   field that must stay full-width (e.g. a one-time secret, a textarea) gets .col-span-full. Rows are
+   spaced by the .form-group bottom margin. */
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    column-gap: 1.5rem;
+    align-items: start;
+}
+.form-grid > .col-span-full {
+    grid-column: 1 / -1;
+}
+
+/* Spinner for inline "loading…" indicators (e.g. the Event Log read). */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
+
 /* Health page section headers */
 .health-section {
     font-size: 1.05rem;
@@ -501,7 +529,7 @@ h1:focus-visible {
     flex: 0 0 auto;
 }
 .setup-tile-ok { background: color-mix(in oklch, var(--primary) 14%, transparent); color: var(--primary); }
-.setup-tile-warn { background: color-mix(in oklch, var(--chart-3, orange) 14%, transparent); color: var(--chart-3, orange); }
+.setup-tile-warn { background: color-mix(in oklch, var(--warning, orange) 14%, transparent); color: var(--warning, orange); }
 .setup-tile-bad { background: color-mix(in oklch, var(--destructive) 14%, transparent); color: var(--destructive); }
 
 /* Inline "can't send yet" notice inside the Basic group (submission access is under Recommended) */
@@ -512,11 +540,11 @@ h1:focus-visible {
     padding: 0.6rem 0.75rem;
     margin-bottom: 0.75rem;
     font-size: 0.85rem;
-    background: color-mix(in oklch, var(--chart-3, orange) 12%, transparent);
-    border: 1px solid color-mix(in oklch, var(--chart-3, orange) 25%, transparent);
+    background: color-mix(in oklch, var(--warning, orange) 12%, transparent);
+    border: 1px solid color-mix(in oklch, var(--warning, orange) 25%, transparent);
     border-radius: var(--radius);
 }
-.setup-cantsend > svg { flex: 0 0 auto; margin-top: 0.1rem; color: var(--chart-3, orange); }
+.setup-cantsend > svg { flex: 0 0 auto; margin-top: 0.1rem; color: var(--warning, orange); }
 .setup-tile-label { font-size: 0.75rem; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.04em; }
 .setup-tile-value { font-size: 1.05rem; font-weight: 600; line-height: 1.2; }
 
@@ -527,10 +555,10 @@ h1:focus-visible {
     gap: 0.75rem;
     padding: 0.85rem 1rem;
     margin-bottom: 1.5rem;
-    border: 1px solid color-mix(in oklch, var(--chart-3, orange) 35%, transparent);
+    border: 1px solid color-mix(in oklch, var(--warning, orange) 35%, transparent);
     border-left-width: 4px;
     border-radius: var(--radius);
-    background: color-mix(in oklch, var(--chart-3, orange) 8%, transparent);
+    background: color-mix(in oklch, var(--warning, orange) 8%, transparent);
 }
 .setup-next.setup-next-done {
     border-color: color-mix(in oklch, var(--primary) 35%, transparent);
@@ -557,8 +585,8 @@ h1:focus-visible {
 .setup-row:first-child { border-top: none; }
 .setup-row-icon { flex: 0 0 auto; margin-top: 0.1rem; }
 .setup-row-icon.s-done { color: var(--primary); }
-.setup-row-icon.s-todo { color: var(--chart-3, orange); }
-.setup-row-icon.s-partial { color: var(--chart-3, orange); }
+.setup-row-icon.s-todo { color: var(--warning, orange); }
+.setup-row-icon.s-partial { color: var(--warning, orange); }
 .setup-row-icon.s-blocked { color: var(--muted-foreground); }
 .setup-row-icon.s-permissive { color: var(--muted-foreground); }
 .setup-row-main { flex: 1; min-width: 0; }
