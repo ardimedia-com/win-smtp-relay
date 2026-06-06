@@ -37,6 +37,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<DnsSettings> DnsSettings => Set<DnsSettings>();
     public DbSet<HeaderRewriteEntry> HeaderRewriteEntries => Set<HeaderRewriteEntry>();
     public DbSet<SenderRewriteEntry> SenderRewriteEntries => Set<SenderRewriteEntry>();
+    public DbSet<SuppressionEntry> SuppressionEntries => Set<SuppressionEntry>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -296,6 +297,15 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.HasIndex(e => e.SortOrder);
             entity.Property(e => e.FromPattern).HasMaxLength(320);
             entity.Property(e => e.ToAddress).HasMaxLength(320);
+        });
+
+        modelBuilder.Entity<SuppressionEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Address).HasMaxLength(320);
+            entity.Property(e => e.Detail).HasMaxLength(500);
+            // One entry per address per tenant; the delivery worker relies on this for idempotent adds.
+            entity.HasIndex(e => new { e.TenantId, e.Address }).IsUnique();
         });
 
         // Tenant partitioning: every ITenantOwned entity defaults to the Default tenant and

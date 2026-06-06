@@ -36,6 +36,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IStatisticsRetentionSettingsService, StatisticsRetentionSettingsService>();
         services.AddScoped<IDnsSettingsService, DnsSettingsService>();
         services.AddScoped<IMessageFilterService, MessageFilterService>();
+        services.AddScoped<ISuppressionService, SuppressionService>();
 
         // Setup readiness (live checklist) for the current tenant
         services.AddScoped<ITenantReadinessService, TenantReadinessService>();

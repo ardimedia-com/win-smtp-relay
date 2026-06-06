@@ -1,0 +1,73 @@
+@page "/suppressions/new"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject ITenantScopeFactory ScopeFactory
+@inject ICurrentTenant CurrentTenant
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/suppressions">Suppression List</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>Add address</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>Add suppressed address</h1>
+    <p>Manually stop delivery to a recipient. Hard bounces and complaints are added automatically.</p>
+</div>
+
+<div style="max-width:520px;">
+<BbCard>
+    <BbCardContent>
+        <div class="form-group">
+            <BbLabel>Email address</BbLabel>
+            <BbInput @bind-Value="address" Placeholder="recipient@example.com" />
+        </div>
+    </BbCardContent>
+    <BbCardFooter>
+        <div class="flex gap-1 items-center">
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@(!IsValid)">
+                <LucideIcon Name="save" /> Add
+            </BbButton>
+            <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
+            @if (!string.IsNullOrEmpty(statusMessage)) { <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span> }
+        </div>
+    </BbCardFooter>
+</BbCard>
+</div>
+
+@code {
+    private string address = "";
+    private string? statusMessage;
+
+    // Minimal sanity check — a single "@" with non-empty local/domain parts.
+    private bool IsValid
+    {
+        get
+        {
+            var a = address.Trim();
+            var at = a.IndexOf('@');
+            return at > 0 && at < a.Length - 1 && a.LastIndexOf('@') == at;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!IsValid)
+        {
+            statusMessage = "Enter a valid email address.";
+            return;
+        }
+        var tenantId = CurrentTenant.TenantId ?? TenantDefaults.DefaultTenantId;
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ISuppressionService>();
+        await svc.AddAsync(address.Trim(), SuppressionReason.Manual, "Added manually", tenantId);
+        Nav.NavigateTo("/suppressions");
+    }
+
+    private void Cancel() => Nav.NavigateTo("/suppressions");
+}

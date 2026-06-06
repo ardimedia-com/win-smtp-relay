@@ -32,5 +32,7 @@ public enum MessageStatus
     Delivering = 1,
     Delivered = 2,
     Failed = 3,
-    Bounced = 4
+    Bounced = 4,
+    /// <summary>Not sent because every recipient is on the tenant's suppression list. Terminal — not retried.</summary>
+    Suppressed = 5
 }

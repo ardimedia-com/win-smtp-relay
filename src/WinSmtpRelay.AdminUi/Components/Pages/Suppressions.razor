@@ -1,0 +1,115 @@
+@page "/suppressions"
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject ITenantScopeFactory ScopeFactory
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>Suppression List</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header page-header-row">
+    <div>
+        <h1>Suppression List</h1>
+        <p>Recipient addresses this relay will not deliver to. Populated automatically from permanent (hard) bounces and complaints; you can also add addresses manually. Removing an entry re-enables delivery to that address.</p>
+    </div>
+    <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/suppressions/new"))">
+        <LucideIcon Name="plus" /> Add address
+    </BbButton>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[200px] w-full" />
+}
+else
+{
+    <BbTable Data="@rows">
+        <BbTableHeader>
+            <BbTableRow TData="SuppressionEntry">
+                <BbTableHeaderCell TData="SuppressionEntry">Address</BbTableHeaderCell>
+                <BbTableHeaderCell TData="SuppressionEntry">Reason</BbTableHeaderCell>
+                <BbTableHeaderCell TData="SuppressionEntry">Detail</BbTableHeaderCell>
+                <BbTableHeaderCell TData="SuppressionEntry">Added</BbTableHeaderCell>
+                <BbTableHeaderCell TData="SuppressionEntry"></BbTableHeaderCell>
+            </BbTableRow>
+        </BbTableHeader>
+        <BbTableBody>
+            @if (rows.Count == 0)
+            {
+                <BbTableRow TData="SuppressionEntry">
+                    <BbTableCell colspan="5" style="text-align:center;">No suppressed addresses</BbTableCell>
+                </BbTableRow>
+            }
+            @foreach (var e in rows)
+            {
+                <BbTableRow Item="@e">
+                    <BbTableCell><code>@e.Address</code></BbTableCell>
+                    <BbTableCell><span class="badge-status @ReasonCss(e.Reason)">@e.Reason</span></BbTableCell>
+                    <BbTableCell style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@(e.Detail ?? "—")</BbTableCell>
+                    <BbTableCell><LocalTime Utc="@e.CreatedUtc" /></BbTableCell>
+                    <BbTableCell>
+                        <div class="list-row-actions">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Remove (re-enable delivery)"
+                                    @onclick="() => { removeId = e.Id; removeAddress = e.Address; showRemove = true; }">
+                                <LucideIcon Name="trash-2" />
+                            </BbButton>
+                        </div>
+                    </BbTableCell>
+                </BbTableRow>
+            }
+        </BbTableBody>
+    </BbTable>
+}
+
+<BbAlertDialog @bind-Open="showRemove">
+    <BbAlertDialogContent>
+        <BbAlertDialogHeader>
+            <BbAlertDialogTitle>Remove from suppression list</BbAlertDialogTitle>
+            <BbAlertDialogDescription>Delivery to <strong>@removeAddress</strong> will be re-enabled. If the address is still invalid it will simply be re-suppressed on the next hard bounce.</BbAlertDialogDescription>
+        </BbAlertDialogHeader>
+        <BbAlertDialogFooter>
+            <BbAlertDialogCancel><BbButton Variant="ButtonVariant.Outline">Cancel</BbButton></BbAlertDialogCancel>
+            <BbAlertDialogAction><BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmRemoveAsync">Remove</BbButton></BbAlertDialogAction>
+        </BbAlertDialogFooter>
+    </BbAlertDialogContent>
+</BbAlertDialog>
+
+@code {
+    private IReadOnlyList<SuppressionEntry> rows = [];
+    private bool isLoading = true;
+    private bool showRemove;
+    private int removeId;
+    private string? removeAddress;
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ISuppressionService>();
+        rows = await svc.GetAllAsync();
+        isLoading = false;
+    }
+
+    private async Task ConfirmRemoveAsync()
+    {
+        showRemove = false;
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ISuppressionService>();
+        await svc.RemoveAsync(removeId);
+        await RefreshAsync();
+    }
+
+    private static string ReasonCss(SuppressionReason reason) => reason switch
+    {
+        SuppressionReason.HardBounce => "badge-error",
+        SuppressionReason.Complaint => "badge-warning",
+        _ => "badge-muted"
+    };
+}

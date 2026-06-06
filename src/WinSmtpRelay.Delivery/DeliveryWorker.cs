@@ -111,8 +111,40 @@ public class DeliveryWorker(
         var deliveryService = scope.ServiceProvider.GetRequiredService<IDeliveryService>();
         var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
 
+        var suppression = scope.ServiceProvider.GetRequiredService<ISuppressionService>();
+
         try
         {
+            // Suppression: never deliver to addresses on the tenant's suppression list (prior hard bounce
+            // or complaint). Skipped recipients are logged; if every recipient is suppressed the message
+            // is terminal (Suppressed) and not retried. Re-evaluated each attempt against the original
+            // recipient list, so it stays correct across retries.
+            var allRecipients = message.Recipients.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var deliverable = new List<string>();
+            foreach (var r in allRecipients)
+            {
+                if (await suppression.IsSuppressedAsync(r, message.TenantId, cancellationToken))
+                {
+                    await LogDeliveryAsync(db, message.Id, r, "550", "Suppressed: address previously hard-bounced or complained", null, message.TenantId);
+                    _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, r, "550", null, message.TenantId);
+                    logger.LogInformation("Message {MessageId}: recipient {Recipient} skipped (suppressed)", message.MessageId, r);
+                }
+                else
+                {
+                    deliverable.Add(r);
+                }
+            }
+            if (deliverable.Count == 0)
+            {
+                await queue.UpdateStatusAsync(message.Id, MessageStatus.Suppressed, "All recipients suppressed", cancellationToken);
+                _ = activityNotifier.NotifyQueueChangedAsync();
+                logger.LogInformation("Message {MessageId} (id={QueueId}) not sent: all recipients suppressed", message.MessageId, message.Id);
+                return;
+            }
+            // Deliver only to the non-suppressed recipients (local mutation; the persisted row keeps the
+            // original recipients, so a retry re-evaluates suppression from scratch).
+            message.Recipients = string.Join(';', deliverable);
+
             // Run message filters before delivery
             var filters = scope.ServiceProvider.GetServices<IMessageFilter>().OrderBy(f => f.Order);
             var filterContext = new MessageFilterContext
@@ -200,6 +232,12 @@ public class DeliveryWorker(
                     delivered.Add(dr.Recipient);
                 if (delivered.Count != before)
                     await queue.SetDeliveredRecipientsAsync(message.Id, string.Join(';', delivered), cancellationToken);
+
+                // Auto-suppress recipients that got a permanent (5xx) failure. Repeatedly mailing dead
+                // addresses is a primary cause of blocklisting; future messages to them are skipped.
+                foreach (var dr in dex.Results.Where(r => !r.Success && r.StatusCode.StartsWith('5')))
+                    await suppression.AddAsync(dr.Recipient, SuppressionReason.HardBounce,
+                        $"{dr.StatusCode} {dr.StatusMessage}", message.TenantId, cancellationToken);
             }
             else
             {
