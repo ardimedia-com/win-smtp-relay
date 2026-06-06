@@ -158,12 +158,13 @@
                 </BbSidebarGroup>
             </AuthorizeView>
 
-            @* Host-level configuration and operations — not tenant-specific, so shown only in the
-               "All tenants" (host) view. Host administrators only. *@
-            @if (IsHostScope)
-            {
+            @* Host administration — host-wide configuration and operations (not tenant-specific). Gated by
+               the HostAdmin ROLE, so a host administrator sees this group in every scope (alongside the
+               normal / per-tenant groups above), while a tenant admin or viewer never sees it. The pages
+               themselves are independently HostAdmin-gated at their routes. *@
+            <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin" Context="hostAuth">
                 <BbSidebarGroup>
-                    <BbSidebarGroupLabel>Host</BbSidebarGroupLabel>
+                    <BbSidebarGroupLabel>Host administration</BbSidebarGroupLabel>
                     <BbSidebarMenu>
                         <BbSidebarMenuItem>
                             <BbSidebarMenuButton Href="tenants">
@@ -209,7 +210,7 @@
                         </BbSidebarMenuItem>
                     </BbSidebarMenu>
                 </BbSidebarGroup>
-            }
+            </AuthorizeView>
         </BbSidebarContent>
 
         <BbSidebarFooter>
@@ -262,12 +263,11 @@
     [CascadingParameter]
     private Task<AuthenticationState>? AuthState { get; set; }
 
-    // Scope/"mode" for nav visibility:
-    //   IsHostScope   = host admin viewing "All tenants" (host-level config/ops belong here)
-    //   IsTenantScope = a specific tenant is active — a host admin who picked a tenant, or a tenant
-    //                   admin/viewer (always scoped). Per-tenant configuration belongs here.
-    // The two are mutually exclusive: a host admin in "All tenants" has no TenantId; everyone else does.
-    private bool IsHostScope => CurrentTenant.IsHostScope;
+    // Per-tenant nav visibility: the Setup checklist and the per-tenant Configuration group are shown
+    // only when a specific tenant is in scope — a host admin who picked a tenant in the switcher, or a
+    // tenant admin/viewer (who is always scoped to their own tenant). In the "All tenants" (host) view
+    // there is no single tenant to configure, so those groups are hidden. Host administration is gated by
+    // the HostAdmin role instead of scope, so it stays visible to a host admin in every scope.
     private bool IsTenantScope => CurrentTenant.TenantId is not null;
 
     protected override async Task OnInitializedAsync()
