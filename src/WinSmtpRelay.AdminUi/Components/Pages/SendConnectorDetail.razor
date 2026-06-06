@@ -35,6 +35,22 @@ else
 {
     <BbCard>
         <BbCardContent>
+            @if (isBrevo)
+            {
+                <div style="border:1px solid var(--border);border-radius:var(--radius);padding:0.75rem 1rem;background:var(--muted);margin-bottom:1rem;font-size:0.85rem;line-height:1.55;">
+                    <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.35rem;">
+                        <LucideIcon Name="mail-check" Size="16" />
+                        <strong>Brevo smart host</strong>
+                    </div>
+                    <span class="text-muted">
+                        Host, port and TLS are pre-filled. Enter your <strong>Brevo account email</strong> as
+                        <em>Username</em> and a <strong>Brevo SMTP key</strong> as <em>Password</em> (Brevo dashboard →
+                        <em>SMTP &amp; API → SMTP</em>; the SMTP key is not your login password). Set <em>Default</em> to
+                        <em>Yes</em> to route all of this organization's outbound mail through Brevo, or add a Domain Route
+                        for specific sender domains. Free tier: 300 emails/day.
+                    </span>
+                </div>
+            }
             <div class="form-grid">
                 <div class="form-group col-span-full">
                     <BbLabel For="name">Name</BbLabel>
@@ -115,7 +131,12 @@ else
 
 @code {
     [Parameter] public int? Id { get; set; }
+
+    /// <summary>Optional connector template to pre-fill a New connector (e.g. "brevo").</summary>
+    [SupplyParameterFromQuery] public string? Template { get; set; }
+
     private bool IsNew => Id is null;
+    private bool isBrevo;
 
     private bool isLoading = true;
     private bool notFound;
@@ -138,6 +159,17 @@ else
     {
         if (IsNew)
         {
+            if (string.Equals(Template, "brevo", StringComparison.OrdinalIgnoreCase))
+            {
+                // Pre-fill the Brevo smart-host settings; the admin supplies their account email +
+                // SMTP key. Require TLS — Brevo always offers STARTTLS on 587, so enforce encryption.
+                isBrevo = true;
+                name = "Brevo";
+                smartHost = "smtp-relay.brevo.com";
+                port = "587";
+                opportunisticTls = "true";
+                requireTls = "true";
+            }
             isLoading = false;
             return;
         }

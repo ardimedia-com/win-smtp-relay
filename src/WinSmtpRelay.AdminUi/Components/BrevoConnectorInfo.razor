@@ -1,0 +1,56 @@
+@inject NavigationManager Nav
+
+@*
+    Reusable promo / onboarding callout for relaying through Brevo (a free hosted SMTP provider).
+    Renders the "why / account / fees / link" background plus an "Add Brevo Connector" button that
+    opens the New Send Connector form pre-filled for Brevo (?template=brevo). Used on the Send
+    Connectors page (full) and the Setup checklist's Basic section (Compact).
+*@
+
+<div style="border:1px solid var(--border);border-radius:var(--radius);padding:@(Compact ? "0.75rem 1rem" : "1rem 1.25rem");background:var(--muted);">
+    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <LucideIcon Name="mail-check" Size="18" />
+        <strong>Relay through Brevo</strong>
+        <span class="badge-status badge-success">Free: 300 emails/day</span>
+    </div>
+
+    @if (Compact)
+    {
+        <p class="text-muted" style="font-size:0.82rem;margin:0.5rem 0 0.75rem;">
+            No outbound mail server of your own? Relay through <strong>Brevo</strong>, a hosted email
+            service — a free account sends 300 emails/day and Brevo manages the sending IPs and their
+            reputation for you. You'll need a free account and an SMTP key from
+            <a href="https://www.brevo.com" target="_blank" rel="noopener noreferrer">brevo.com</a>.
+        </p>
+    }
+    else
+    {
+        <p class="text-muted" style="font-size:0.875rem;margin:0.5rem 0 0.5rem;">
+            No outbound mail server of your own? Relay through <strong>Brevo</strong> (a hosted email
+            service). Brevo manages the sending IPs and their reputation, so your messages reach the inbox
+            without you running an outbound MX server or risking your own IP getting blocklisted.
+        </p>
+        <ul class="text-muted" style="font-size:0.85rem;margin:0 0 0.75rem;padding-left:1.25rem;line-height:1.6;">
+            <li><strong>Account needed:</strong> a free account at
+                <a href="https://www.brevo.com" target="_blank" rel="noopener noreferrer">brevo.com</a>.
+                After signing in, create an <strong>SMTP key</strong> under <em>SMTP &amp; API → SMTP</em>
+                (this is the password — not your login password).</li>
+            <li><strong>Fees:</strong> the free tier sends <strong>300 emails/day</strong> (shared across
+                the whole Brevo account). Paid plans add higher volume and an optional dedicated IP —
+                see <a href="https://www.brevo.com/pricing/" target="_blank" rel="noopener noreferrer">Brevo pricing</a>.</li>
+            <li><strong>Deliverability:</strong> authenticate your sender domain (SPF/DKIM) in Brevo — the
+                <a href="/deliverability">Deliverability</a> page shows the records to publish.</li>
+        </ul>
+    }
+
+    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="AddBrevo">
+        <LucideIcon Name="mail-check" /> Add Brevo Connector
+    </BbButton>
+</div>
+
+@code {
+    /// <summary>Render a shorter single-paragraph version (for the Setup checklist).</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    private void AddBrevo() => Nav.NavigateTo("/connectors/send/new?template=brevo");
+}

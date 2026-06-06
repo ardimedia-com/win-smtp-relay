@@ -40,6 +40,9 @@
     </BbTabsList>
 
     <BbTabsContent Value="connectors">
+        <div style="margin-bottom:1rem;">
+            <BrevoConnectorInfo />
+        </div>
         @if (isLoading)
         {
             <BbSkeleton Class="h-[300px] w-full" />
