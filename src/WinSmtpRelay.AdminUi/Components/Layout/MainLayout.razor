@@ -33,7 +33,8 @@
                             <span>Live Activity</span>
                         </BbSidebarMenuButton>
                     </BbSidebarMenuItem>
-                    @* Setup is a per-tenant onboarding checklist — only meaningful for a specific tenant. *@
+                    @* Setup and Deliverability are per-tenant — shown only when a specific tenant is in
+                       scope. The "All tenants" overview omits them; select a tenant to see them. *@
                     @if (IsTenantScope)
                     {
                         <BbSidebarMenuItem>
@@ -42,13 +43,13 @@
                                 <span>Setup</span>
                             </BbSidebarMenuButton>
                         </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="deliverability">
+                                <LucideIcon Name="mail-check" />
+                                <span>Deliverability</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
                     }
-                    <BbSidebarMenuItem>
-                        <BbSidebarMenuButton Href="deliverability">
-                            <LucideIcon Name="mail-check" />
-                            <span>Deliverability</span>
-                        </BbSidebarMenuButton>
-                    </BbSidebarMenuItem>
                 </BbSidebarMenu>
             </BbSidebarGroup>
 
@@ -136,8 +137,9 @@
                 </AuthorizeView>
             }
 
-            @* Account & access management — full admins only; meaningful in either scope (host admins
-               and host-level keys in host scope; the selected tenant's admins and keys in tenant scope). *@
+            @* Account & access management — full admins only. Admin Users is meaningful in both scopes
+               (host administrators in the "All tenants" overview; the selected tenant's admins in a tenant
+               scope). API keys are per-tenant, so they appear only when a specific tenant is selected. *@
             <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="acctAuth">
                 <BbSidebarGroup>
                     <BbSidebarGroupLabel>Accounts</BbSidebarGroupLabel>
@@ -148,30 +150,29 @@
                                 <span>Admin Users</span>
                             </BbSidebarMenuButton>
                         </BbSidebarMenuItem>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="apikeys">
-                                <LucideIcon Name="key-round" />
-                                <span>API Keys</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
+                        @if (IsTenantScope)
+                        {
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="apikeys">
+                                    <LucideIcon Name="key-round" />
+                                    <span>API Keys</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                        }
                     </BbSidebarMenu>
                 </BbSidebarGroup>
             </AuthorizeView>
 
-            @* Host administration — host-wide configuration and operations (not tenant-specific). Gated by
-               the HostAdmin ROLE, so a host administrator sees this group in every scope (alongside the
-               normal / per-tenant groups above), while a tenant admin or viewer never sees it. The pages
-               themselves are independently HostAdmin-gated at their routes. *@
-            <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin" Context="hostAuth">
+            @* Server configuration — host-wide settings (one set for the whole server, not per-tenant).
+               Shown in a tenant scope and only to the HostAdmin role, so a tenant admin/viewer never sees
+               them. They apply server-wide regardless of which tenant is selected; the pages are also
+               HostAdmin-gated at their routes. *@
+            @if (IsTenantScope)
+            {
+                <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin" Context="srvAuth">
                 <BbSidebarGroup>
-                    <BbSidebarGroupLabel>Host administration</BbSidebarGroupLabel>
+                    <BbSidebarGroupLabel>Server</BbSidebarGroupLabel>
                     <BbSidebarMenu>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="tenants">
-                                <LucideIcon Name="building-2" />
-                                <span>Tenants</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
                         <BbSidebarMenuItem>
                             <BbSidebarMenuButton Href="settings">
                                 <LucideIcon Name="settings" />
@@ -196,6 +197,25 @@
                                 <span>Startup Config</span>
                             </BbSidebarMenuButton>
                         </BbSidebarMenuItem>
+                    </BbSidebarMenu>
+                </BbSidebarGroup>
+                </AuthorizeView>
+            }
+
+            @* Host overview & operations — consolidated across all tenants. Shown only in the "All tenants"
+               (host) scope, which only a host administrator can enter (the tenant switcher is host-only).
+               Selecting a specific tenant switches to that tenant's configuration view instead. *@
+            @if (IsHostScope)
+            {
+                <BbSidebarGroup>
+                    <BbSidebarGroupLabel>Host</BbSidebarGroupLabel>
+                    <BbSidebarMenu>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="tenants">
+                                <LucideIcon Name="building-2" />
+                                <span>Tenants</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
                         <BbSidebarMenuItem>
                             <BbSidebarMenuButton Href="logs">
                                 <LucideIcon Name="file-text" />
@@ -210,7 +230,7 @@
                         </BbSidebarMenuItem>
                     </BbSidebarMenu>
                 </BbSidebarGroup>
-            </AuthorizeView>
+            }
         </BbSidebarContent>
 
         <BbSidebarFooter>
@@ -263,11 +283,17 @@
     [CascadingParameter]
     private Task<AuthenticationState>? AuthState { get; set; }
 
-    // Per-tenant nav visibility: the Setup checklist and the per-tenant Configuration group are shown
-    // only when a specific tenant is in scope — a host admin who picked a tenant in the switcher, or a
-    // tenant admin/viewer (who is always scoped to their own tenant). In the "All tenants" (host) view
-    // there is no single tenant to configure, so those groups are hidden. Host administration is gated by
-    // the HostAdmin role instead of scope, so it stays visible to a host admin in every scope.
+    // Nav visibility is driven by scope (the tenant switcher, which is host-admin-only):
+    //   IsHostScope   = the "All tenants" overview — a consolidated, cross-tenant cockpit: monitoring
+    //                   (Dashboard, Live Activity, Queue, Journal) plus host operations (Admin Users,
+    //                   Tenants, Event Log, Update). Only a host admin can enter it.
+    //   IsTenantScope = a specific tenant is selected (a host admin who picked one, or a tenant
+    //                   admin/viewer, who is always scoped to their own tenant). This is the
+    //                   "configuration" view: that tenant's Setup/Deliverability/Configuration/API keys,
+    //                   plus — for a host admin only — the server-wide Server group.
+    // The two are mutually exclusive. Host-only items (Server group, Host group) are additionally
+    // HostAdmin-gated by role, so a tenant admin/viewer never sees them even within a tenant scope.
+    private bool IsHostScope => CurrentTenant.IsHostScope;
     private bool IsTenantScope => CurrentTenant.TenantId is not null;
 
     protected override async Task OnInitializedAsync()
