@@ -78,8 +78,8 @@ public class DkimKeyProtectionTests
     [TestCategory("Unit")]
     public void Protect_NullOrEmpty_ReturnedUnchanged()
     {
-        Assert.IsNull(DkimKeyProtector.Protect(null));
-        Assert.AreEqual("", DkimKeyProtector.Protect(""));
+        Assert.IsNull(SecretProtector.Protect(null));
+        Assert.AreEqual("", SecretProtector.Protect(""));
     }
 
     [TestMethod]
@@ -88,7 +88,7 @@ public class DkimKeyProtectionTests
     {
         // No marker -> treated as pre-existing plaintext and returned verbatim (lazy migration).
         const string legacy = "-----BEGIN PRIVATE KEY-----\nLEGACY\n-----END PRIVATE KEY-----\n";
-        Assert.AreEqual(legacy, DkimKeyProtector.Unprotect(legacy));
+        Assert.AreEqual(legacy, SecretProtector.Unprotect(legacy));
     }
 
     [TestMethod]
@@ -102,11 +102,11 @@ public class DkimKeyProtectionTests
         }
 
         const string pem = "-----BEGIN PRIVATE KEY-----\nROUNDTRIP\n-----END PRIVATE KEY-----\n";
-        var protectedValue = DkimKeyProtector.Protect(pem);
+        var protectedValue = SecretProtector.Protect(pem);
 
         Assert.IsNotNull(protectedValue);
         Assert.IsTrue(protectedValue!.StartsWith("dpapi:", StringComparison.Ordinal));
         Assert.AreNotEqual(pem, protectedValue);
-        Assert.AreEqual(pem, DkimKeyProtector.Unprotect(protectedValue));
+        Assert.AreEqual(pem, SecretProtector.Unprotect(protectedValue));
     }
 }

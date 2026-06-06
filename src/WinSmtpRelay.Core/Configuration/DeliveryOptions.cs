@@ -12,6 +12,10 @@ public class DeliveryOptions
     public string? SmartHostUsername { get; set; }
     public string? SmartHostPassword { get; set; }
     public bool OpportunisticTls { get; set; } = true;
+
+    /// When true, delivery via the global smart host requires TLS (mandatory STARTTLS) and fails if the
+    /// server will not negotiate it. Does not apply to direct-MX delivery, which stays opportunistic.
+    public bool RequireTls { get; set; } = false;
     public int ConnectTimeoutSeconds { get; set; } = 30;
 
     /// Per-domain routing: domain pattern to upstream relay config.

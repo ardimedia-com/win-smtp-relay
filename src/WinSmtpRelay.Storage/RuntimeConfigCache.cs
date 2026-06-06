@@ -25,6 +25,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
     private volatile IReadOnlyDictionary<string, int>? _recipientDomainOwners;
     private volatile IReadOnlyList<IpAccessRule>? _ipAccessRules;
     private volatile IReadOnlyList<DomainRoute>? _domainRoutes;
+    private volatile IReadOnlyDictionary<int, SendConnector>? _defaultConnectors;
     private volatile IReadOnlyList<HeaderRewriteEntry>? _headerRewriteRules;
     private volatile IReadOnlyList<SenderRewriteEntry>? _senderRewriteRules;
     private volatile IReadOnlySet<int>? _enabledTenants;
@@ -390,6 +391,44 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         }
     }
 
+    public async Task<SendConnector?> GetDefaultConnectorAsync(int tenantId, CancellationToken ct = default)
+    {
+        var map = _defaultConnectors;
+        if (map is null)
+        {
+            await _lock.WaitAsync(ct);
+            try
+            {
+                if (_defaultConnectors is null)
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+                    var connectors = await db.SendConnectors
+                        .AsNoTracking()
+                        .Where(c => c.IsDefault && c.IsEnabled)
+                        .OrderBy(c => c.Id)
+                        .ToListAsync(ct);
+
+                    // One default per tenant — first by Id wins if a tenant flagged several as default.
+                    // (The smart-host password is decrypted transparently by the EF value converter.)
+                    var dict = new Dictionary<int, SendConnector>();
+                    foreach (var c in connectors)
+                        dict.TryAdd(c.TenantId, c);
+
+                    _defaultConnectors = dict;
+                    _logger.LogDebug("Loaded {Count} default send connector(s) into cache", dict.Count);
+                }
+                map = _defaultConnectors;
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        return map.TryGetValue(tenantId, out var connector) ? connector : null;
+    }
+
     public async Task<IReadOnlyList<HeaderRewriteEntry>> GetHeaderRewriteRulesAsync(CancellationToken ct = default)
     {
         if (_headerRewriteRules is { } cached)
@@ -458,6 +497,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
         _recipientDomainOwners = null;
         _ipAccessRules = null;
         _domainRoutes = null;
+        _defaultConnectors = null;
         _headerRewriteRules = null;
         _senderRewriteRules = null;
         _enabledTenants = null;

@@ -42,6 +42,12 @@ public interface IRuntimeConfigCache
     Task<BackupMxSettings> GetBackupMxSettingsAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default);
+
+    /// <summary>The tenant's enabled "default" send connector, used as the routing fallback when no
+    /// domain route matches (checked before the appsettings global smart host). Null if the tenant has
+    /// no enabled default connector.</summary>
+    Task<SendConnector?> GetDefaultConnectorAsync(int tenantId, CancellationToken ct = default);
+
     Task<IReadOnlyList<HeaderRewriteEntry>> GetHeaderRewriteRulesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<SenderRewriteEntry>> GetSenderRewriteRulesAsync(CancellationToken ct = default);
 

@@ -73,6 +73,11 @@ internal class StubRuntimeConfigCache : IRuntimeConfigCache
     public Task<IReadOnlyList<DomainRoute>> GetDomainRoutesAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<DomainRoute>>(DomainRoutes);
 
+    public Dictionary<int, SendConnector> DefaultConnectors { get; set; } = new();
+
+    public Task<SendConnector?> GetDefaultConnectorAsync(int tenantId, CancellationToken ct = default)
+        => Task.FromResult(DefaultConnectors.TryGetValue(tenantId, out var c) ? c : null);
+
     public Task<IReadOnlyList<HeaderRewriteEntry>> GetHeaderRewriteRulesAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<HeaderRewriteEntry>>(HeaderRewriteRules);
 

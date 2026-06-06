@@ -4,10 +4,12 @@ using System.Text;
 namespace WinSmtpRelay.Storage;
 
 /// <summary>
-/// Protects DKIM RSA private keys at rest using Windows DPAPI
-/// (<see cref="ProtectedData"/>, <see cref="DataProtectionScope.LocalMachine"/>), so the key material
-/// is not stored as plaintext PEM in the SQLite database. Applied transparently via an EF value
-/// converter on <c>DkimDomain.PrivateKeyPem</c>.
+/// Protects secrets at rest using Windows DPAPI
+/// (<see cref="ProtectedData"/>, <see cref="DataProtectionScope.LocalMachine"/>), so credential
+/// material is not stored as plaintext in the SQLite database. Applied transparently via EF value
+/// converters — currently on <c>DkimDomain.PrivateKeyPem</c> (the RSA signing key) and
+/// <c>SendConnector.EncryptedPassword</c> (the upstream smart-host / submission password, e.g. a Brevo
+/// SMTP key). Callers read and write decrypted plaintext; encryption happens only at the storage edge.
 ///
 /// Encrypted values are stored as <c>dpapi:&lt;base64&gt;</c>. The marker lets reads distinguish
 /// encrypted values from pre-existing plaintext rows: legacy plaintext (no marker, or anything that
@@ -18,7 +20,7 @@ namespace WinSmtpRelay.Storage;
 /// <see cref="PlatformNotSupportedException"/> on non-Windows — acceptable because the relay only runs
 /// on Windows.
 /// </summary>
-public static class DkimKeyProtector
+public static class SecretProtector
 {
     /// <summary>Marker prefix on stored values that have been DPAPI-encrypted.</summary>
     private const string Marker = "dpapi:";
@@ -26,12 +28,14 @@ public static class DkimKeyProtector
     /// <summary>
     /// Fixed application entropy mixed into the DPAPI ciphertext. Not a secret (it ships in the binary),
     /// but it scopes the protection to this application so unrelated LocalMachine-protected blobs can't
-    /// be cross-decrypted.
+    /// be cross-decrypted. The literal value is HISTORICAL and must not change: existing rows (DKIM keys
+    /// first protected under this name) were encrypted with these exact bytes, and altering them would
+    /// make those rows undecryptable.
     /// </summary>
     private static readonly byte[] Entropy = "WinSmtpRelay.Dkim.PrivateKey.v1"u8.ToArray();
 
     /// <summary>
-    /// Encrypts a plaintext PEM private key for storage. Null/empty is returned unchanged.
+    /// Encrypts a plaintext secret for storage. Null/empty is returned unchanged.
     /// The result is <c>dpapi:&lt;base64&gt;</c>.
     /// </summary>
     public static string? Protect(string? plaintext)
@@ -47,9 +51,9 @@ public static class DkimKeyProtector
     }
 
     /// <summary>
-    /// Decrypts a stored value back to the plaintext PEM. Null/empty is returned unchanged. Values
-    /// without the <c>dpapi:</c> marker — or any value that fails to decrypt — are returned unchanged
-    /// (graceful lazy migration of pre-existing plaintext rows, which get re-encrypted on next save).
+    /// Decrypts a stored value back to plaintext. Null/empty is returned unchanged. Values without the
+    /// <c>dpapi:</c> marker — or any value that fails to decrypt — are returned unchanged (graceful lazy
+    /// migration of pre-existing plaintext rows, which get re-encrypted on next save).
     /// </summary>
     public static string? Unprotect(string? stored)
     {
@@ -66,7 +70,7 @@ public static class DkimKeyProtector
         }
         catch
         {
-            // Corrupt/undecryptable value: fail open to the stored text rather than losing the key.
+            // Corrupt/undecryptable value: fail open to the stored text rather than losing the secret.
             return stored;
         }
     }

@@ -110,26 +110,43 @@ public class SmtpDeliveryService : IDeliveryService
                 mimeMessage, sender, recipients,
                 connector.SmartHost ?? "", connector.SmartHostPort,
                 connector.Username, connector.EncryptedPassword,
-                connector.OpportunisticTls,
+                connector.OpportunisticTls, connector.RequireTls,
                 connector.ConnectTimeoutSeconds,
                 egressEndPoint,
                 cancellationToken);
         }
 
-        // 2. Global smart host
+        // 2. The tenant's default send connector (a connector flagged "Default" for this tenant), if it
+        // routes through a smart host. A direct-MX default connector falls through to direct MX below.
+        var defaultConnector = await _configCache.GetDefaultConnectorAsync(tenantId, cancellationToken);
+        if (defaultConnector is { SmartHost: { Length: > 0 } smartHost })
+        {
+            _logger.LogDebug("Using default connector {Connector} for domain {Domain}",
+                defaultConnector.Name, domain);
+            return await SendViaSmtpAsync(
+                mimeMessage, sender, recipients,
+                smartHost, defaultConnector.SmartHostPort,
+                defaultConnector.Username, defaultConnector.EncryptedPassword,
+                defaultConnector.OpportunisticTls, defaultConnector.RequireTls,
+                defaultConnector.ConnectTimeoutSeconds,
+                egressEndPoint,
+                cancellationToken);
+        }
+
+        // 3. Global smart host (appsettings)
         if (!string.IsNullOrWhiteSpace(_config.SmartHost))
         {
             return await SendViaSmtpAsync(
                 mimeMessage, sender, recipients,
                 _config.SmartHost, _config.SmartHostPort,
                 _config.SmartHostUsername, _config.SmartHostPassword,
-                _config.OpportunisticTls,
+                _config.OpportunisticTls, _config.RequireTls,
                 _config.ConnectTimeoutSeconds,
                 egressEndPoint,
                 cancellationToken);
         }
 
-        // 3. Direct MX delivery
+        // 4. Direct MX delivery
         var mxHosts = await _mxResolver.ResolveMxAsync(domain, cancellationToken);
 
         Exception? lastException = null;
@@ -138,7 +155,7 @@ public class SmtpDeliveryService : IDeliveryService
             try
             {
                 return await SendViaSmtpAsync(mimeMessage, sender, recipients, mxHost, 25, null, null,
-                    _config.OpportunisticTls, _config.ConnectTimeoutSeconds, egressEndPoint, cancellationToken);
+                    _config.OpportunisticTls, requireTls: false, _config.ConnectTimeoutSeconds, egressEndPoint, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -188,6 +205,19 @@ public class SmtpDeliveryService : IDeliveryService
             : null;
     }
 
+    /// <summary>
+    /// Maps a connector's TLS flags to a MailKit transport option. <c>requireTls</c> enforces
+    /// encryption (mandatory STARTTLS — MailKit fails the connection if the server won't negotiate TLS)
+    /// and takes precedence; <c>opportunisticTls</c> upgrades to STARTTLS only when the server offers it;
+    /// neither flag means an unencrypted connection. (Implicit TLS / port 465 is not handled — submission
+    /// via STARTTLS on 587 is the supported smart-host path; direct-MX delivery always stays
+    /// opportunistic so it can still reach MX hosts that offer no TLS.)
+    /// </summary>
+    internal static SecureSocketOptions ResolveTlsOption(bool opportunisticTls, bool requireTls) =>
+        requireTls ? SecureSocketOptions.StartTls
+        : opportunisticTls ? SecureSocketOptions.StartTlsWhenAvailable
+        : SecureSocketOptions.None;
+
     internal async Task<DomainRoute?> FindDomainRouteAsync(string domain, int tenantId, CancellationToken ct = default)
     {
         var routes = await _configCache.GetDomainRoutesAsync(ct);
@@ -222,6 +252,7 @@ public class SmtpDeliveryService : IDeliveryService
         string? username,
         string? password,
         bool opportunisticTls,
+        bool requireTls,
         int connectTimeoutSeconds,
         IPEndPoint? egressEndPoint,
         CancellationToken cancellationToken)
@@ -236,9 +267,7 @@ public class SmtpDeliveryService : IDeliveryService
             _logger.LogDebug("Binding outbound delivery to source IP {EgressIp}", egressEndPoint.Address);
         }
 
-        var tlsOption = opportunisticTls
-            ? SecureSocketOptions.StartTlsWhenAvailable
-            : SecureSocketOptions.None;
+        var tlsOption = ResolveTlsOption(opportunisticTls, requireTls);
 
         _logger.LogDebug("Connecting to {Host}:{Port} (TLS={TlsOption}, Timeout={Timeout}s)",
             host, port, tlsOption, connectTimeoutSeconds);

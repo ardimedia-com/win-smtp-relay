@@ -464,13 +464,13 @@ public static class AdminEndpoints
         var ep = group.MapGroup("/connectors/send");
 
         ep.MapGet("/", async (ISendConnectorService svc, CancellationToken ct) =>
-            Results.Ok(await svc.GetAllAsync(ct)));
+            Results.Ok((await svc.GetAllAsync(ct)).Select(SendConnectorSummary.From)));
 
         ep.MapPost("/", async (SendConnector connector, ISendConnectorService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
             var created = await svc.CreateAsync(connector, ct);
             cache.Invalidate();
-            return Results.Created($"/api/connectors/send/{created.Id}", created);
+            return Results.Created($"/api/connectors/send/{created.Id}", SendConnectorSummary.From(created));
         });
 
         ep.MapPut("/{id:int}", async (int id, SendConnector connector, ISendConnectorService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
@@ -494,13 +494,13 @@ public static class AdminEndpoints
         var ep = group.MapGroup("/routes");
 
         ep.MapGet("/", async (IDomainRouteService svc, CancellationToken ct) =>
-            Results.Ok(await svc.GetAllAsync(ct)));
+            Results.Ok((await svc.GetAllAsync(ct)).Select(DomainRouteSummary.From)));
 
         ep.MapPost("/", async (DomainRoute route, IDomainRouteService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
             var created = await svc.CreateAsync(route, ct);
             cache.Invalidate();
-            return Results.Created($"/api/routes/{created.Id}", created);
+            return Results.Created($"/api/routes/{created.Id}", DomainRouteSummary.From(created));
         });
 
         ep.MapPut("/{id:int}", async (int id, DomainRoute route, IDomainRouteService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
@@ -660,6 +660,35 @@ public record DkimDomainSummary(
         d.Id, d.TenantId, d.Domain, d.Selector, d.IsEnabled,
         !string.IsNullOrEmpty(d.PrivateKeyPem) || !string.IsNullOrEmpty(d.PrivateKeyPath),
         d.CreatedUtc);
+}
+
+/// <summary>
+/// Safe projection of a <see cref="SendConnector"/> for API responses. Deliberately omits the upstream
+/// smart-host password (e.g. a Brevo SMTP key) — the connector's only secret — exposing only whether
+/// one is configured via <see cref="HasPassword"/>.
+/// </summary>
+public record SendConnectorSummary(
+    int Id, int TenantId, string Name, string? SmartHost, int SmartHostPort, string? Username,
+    bool HasPassword, bool OpportunisticTls, bool RequireTls, bool IsDefault,
+    int MaxConcurrentDeliveries, int MaxRetryHours, string RetryIntervalsMinutes,
+    int ConnectTimeoutSeconds, bool IsEnabled, DateTimeOffset CreatedUtc)
+{
+    public static SendConnectorSummary From(SendConnector c) => new(
+        c.Id, c.TenantId, c.Name, c.SmartHost, c.SmartHostPort, c.Username,
+        !string.IsNullOrEmpty(c.EncryptedPassword), c.OpportunisticTls, c.RequireTls, c.IsDefault,
+        c.MaxConcurrentDeliveries, c.MaxRetryHours, c.RetryIntervalsMinutes,
+        c.ConnectTimeoutSeconds, c.IsEnabled, c.CreatedUtc);
+}
+
+/// <summary>Safe projection of a <see cref="DomainRoute"/> — embeds the password-free connector summary
+/// so the route listing cannot leak the smart-host credential through its navigation property.</summary>
+public record DomainRouteSummary(
+    int Id, int TenantId, string DomainPattern, int SendConnectorId, int SortOrder,
+    SendConnectorSummary? SendConnector)
+{
+    public static DomainRouteSummary From(DomainRoute r) => new(
+        r.Id, r.TenantId, r.DomainPattern, r.SendConnectorId, r.SortOrder,
+        r.SendConnector is null ? null : SendConnectorSummary.From(r.SendConnector));
 }
 
 public record DeliveryLogSummary(

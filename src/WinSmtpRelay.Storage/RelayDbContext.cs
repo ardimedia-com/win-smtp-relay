@@ -173,6 +173,11 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.Property(e => e.SmartHost).HasMaxLength(255);
             entity.Property(e => e.Username).HasMaxLength(255);
             entity.Property(e => e.RetryIntervalsMinutes).HasMaxLength(100);
+            // Encrypt the upstream smart-host / submission password at rest via DPAPI (the same protector
+            // as the DKIM key). Transparent converter: callers read/write the decrypted password; the
+            // column stays TEXT, so no schema migration is required. See SecretProtector.
+            entity.Property(e => e.EncryptedPassword)
+                .HasConversion(v => SecretProtector.Protect(v), v => SecretProtector.Unprotect(v));
         });
 
         modelBuilder.Entity<DomainRoute>(entity =>
@@ -193,12 +198,12 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.Property(e => e.Domain).HasMaxLength(255);
             entity.Property(e => e.Selector).HasMaxLength(100);
             entity.Property(e => e.PrivateKeyPath).HasMaxLength(500);
-            // Encrypt the RSA private key at rest via Windows DPAPI (the only secret that was stored as
-            // plaintext). The converter is transparent: callers read/write decrypted PEM. Pre-existing
-            // plaintext rows are read back unchanged and re-encrypted on their next save. The column stays
-            // TEXT, so no schema migration is required. See DkimKeyProtector.
+            // Encrypt the RSA private key at rest via Windows DPAPI. The converter is transparent:
+            // callers read/write decrypted PEM. Pre-existing plaintext rows are read back unchanged and
+            // re-encrypted on their next save. The column stays TEXT, so no schema migration is required.
+            // See SecretProtector (shared with the smart-host password).
             entity.Property(e => e.PrivateKeyPem)
-                .HasConversion(v => DkimKeyProtector.Protect(v), v => DkimKeyProtector.Unprotect(v));
+                .HasConversion(v => SecretProtector.Protect(v), v => SecretProtector.Unprotect(v));
         });
 
         modelBuilder.Entity<RateLimitSettings>(entity =>
