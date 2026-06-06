@@ -1,6 +1,7 @@
 @page "/logs"
 @using System.Diagnostics.Eventing.Reader
 @using Microsoft.JSInterop
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IJSRuntime JS
 
 <BbBreadcrumb>
@@ -70,6 +71,16 @@
     </div>
 </div>
 
+@if (isLoading)
+{
+    <div class="text-muted" style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
+        <span class="spin" style="display:inline-flex;"><LucideIcon Name="loader-circle" Size="16" /></span>
+        <span>Reading the Windows Event Log…</span>
+    </div>
+    <BbSkeleton Class="h-[320px] w-full" />
+}
+else
+{
 <BbTable Data="@visibleEntries">
     <BbTableHeader>
         <BbTableRow TData="LogEntry">
@@ -117,6 +128,7 @@
         }
     </BbTableBody>
 </BbTable>
+}
 
 <BbDialog Open="@(selectedEntry is not null)" OpenChanged="@(open => { if (!open) selectedEntry = null; })">
     <BbDialogContent>
@@ -192,6 +204,7 @@
     private const string ShowHandledKey = "winsmtprelay-log-show-handled";
 
     private bool showHelp;
+    private bool isLoading = true;
     private List<LogEntry> logEntries = [];
     private string selectedLevel = "";
     private string searchText = "WinSmtpRelay";
@@ -204,12 +217,9 @@
     private List<LogEntry> visibleEntries = [];
     private LogEntry? selectedEntry;
 
-    protected override void OnInitialized()
-    {
-        LoadLogs();
-        UpdateVisibleEntries();
-    }
-
+    // The Windows Event Log read is synchronous and can take several seconds. Defer it until after the
+    // first paint (and run it off the circuit thread) so the page shows immediately with a loading
+    // indicator instead of blocking the initial render.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -217,9 +227,23 @@
         await ReadWatermark();
         var showHandledStr = await JS.InvokeAsync<string?>("localStorage.getItem", ShowHandledKey);
         showHandled = showHandledStr == "true";
+        await LoadLogsAsync();
+    }
+
+    private async Task LoadLogsAsync()
+    {
+        isLoading = true;
+        await InvokeAsync(StateHasChanged);
+
+        // Offload the blocking EventLogReader scan to a thread-pool thread so the circuit stays responsive.
+        await Task.Run(LoadLogs);
+
         UpdateUnhandledCount();
         UpdateVisibleEntries();
-        StateHasChanged();
+        isLoading = false;
+        try { await InvokeAsync(StateHasChanged); }
+        catch (ObjectDisposedException) { /* circuit gone while the log read was in flight */ }
+        catch (OperationCanceledException) { /* circuit gone while the log read was in flight */ }
     }
 
     private async Task ReadWatermark()
@@ -265,21 +289,19 @@
     private async Task OnLevelChanged(string value)
     {
         selectedLevel = value;
-        await RefreshLogs();
+        await LoadLogsAsync();
     }
 
     private async Task OnMaxEntriesChanged(string value)
     {
         maxEntriesStr = value;
-        await RefreshLogs();
+        await LoadLogsAsync();
     }
 
     private async Task RefreshLogs()
     {
-        LoadLogs();
         await ReadWatermark();
-        UpdateUnhandledCount();
-        UpdateVisibleEntries();
+        await LoadLogsAsync();
     }
 
     private void LoadLogs()
