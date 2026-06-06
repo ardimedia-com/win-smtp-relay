@@ -2,6 +2,7 @@
 @page "/domains/{Id:int}"
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
+@attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
 @inject IRuntimeConfigCache ConfigCache
 @inject IDnsSetupService DnsSetup

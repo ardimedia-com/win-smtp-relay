@@ -72,8 +72,11 @@
 
             @* Per-tenant configuration — only meaningful when a specific tenant is in scope. In the
                "All tenants" (host) view these are hidden; select a tenant in the switcher to manage them. *@
+            @* Per-tenant configuration is write-capable, so it is gated to AdminFull (read-only
+               TenantViewers see the monitoring groups only; the detail pages enforce the same policy). *@
             @if (IsTenantScope)
             {
+                <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="cfgAuth">
                 <BbSidebarGroup>
                     <BbSidebarGroupLabel>Configuration</BbSidebarGroupLabel>
                     <BbSidebarMenu>
@@ -130,6 +133,7 @@
                         </BbSidebarMenuItem>
                     </BbSidebarMenu>
                 </BbSidebarGroup>
+                </AuthorizeView>
             }
 
             @* Account & access management — full admins only; meaningful in either scope (host admins

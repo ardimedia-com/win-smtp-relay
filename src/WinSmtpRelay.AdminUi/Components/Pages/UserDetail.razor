@@ -3,7 +3,9 @@
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
+@inject ICurrentTenant CurrentTenant
 @inject NavigationManager Nav
 
 <BbBreadcrumb>
@@ -138,8 +140,12 @@ else
         if (IsNew)
         {
             var svc = scope.ServiceProvider.GetRequiredService<IUserService>();
+            // Scope the duplicate check and the post-create lookup to the active tenant — a username is
+            // unique only per tenant, so an un-qualified check would over-reject across tenants (and in
+            // host scope the ambient filter is a no-op).
+            var tenantId = CurrentTenant.TenantId ?? TenantDefaults.DefaultTenantId;
 
-            var existing = await svc.GetByUsernameAsync(username);
+            var existing = await svc.GetByUsernameAsync(username, tenantId);
             if (existing is not null)
             {
                 statusMessage = $"User '{username}' already exists";
@@ -150,7 +156,7 @@ else
 
             // Apply the per-user policy fields the create service does not set.
             var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
-            var created = await db.RelayUsers.FirstOrDefaultAsync(u => u.Username == username);
+            var created = await db.RelayUsers.FirstOrDefaultAsync(u => u.Username == username && u.TenantId == tenantId);
             if (created is not null)
             {
                 created.IsEnabled = enabled == "true";
