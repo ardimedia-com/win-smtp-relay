@@ -21,7 +21,7 @@
         <p>The DNS your domains and sending IPs need so mail is trusted and delivered — SPF, DKIM, DMARC, MX, reverse DNS, and the public hostname. Status reflects live DNS; publish the expected values at your provider and Re-check.</p>
     </div>
     <div class="flex gap-1 items-center">
-        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="RefreshAsync" Disabled="@isLoading">
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" Class="nowrap" @onclick="RefreshAsync" Disabled="@isLoading">
             <LucideIcon Name="refresh-cw" /> Re-check all
         </BbButton>
         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
@@ -82,6 +82,14 @@ else
                             </div>
                         }
                     </div>
+                }
+                @if (!string.IsNullOrEmpty(g.ActionHref))
+                {
+                    <a href="@g.ActionHref" style="text-decoration:none;display:inline-block;margin-top:0.5rem;">
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small">
+                            <LucideIcon Name="arrow-right" /> @g.ActionLabel
+                        </BbButton>
+                    </a>
                 }
             </BbCardContent>
         </BbCard>;
@@ -215,7 +223,7 @@ else
 </BbDialog>
 
 @code {
-    private record CheckGroup(string Title, string? Subtitle, List<DnsRecordResult> Records);
+    private record CheckGroup(string Title, string? Subtitle, List<DnsRecordResult> Records, string? ActionHref = null, string? ActionLabel = null);
     private record DomainCandidate(string Domain, string Source);
 
     // Deep-linkable tab, e.g. /health?tab=dns.
@@ -300,10 +308,14 @@ else
 
             // Detected outbound IP vs the configured sending IPs — flags a stale config when this server's
             // public IP has changed (e.g. a dynamic ISP address), which the per-IP checks below cannot show
-            // because they only validate whatever is configured.
+            // because they only validate whatever is configured. On a problem, link to the settings section.
+            var outboundCheck = BuildOutboundIpCheck(await IpDetector.DetectAsync(ct), sendingIps);
+            var outboundIssue = outboundCheck.Status is DnsRecordStatus.Mismatch or DnsRecordStatus.NotConfigured;
             outboundIpGroup = new CheckGroup("Outbound IP",
                 "What this server actually sends from, compared with your configured sending IPs",
-                [BuildOutboundIpCheck(await IpDetector.DetectAsync(ct), sendingIps)]);
+                [outboundCheck],
+                outboundIssue ? "/settings?tab=dns" : null,
+                outboundIssue ? "Update sending IPs in Settings" : null);
 
             hostnameGroup = new CheckGroup(
                 string.IsNullOrWhiteSpace(settings.PublicHostname) ? "(public hostname)" : settings.PublicHostname,
