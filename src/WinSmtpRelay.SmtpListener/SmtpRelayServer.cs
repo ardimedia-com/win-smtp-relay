@@ -93,19 +93,31 @@ public class SmtpRelayServer : BackgroundService
                 endpoint.Address, endpoint.Port, endpoint.ImplicitTls, endpoint.RequireTls, endpoint.RequireAuth);
         }
 
-        // Open-relay backstop: warn loudly if nothing constrains unauthenticated submission at all.
-        if (!endpoints.Any(e => e.RequireAuth) && _config.AllowedNetworks.Count == 0)
+        // Open-relay protection is ALWAYS enforced in RelayMailboxFilter.CanDeliverToAsync: relaying to an
+        // external (non-hosted) domain requires SMTP authentication or an explicit, non-"any" allow-IP
+        // rule. It cannot be disabled by configuration. Log the resulting posture for the operator.
         {
             using var scope = _scopeFactory.CreateScope();
             var cache = scope.ServiceProvider.GetRequiredService<IRuntimeConfigCache>();
             var ipRules = await cache.GetIpAccessRulesAsync(stoppingToken);
-            var senderDomains = await cache.GetAcceptedSenderDomainsAsync(stoppingToken);
-            if (!ipRules.Any(r => r.Action == IpAccessAction.Allow) && senderDomains.Count == 0)
+            var explicitRelayNetworks =
+                ipRules.Count(r => r.Action == IpAccessAction.Allow && !IpAccessEvaluator.IsAnyNetwork(r.Network)) +
+                _config.AllowedNetworks.Count(n => !IpAccessEvaluator.IsAnyNetwork(n));
+            var anyAllowConfigured =
+                ipRules.Any(r => r.Action == IpAccessAction.Allow && IpAccessEvaluator.IsAnyNetwork(r.Network)) ||
+                _config.AllowedNetworks.Any(IpAccessEvaluator.IsAnyNetwork);
+
+            _logger.LogInformation(
+                "Open-relay protection active: external relaying requires SMTP authentication or an explicit " +
+                "allow-IP rule. Unauthenticated relay is permitted from {Count} explicit allow network(s); " +
+                "AUTH-required endpoints: {AuthEndpoints}.",
+                explicitRelayNetworks, endpoints.Count(e => e.RequireAuth));
+
+            if (anyAllowConfigured)
                 _logger.LogWarning(
-                    "OPEN RELAY RISK: the SMTP listener accepts unauthenticated mail from ANY source IP — no " +
-                    "receive connector requires AUTH, AllowedNetworks is empty, there are no Allow IP access " +
-                    "rules, and no accepted sender domains are configured. Add an IP allow-list, accepted " +
-                    "sender domains, or require authentication on a receive connector.");
+                    "An \"any\" allow rule (0.0.0.0/0 or ::/0) is configured. It permits connections but does NOT " +
+                    "authorize external relaying — open-relay protection refuses to relay for it. Use SMTP AUTH or " +
+                    "a specific allow-IP rule to permit relaying.");
         }
 
         var options = optionsBuilder.Build();

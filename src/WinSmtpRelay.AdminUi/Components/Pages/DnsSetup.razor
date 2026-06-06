@@ -101,6 +101,48 @@ else
         </BbTabsList>
 
         <BbTabsContent Value="ip">
+            <BbCard Class="mb-1">
+                <BbCardHeader>
+                    <BbCardTitle>Relay security</BbCardTitle>
+                    <BbCardDescription>Who may send to external (non-hosted) recipients through this relay</BbCardDescription>
+                </BbCardHeader>
+                <BbCardContent>
+                    <div class="dns-record">
+                        <div class="dns-record-head">
+                            <strong>Open-relay protection</strong>
+                            <span class="badge-status badge-success">Active</span>
+                        </div>
+                        <div class="text-muted" style="font-size:0.8rem;">
+                            Relaying to a domain this server does not host always requires SMTP authentication or an
+                            explicit allow-IP rule. This is enforced in code and cannot be turned off by configuration.
+                        </div>
+                        <div class="dns-record-row">
+                            <span class="dns-record-label">Unauth. relay</span>
+                            <span class="dns-record-value">
+                                @if (relayExplicitAllow.Count == 0)
+                                {
+                                    <text>Only authenticated SMTP users may relay (no allow-IP rule grants it).</text>
+                                }
+                                else
+                                {
+                                    <text>Allowed without auth from: <code class="mono">@string.Join(", ", relayExplicitAllow)</code></text>
+                                }
+                            </span>
+                        </div>
+                        @if (relayAnyAllow)
+                        {
+                            <div class="dns-record-row">
+                                <span class="dns-record-label"><span class="badge-status badge-warning">Note</span></span>
+                                <span class="dns-record-value text-muted" style="font-size:0.8rem;">
+                                    An &ldquo;any&rdquo; (<code class="mono">0.0.0.0/0</code> / <code class="mono">::/0</code>) allow rule is
+                                    configured. It permits connections but does <strong>not</strong> authorize external relaying — use SMTP
+                                    AUTH or a specific allow-IP rule for that.
+                                </span>
+                            </div>
+                        }
+                    </div>
+                </BbCardContent>
+            </BbCard>
             @if (outboundIpGroup is not null) { @groupCard(outboundIpGroup) }
             @if (hostnameGroup is not null) { @groupCard(hostnameGroup) }
             @if (ipGroups.Count == 0)
@@ -240,6 +282,8 @@ else
     private List<CheckGroup> adHocGroups = [];
     private CheckGroup? outboundIpGroup;
     private CheckGroup? hostnameGroup;
+    private List<string> relayExplicitAllow = [];
+    private bool relayAnyAllow;
     private List<DomainCandidate> candidateDomains = [];
     private List<string> candidateIps = [];
     private string adHocDomain = "";
@@ -316,6 +360,17 @@ else
                 [outboundCheck],
                 outboundIssue ? "/settings?tab=dns" : null,
                 outboundIssue ? "Update sending IPs in Settings" : null);
+
+            // Relay-security posture: open-relay protection is always enforced (external relay needs AUTH
+            // or an explicit, non-"any" allow-IP rule). Surface which allow networks grant unauthenticated
+            // relay, and flag an "any" (…/0) allow rule which does NOT grant relay.
+            var relayRules = await sp.GetRequiredService<IRuntimeConfigCache>().GetIpAccessRulesAsync(ct);
+            var allowNetworks = relayRules
+                .Where(r => r.Action == IpAccessAction.Allow)
+                .Select(r => r.Network.Trim())
+                .ToList();
+            relayExplicitAllow = [.. allowNetworks.Where(n => !n.EndsWith("/0"))];
+            relayAnyAllow = allowNetworks.Any(n => n.EndsWith("/0"));
 
             hostnameGroup = new CheckGroup(
                 string.IsNullOrWhiteSpace(settings.PublicHostname) ? "(public hostname)" : settings.PublicHostname,

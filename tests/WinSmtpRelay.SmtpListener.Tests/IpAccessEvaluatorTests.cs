@@ -121,4 +121,96 @@ public class IpAccessEvaluatorTests
             TRule(2, "10.0.0.0/8", IpAccessAction.Deny, 0));
         Assert.AreEqual(true, result);
     }
+
+    // ---- IsAnyNetwork ----
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void IsAnyNetwork_TrueForZeroPrefix()
+    {
+        Assert.IsTrue(IpAccessEvaluator.IsAnyNetwork("0.0.0.0/0"));
+        Assert.IsTrue(IpAccessEvaluator.IsAnyNetwork("::/0"));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void IsAnyNetwork_FalseForSpecific()
+    {
+        Assert.IsFalse(IpAccessEvaluator.IsAnyNetwork("10.0.0.0/8"));
+        Assert.IsFalse(IpAccessEvaluator.IsAnyNetwork("1.2.3.4/32"));
+        Assert.IsFalse(IpAccessEvaluator.IsAnyNetwork("1.2.3.4")); // no prefix → treated as host, not "any"
+    }
+
+    // ---- IsExplicitlyAllowedForRelay (open-relay protection) ----
+
+    private static bool Relay(string ip, int tenantId, string[] staticNets, params IpAccessRule[] rules)
+        => IpAccessEvaluator.IsExplicitlyAllowedForRelay(IPAddress.Parse(ip), rules, tenantId, staticNets);
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Relay_NoRulesNoStatic_NotAllowed()
+    {
+        // The secure default: an empty configuration authorizes no external relaying.
+        Assert.IsFalse(Relay("203.0.113.5", TenantDefaults.DefaultTenantId, []));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Relay_AnyAllowRuleOnly_NotAllowed()
+    {
+        // A single 0.0.0.0/0 Allow rule must NOT turn this into an open relay.
+        Assert.IsFalse(Relay("203.0.113.5", TenantDefaults.DefaultTenantId, [],
+            TRule(TenantDefaults.DefaultTenantId, "0.0.0.0/0", IpAccessAction.Allow, 0)));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Relay_ExplicitAllow_Allowed()
+    {
+        Assert.IsTrue(Relay("10.0.0.5", TenantDefaults.DefaultTenantId, [],
+            TRule(TenantDefaults.DefaultTenantId, "10.0.0.0/8", IpAccessAction.Allow, 0)));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Relay_ExplicitAllow_NonMatchingIp_NotAllowed()
+    {
+        Assert.IsFalse(Relay("203.0.113.5", TenantDefaults.DefaultTenantId, [],
+            TRule(TenantDefaults.DefaultTenantId, "10.0.0.0/8", IpAccessAction.Allow, 0)));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Relay_DenyFirst_NotAllowed()
+    {
+        Assert.IsFalse(Relay("10.1.2.3", TenantDefaults.DefaultTenantId, [],
+            TRule(TenantDefaults.DefaultTenantId, "10.1.2.0/24", IpAccessAction.Deny, 0),
+            TRule(TenantDefaults.DefaultTenantId, "10.0.0.0/8", IpAccessAction.Allow, 1)));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Relay_StaticAllowedNetwork_Allowed()
+    {
+        // A specific entry in the static appsettings allow-list authorizes relaying.
+        Assert.IsTrue(Relay("192.168.1.10", TenantDefaults.DefaultTenantId, ["192.168.0.0/16"]));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Relay_StaticAnyNetwork_NotAllowed()
+    {
+        // 0.0.0.0/0 in the static allow-list must NOT authorize relaying either.
+        Assert.IsFalse(Relay("203.0.113.5", TenantDefaults.DefaultTenantId, ["0.0.0.0/0"]));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Relay_TenantExplicitAllow_ScopedToTenant()
+    {
+        // Tenant 2's explicit allow authorizes relay for tenant 2, but not for tenant 3.
+        var rule = TRule(2, "10.0.0.0/8", IpAccessAction.Allow, 0);
+        Assert.IsTrue(Relay("10.0.0.5", tenantId: 2, [], rule));
+        Assert.IsFalse(Relay("10.0.0.5", tenantId: 3, [], rule));
+    }
 }

@@ -233,7 +233,8 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
     {
         var recipientDomain = to.Host;
 
-        // Always accept mail for backup MX domains (read live from the runtime config cache)
+        // ---- Mail for a domain we HOST (inbound) ----
+        // Backup-MX domains are hosted (read live from the runtime config cache).
         var backupMx = await _configCache.GetBackupMxSettingsAsync(cancellationToken);
         if (backupMx.Enabled &&
             backupMx.DomainList.Any(d => string.Equals(d, recipientDomain, StringComparison.OrdinalIgnoreCase)))
@@ -241,23 +242,14 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             return true;
         }
 
-        // If accepted domains are configured, check recipient domain (from DB cache)
+        // Configured accepted recipient domains are hosted (inbound).
         var acceptedDomains = await _configCache.GetAcceptedDomainsAsync(cancellationToken);
-        if (acceptedDomains.Count > 0)
+        var isHostedRecipient = acceptedDomains.Any(d =>
+            string.Equals(d, recipientDomain, StringComparison.OrdinalIgnoreCase));
+        if (isHostedRecipient)
         {
-            var accepted = acceptedDomains.Any(d =>
-                string.Equals(d, recipientDomain, StringComparison.OrdinalIgnoreCase));
-
-            if (!accepted)
-            {
-                _logger.LogWarning("Recipient {Recipient} rejected: domain {Domain} not in accepted domains",
-                    to.AsAddress(), recipientDomain);
-                return false;
-            }
-
             // Optional verification gate: when enabled, an accepted recipient domain must also have its
-            // ownership verified (DNS TXT) before the relay accepts mail for it. Applies only among
-            // configured domains; backup-MX domains were already accepted above.
+            // ownership verified (DNS TXT) before the relay accepts mail for it.
             var emailAuth = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);
             if (emailAuth.RequireRecipientDomainVerification)
             {
@@ -269,9 +261,33 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
                     return false;
                 }
             }
+            return true;
         }
 
-        return true;
+        // ---- Relaying to an EXTERNAL recipient (a domain we do not host) ----
+        // Open-relay protection (ALWAYS ON — not configurable): relay externally only for an
+        // authenticated session, or a client matched by an EXPLICIT, non-"any" allow-IP rule. An empty
+        // configuration, or a single 0.0.0.0/0 allow rule, therefore can NEVER turn this into an open
+        // relay — the protection cannot be disabled or bypassed by configuration alone.
+        if (GetAuthenticatedUser(context) is not null)
+            return true;
+
+        var remoteEndPoint = context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep) ? ep as IPEndPoint : null;
+        var relayTenantId = context.Properties.TryGetValue("TenantId", out var tid) && tid is int t
+            ? t
+            : Core.Models.TenantDefaults.DefaultTenantId;
+        var ipRules = await _configCache.GetIpAccessRulesAsync(cancellationToken);
+
+        if (remoteEndPoint is not null &&
+            IpAccessEvaluator.IsExplicitlyAllowedForRelay(remoteEndPoint.Address, ipRules, relayTenantId, _options.AllowedNetworks))
+        {
+            return true;
+        }
+
+        _logger.LogWarning(
+            "Relaying denied for {Recipient} from {ClientIp}: relaying to an external domain requires SMTP authentication or an explicit allow-IP rule (open-relay protection)",
+            to.AsAddress(), remoteEndPoint?.Address);
+        return false;
     }
 
     private static string? GetAuthenticatedUser(ISessionContext context)

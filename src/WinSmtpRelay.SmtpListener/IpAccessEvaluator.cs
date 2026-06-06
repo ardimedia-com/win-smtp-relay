@@ -51,4 +51,44 @@ public static class IpAccessEvaluator
         // No rule matched: allow-list mode blocks, deny-list mode permits.
         return !hasAllowRule;
     }
+
+    /// <summary>
+    /// Relay authorization for an UNAUTHENTICATED client (open-relay protection). Returns <c>true</c>
+    /// only if the client is matched by an EXPLICIT, non-"any" <see cref="IpAccessAction.Allow"/> rule
+    /// (first-match, the tenant's own rules then the host baseline), or is in a non-"any" entry of the
+    /// static appsettings allow-list. A first-matching <see cref="IpAccessAction.Deny"/> — or no match
+    /// at all — returns <c>false</c>. Crucially, an "any" rule (0.0.0.0/0 or ::/0), and an empty
+    /// configuration, do NOT authorize relaying: this makes an open relay impossible to create by
+    /// configuration alone. (Connection-level acceptance still uses <see cref="EvaluateForTenant"/>;
+    /// this is the stricter gate applied only when relaying to a non-hosted, external recipient.)
+    /// </summary>
+    public static bool IsExplicitlyAllowedForRelay(
+        IPAddress clientIp,
+        IReadOnlyList<IpAccessRule> allRules,
+        int tenantId,
+        IReadOnlyList<string> staticAllowedNetworks)
+    {
+        var hostRules = allRules.Where(r => r.TenantId == TenantDefaults.DefaultTenantId).OrderBy(r => r.SortOrder);
+        var effective = tenantId == TenantDefaults.DefaultTenantId
+            ? hostRules.ToList()
+            : allRules.Where(r => r.TenantId == tenantId).OrderBy(r => r.SortOrder).Concat(hostRules).ToList();
+
+        foreach (var rule in effective)
+        {
+            if (!IpNetworkHelper.IsInNetwork(clientIp, rule.Network))
+                continue;
+            // First matching rule decides. An "any" Allow rule does NOT grant relay rights.
+            return rule.Action == IpAccessAction.Allow && !IsAnyNetwork(rule.Network);
+        }
+
+        // No DB rule matched — honour explicit, non-"any" entries in the static appsettings allow-list.
+        return staticAllowedNetworks.Any(n => !IsAnyNetwork(n) && IpNetworkHelper.IsInNetwork(clientIp, n));
+    }
+
+    /// <summary>True for a CIDR covering the entire address space (prefix length 0), e.g. 0.0.0.0/0 or ::/0.</summary>
+    public static bool IsAnyNetwork(string cidr)
+    {
+        var parts = cidr.Split('/');
+        return parts.Length > 1 && int.TryParse(parts[1], out var prefix) && prefix == 0;
+    }
 }

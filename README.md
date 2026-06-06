@@ -2,9 +2,6 @@
 
 > **Work in progress** — This project is under active development and not yet ready for production use.
 
-> **Hosted Service** — We are considering offering WIN-SMTP-RELAY as a hosted/managed service. For test environments, we would provide the service free of charge. If you are interested, please [open an issue](https://github.com/ardimedia-com/win-smtp-relay/issues) and let us know about your use case.
-
-
 Open-source SMTP relay server for Windows. Built with .NET 10, designed as a modern replacement for IIS SMTP.
 
 **Relay only** — no mailboxes, no IMAP, no POP3. Accepts mail from internal apps/devices and forwards it via MX lookup or smart host.
@@ -149,6 +146,24 @@ Password: <random, shown once>
 Sign in at `https://localhost:8025/account/login` and change the password immediately (you are prompted to). To expose the admin UI beyond loopback, put it behind a reverse proxy or change `AdminUi:BindAddress` deliberately, and configure a real certificate via `AdminUi:CertificatePath` / `AdminUi:CertificatePassword`.
 
 For automation, create an API key and pass it as `X-Api-Key: <key>` (or `Authorization: Bearer <key>`). Keys are scoped to a tenant and a role.
+
+## Responsible operation
+
+A mail relay can be abused if misconfigured. WIN-SMTP-RELAY is **closed by default**: relaying to an
+external (non-hosted) recipient always requires SMTP authentication or an explicit allow-IP rule, and
+this cannot be disabled by configuration — an empty config, or a `0.0.0.0/0` allow rule, will not relay
+to the outside world.
+
+When operating it, also:
+
+- **Send only solicited mail.** Stop sending to addresses that hard-bounce or complain — the per-tenant
+  suppression list does this automatically; don't work around it.
+- **Protect deliverability:** publish SPF/DKIM/DMARC and valid reverse DNS (PTR), use a stable (not
+  dynamic) IP, and prefer a reputable **smart host** for production sending. Watch the **Health** page
+  (Spamhaus / SpamCop checks) and act on any listing.
+- **Protect the admin plane:** HTTPS with a real certificate, strong passwords, least-privilege API keys.
+
+See [SECURITY.md](SECURITY.md) for the full guidance and how to report a vulnerability.
 
 ## License
 
