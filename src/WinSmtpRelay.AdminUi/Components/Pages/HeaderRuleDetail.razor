@@ -32,30 +32,29 @@ else if (notFound)
 }
 else
 {
-    <div style="max-width:520px;">
     <BbCard>
         <BbCardContent>
-            <div class="form-group">
-                <BbLabel>Header Name</BbLabel>
-                <BbInput @bind-Value="headerName" Placeholder="X-Custom-Header" />
-            </div>
-            <div class="form-group">
-                <BbLabel>Action</BbLabel>
-                <BbNativeSelect @bind-Value="action">
-                    <option value="Set">Set</option>
-                    <option value="Remove">Remove</option>
-                    <option value="Append">Append</option>
-                </BbNativeSelect>
-            </div>
-            <div class="form-group">
-                <BbLabel>Match Value (optional, regex)</BbLabel>
-                <BbInput @bind-Value="matchValue" Placeholder=".*" />
-            </div>
-            <div class="form-group">
-                <BbLabel>New Value</BbLabel>
-                <BbInput @bind-Value="newValue" Placeholder="new value" />
-            </div>
-            <div style="display:flex;gap:1rem;">
+            <div class="form-grid">
+                <div class="form-group col-span-full">
+                    <BbLabel>Header Name</BbLabel>
+                    <BbInput @bind-Value="headerName" Placeholder="X-Custom-Header" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Action</BbLabel>
+                    <BbNativeSelect @bind-Value="action">
+                        <option value="Set">Set</option>
+                        <option value="Remove">Remove</option>
+                        <option value="Append">Append</option>
+                    </BbNativeSelect>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Match Value (optional, regex)</BbLabel>
+                    <BbInput @bind-Value="matchValue" Placeholder=".*" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>New Value</BbLabel>
+                    <BbInput @bind-Value="newValue" Placeholder="new value" />
+                </div>
                 <div class="form-group">
                     <BbLabel>Sort Order</BbLabel>
                     <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
@@ -78,7 +77,6 @@ else
             </div>
         </BbCardFooter>
     </BbCard>
-    </div>
 }
 
 @code {

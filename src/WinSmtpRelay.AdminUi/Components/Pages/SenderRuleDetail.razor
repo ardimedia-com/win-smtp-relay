@@ -32,18 +32,17 @@ else if (notFound)
 }
 else
 {
-    <div style="max-width:520px;">
     <BbCard>
         <BbCardContent>
-            <div class="form-group">
-                <BbLabel>From Pattern (regex)</BbLabel>
-                <BbInput @bind-Value="fromPattern" Placeholder="user@example.com" />
-            </div>
-            <div class="form-group">
-                <BbLabel>Rewrite To</BbLabel>
-                <BbInput @bind-Value="toAddress" Placeholder="noreply@newdomain.com" />
-            </div>
-            <div style="display:flex;gap:1rem;">
+            <div class="form-grid">
+                <div class="form-group">
+                    <BbLabel>From Pattern (regex)</BbLabel>
+                    <BbInput @bind-Value="fromPattern" Placeholder="user@example.com" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Rewrite To</BbLabel>
+                    <BbInput @bind-Value="toAddress" Placeholder="noreply@newdomain.com" />
+                </div>
                 <div class="form-group">
                     <BbLabel>Sort Order</BbLabel>
                     <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
@@ -67,7 +66,6 @@ else
             </div>
         </BbCardFooter>
     </BbCard>
-    </div>
 }
 
 @code {

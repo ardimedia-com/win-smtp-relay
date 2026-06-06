@@ -32,9 +32,9 @@ else if (notFound)
 }
 else
 {
-    <div style="max-width:520px;">
     <BbCard>
         <BbCardContent>
+            <div class="form-grid">
             <div class="form-group">
                 <BbLabel>Name</BbLabel>
                 <BbInput @bind-Value="name" Placeholder="Acme Corp" />
@@ -78,6 +78,7 @@ else
                     <div><LocalTime Utc="@createdUtc" Format="yyyy-MM-dd HH:mm" /></div>
                 </div>
             }
+            </div>
         </BbCardContent>
         <BbCardFooter>
             <div class="flex gap-1 items-center">
@@ -93,7 +94,6 @@ else
             </div>
         </BbCardFooter>
     </BbCard>
-    </div>
 }
 
 @code {

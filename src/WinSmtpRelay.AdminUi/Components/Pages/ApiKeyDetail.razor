@@ -35,7 +35,7 @@ else if (notFound)
 else if (createdSecret is not null)
 {
     @* One-time secret display after creation. The plaintext is never persisted and cannot be recovered. *@
-    <div style="max-width:640px;">
+    <div>
         <BbCard>
             <BbCardHeader>
                 <BbCardTitle>API key created</BbCardTitle>
@@ -67,7 +67,7 @@ else if (createdSecret is not null)
 }
 else if (IsNew)
 {
-    <div style="max-width:520px;">
+    <div>
         <BbCard>
             <BbCardContent>
                 <div class="form-group">
@@ -99,7 +99,7 @@ else if (IsNew)
 }
 else if (key is not null)
 {
-    <div style="max-width:520px;">
+    <div>
         <BbCard>
             <BbCardContent>
                 <div class="form-group">

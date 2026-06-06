@@ -37,25 +37,26 @@ else if (connectors.Count == 0)
 }
 else
 {
-    <div style="max-width:520px;">
     <BbCard>
         <BbCardContent>
-            <div class="form-group">
-                <BbLabel>Domain Pattern</BbLabel>
-                <BbInput @bind-Value="domainPattern" Placeholder="*.example.com" />
-            </div>
-            <div class="form-group">
-                <BbLabel>Send Connector</BbLabel>
-                <BbNativeSelect @bind-Value="connectorId">
-                    @foreach (var c in connectors)
-                    {
-                        <option value="@c.Id">@c.Name</option>
-                    }
-                </BbNativeSelect>
-            </div>
-            <div class="form-group">
-                <BbLabel>Sort Order</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
+            <div class="form-grid">
+                <div class="form-group">
+                    <BbLabel>Domain Pattern</BbLabel>
+                    <BbInput @bind-Value="domainPattern" Placeholder="*.example.com" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Send Connector</BbLabel>
+                    <BbNativeSelect @bind-Value="connectorId">
+                        @foreach (var c in connectors)
+                        {
+                            <option value="@c.Id">@c.Name</option>
+                        }
+                    </BbNativeSelect>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Sort Order</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="sortOrder" />
+                </div>
             </div>
         </BbCardContent>
         <BbCardFooter>
@@ -67,7 +68,6 @@ else
             </div>
         </BbCardFooter>
     </BbCard>
-    </div>
 }
 
 @code {

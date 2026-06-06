@@ -1,6 +1,7 @@
 @page "/rate-limits"
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject ITenantScopeFactory ScopeFactory
 
 <BbBreadcrumb>
@@ -31,31 +32,32 @@
 }
 else
 {
-    <div style="max-width:500px;">
     <BbCard>
         <BbCardHeader>
             <BbCardTitle>Rate Limit Settings</BbCardTitle>
         </BbCardHeader>
         <BbCardContent>
-            <div class="form-group">
-                <BbLabel>Max Connections per IP per Minute</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="maxConnPerIp" />
-            </div>
-            <div class="form-group">
-                <BbLabel>Max Messages per Sender per Minute</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="maxMsgPerMin" />
-            </div>
-            <div class="form-group">
-                <BbLabel>Max Messages per Sender per Day</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="maxMsgPerDay" />
-            </div>
-            <div class="form-group">
-                <BbLabel>Failed Auth Ban Threshold (attempts)</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="banThreshold" />
-            </div>
-            <div class="form-group">
-                <BbLabel>Failed Auth Ban Duration (minutes)</BbLabel>
-                <BbInput Type="InputType.Number" @bind-Value="banMinutes" />
+            <div class="form-grid">
+                <div class="form-group">
+                    <BbLabel>Max Connections per IP per Minute</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="maxConnPerIp" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Max Messages per Sender per Minute</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="maxMsgPerMin" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Max Messages per Sender per Day</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="maxMsgPerDay" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Failed Auth Ban Threshold (attempts)</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="banThreshold" />
+                </div>
+                <div class="form-group">
+                    <BbLabel>Failed Auth Ban Duration (minutes)</BbLabel>
+                    <BbInput Type="InputType.Number" @bind-Value="banMinutes" />
+                </div>
             </div>
         </BbCardContent>
         <BbCardFooter>
@@ -68,7 +70,6 @@ else
             }
         </BbCardFooter>
     </BbCard>
-    </div>
 }
 
 <BbDialog @bind-Open="showHelp">

@@ -37,7 +37,7 @@ else if (notFound)
 else if (createdPassword is not null)
 {
     @* One-time password display after create/reset. The plaintext is never persisted. *@
-    <div style="max-width:560px;">
+    <div>
         <BbCard>
             <BbCardHeader><BbCardTitle>@secretTitle</BbCardTitle></BbCardHeader>
             <BbCardContent>
@@ -61,7 +61,7 @@ else if (createdPassword is not null)
 }
 else if (IsNew)
 {
-    <div style="max-width:520px;">
+    <div>
         <BbCard>
             <BbCardContent>
                 <div class="form-group">
@@ -97,7 +97,7 @@ else if (IsNew)
 }
 else
 {
-    <div style="max-width:520px;">
+    <div>
         <BbCard>
             <BbCardContent>
                 <div class="form-group"><BbLabel>Email</BbLabel><div>@email</div></div>
