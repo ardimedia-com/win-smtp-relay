@@ -34,6 +34,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<EmailAuthSettings> EmailAuthSettings => Set<EmailAuthSettings>();
     public DbSet<BackupMxSettings> BackupMxSettings => Set<BackupMxSettings>();
     public DbSet<StatisticsRetentionSettings> StatisticsRetentionSettings => Set<StatisticsRetentionSettings>();
+    public DbSet<ReportingSettings> ReportingSettings => Set<ReportingSettings>();
     public DbSet<DnsSettings> DnsSettings => Set<DnsSettings>();
     public DbSet<HeaderRewriteEntry> HeaderRewriteEntries => Set<HeaderRewriteEntry>();
     public DbSet<SenderRewriteEntry> SenderRewriteEntries => Set<SenderRewriteEntry>();

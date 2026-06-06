@@ -35,6 +35,7 @@ else
             <BbTabsTrigger Value="signup">Signup</BbTabsTrigger>
             <BbTabsTrigger Value="backup-mx">Backup MX</BbTabsTrigger>
             <BbTabsTrigger Value="statistics">Statistics</BbTabsTrigger>
+            <BbTabsTrigger Value="reporting">Reporting</BbTabsTrigger>
         </BbTabsList>
 
         <BbTabsContent Value="signup">
@@ -330,6 +331,60 @@ else
         </BbCardContent>
     </BbCard>
         </BbTabsContent>
+
+        <BbTabsContent Value="reporting">
+    <BbCard>
+        <BbCardHeader>
+            <BbCardTitle>Email reporting</BbCardTitle>
+        </BbCardHeader>
+        <BbCardContent>
+            <div class="settings-group">
+                <div class="settings-group-title">Reports &amp; alerts</div>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <BbSwitch Checked="reportEnabled" CheckedChanged="(bool v) => reportEnabled = v" id="report-toggle" />
+                    <span>Send a daily activity digest and immediate incident alerts</span>
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;margin-bottom:0;">
+                    Immediate alerts: a sending IP getting blocklisted (DNSBL), or the 24-hour bounce rate exceeding the
+                    threshold below. The daily digest summarises volume, bounce/suppression counts and blocklist status.
+                    All sent through this relay's own delivery pipeline.
+                </p>
+            </div>
+            <div class="settings-group">
+                <div class="settings-group-title">Delivery</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <BbLabel>Report recipient</BbLabel>
+                        <BbInput @bind-Value="reportRecipient" Placeholder="ops@yourdomain.tld" />
+                    </div>
+                    <div class="form-group">
+                        <BbLabel>From-address (optional)</BbLabel>
+                        <BbInput @bind-Value="reportFrom" Placeholder="(uses the signup from-address)" />
+                    </div>
+                    <div class="form-group">
+                        <BbLabel>Daily digest time (UTC, HH:mm)</BbLabel>
+                        <BbInput @bind-Value="reportDailyTime" Placeholder="06:00" />
+                    </div>
+                    <div class="form-group">
+                        <BbLabel>Bounce-rate alert threshold (%)</BbLabel>
+                        <BbInput Type="InputType.Number" @bind-Value="reportBounceThreshold" />
+                    </div>
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">
+                    The recipient is required. Leave the from-address blank to use the signup/system from-address.
+                    Set the threshold to <span class="mono">0</span> to disable the bounce-rate alert.
+                </p>
+            </div>
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveReportingAsync" Class="mt-1">
+                <LucideIcon Name="save" /> Save
+            </BbButton>
+            @if (!string.IsNullOrEmpty(reportingStatus))
+            {
+                <p class="text-muted" style="margin-top:0.5rem;">@reportingStatus</p>
+            }
+        </BbCardContent>
+    </BbCard>
+        </BbTabsContent>
     </BbTabs>
 }
 
@@ -374,13 +429,20 @@ else
     private string dnsDmarcPct = "100";
     private string? dnsStatus;
 
+    private bool reportEnabled;
+    private string? reportRecipient;
+    private string? reportFrom;
+    private string reportDailyTime = "06:00";
+    private string reportBounceThreshold = "10";
+    private string? reportingStatus;
+
     private bool detectingIp;
     private List<string> detectedIps = [];
     private bool detectedNone;
 
     protected override async Task OnInitializedAsync()
     {
-        activeTab = Tab is "signup" or "email-auth" or "backup-mx" or "statistics" or "dns" ? Tab : "dns";
+        activeTab = Tab is "signup" or "email-auth" or "backup-mx" or "statistics" or "dns" or "reporting" ? Tab : "dns";
 
         using var scope = ScopeFactory.CreateScope();
         var sp = scope.ServiceProvider;
@@ -417,6 +479,13 @@ else
         dnsDmarcEmail = dns.DmarcReportEmail;
         dnsDmarcPolicy = dns.DmarcPolicy;
         dnsDmarcPct = dns.DmarcPercentage.ToString();
+
+        var reporting = await sp.GetRequiredService<IReportingSettingsService>().GetAsync();
+        reportEnabled = reporting.Enabled;
+        reportRecipient = reporting.RecipientAddress;
+        reportFrom = reporting.FromAddress;
+        reportDailyTime = reporting.DailyTimeUtc;
+        reportBounceThreshold = reporting.BounceRateAlertPercent.ToString();
 
         isLoading = false;
     }
@@ -519,6 +588,20 @@ else
         });
         dnsDmarcPct = pct.ToString();
         dnsStatus = "DNS recommendation settings saved. The Health page reflects them on its next check.";
+    }
+
+    private async Task SaveReportingAsync()
+    {
+        var threshold = int.TryParse(reportBounceThreshold, out var t) ? Math.Clamp(t, 0, 100) : 10;
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IReportingSettingsService>()
+            .UpdateAsync(reportEnabled, reportRecipient, reportFrom, reportDailyTime, threshold);
+        reportBounceThreshold = threshold.ToString();
+        reportingStatus = reportEnabled
+            ? (string.IsNullOrWhiteSpace(reportRecipient)
+                ? "Saved, but reporting needs a recipient address to send anything."
+                : $"Reporting enabled — sending to {reportRecipient!.Trim()}.")
+            : "Reporting disabled.";
     }
 
     private async Task OnToggleAsync(bool value)
