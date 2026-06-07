@@ -1,11 +1,12 @@
 @page "/"
-@using Microsoft.AspNetCore.SignalR.Client
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Navigation
 @inject IQueueDepthRecorder QueueDepthRecorder
 @inject WinSmtpRelay.AdminUi.Services.BrowserTimeService BrowserTime
+@inject IActivityFeed Feed
+@inject ICurrentTenant CurrentTenant
 @implements IAsyncDisposable
 
 <BbBreadcrumb>
@@ -244,7 +245,6 @@ else
     private string activeTab = "minute";
     private object[]? chartData;
     private object[]? minuteChartData;
-    private HubConnection? hubConnection;
     private bool _disposed;
     private System.Threading.Timer? refreshTimer;
     private System.Threading.Timer? uptimeTimer;
@@ -276,8 +276,8 @@ else
         // Load initial chart data
         await LoadChartDataAsync();
 
-        // Set up SignalR for live tabs + queue depth updates
-        await SetupSignalRAsync();
+        // Subscribe to the in-process activity feed for live chart + queue-depth updates.
+        Feed.Received += OnActivity;
 
         // Periodic refresh: uptime every 30s
         uptimeTimer = new System.Threading.Timer(_ =>
@@ -322,50 +322,28 @@ else
             : $"{elapsed.Hours}h {elapsed.Minutes}m";
     }
 
-    private async Task SetupSignalRAsync()
+    private void OnActivity(ActivityEvent e)
     {
-        var hubUrl = Navigation.ToAbsoluteUri("/hubs/activity");
-        hubConnection = new HubConnectionBuilder()
-            .WithUrl(hubUrl)
-            .WithAutomaticReconnect()
-            .Build();
+        if (_disposed) return;
+        // React only to this circuit's scope (a host admin in "All tenants" sees everything).
+        var mine = e.TenantId is null || CurrentTenant.IsHostScope || e.TenantId == CurrentTenant.TenantId;
+        if (!mine) return;
 
-        hubConnection.On<dynamic>("DeliveryAttempt", (data) =>
+        switch (e.Kind)
         {
-            if (_disposed) return;
-            ScheduleChartRefresh();
-        });
-
-        // QueueChanged sends no arguments — use parameterless On
-        hubConnection.On("QueueChanged", () =>
-        {
-            if (_disposed) return;
-            InvokeAsync(async () =>
-            {
-                queueDepth = await ReadQueueDepthAsync();
-                await RefreshRecentMessagesAsync();
-                StateHasChanged();
-            });
-        });
-
-        hubConnection.On<dynamic>("MessageReceived", (data) =>
-        {
-            if (_disposed) return;
-            InvokeAsync(async () =>
-            {
-                queueDepth = await ReadQueueDepthAsync();
-                await RefreshRecentMessagesAsync();
-                StateHasChanged();
-            });
-        });
-
-        try
-        {
-            await hubConnection.StartAsync();
-        }
-        catch
-        {
-            // Will auto-reconnect
+            case ActivityKind.DeliveryAttempt:
+                ScheduleChartRefresh();
+                break;
+            case ActivityKind.QueueChanged:
+            case ActivityKind.MessageReceived:
+                _ = InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    queueDepth = await ReadQueueDepthAsync();
+                    await RefreshRecentMessagesAsync();
+                    StateHasChanged();
+                });
+                break;
         }
     }
 
@@ -526,6 +504,7 @@ else
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
+        Feed.Received -= OnActivity;
         BrowserTime.Changed -= OnTimeZoneChanged;
         _chartDebounceTimer?.Dispose();
         if (minuteRefreshTimer is not null)
@@ -534,7 +513,5 @@ else
             await uptimeTimer.DisposeAsync();
         if (refreshTimer is not null)
             await refreshTimer.DisposeAsync();
-        if (hubConnection is not null)
-            await hubConnection.DisposeAsync();
     }
 }

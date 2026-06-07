@@ -1,10 +1,11 @@
 @page "/queue"
-@using Microsoft.AspNetCore.SignalR.Client
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Navigation
-@implements IAsyncDisposable
+@inject IActivityFeed Feed
+@inject ICurrentTenant CurrentTenant
+@implements IDisposable
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -165,24 +166,22 @@ else
     private bool loaded;
     private bool showDeleteConfirm;
     private long deleteTargetId;
-    private HubConnection? hubConnection;
     private bool _disposed;
 
     protected override async Task OnInitializedAsync()
     {
         await RefreshAsync();
+        Feed.Received += OnActivity;
+    }
 
-        var hubUrl = Navigation.ToAbsoluteUri("/hubs/activity");
-        hubConnection = new HubConnectionBuilder()
-            .WithUrl(hubUrl)
-            .WithAutomaticReconnect()
-            .Build();
-
-        hubConnection.On("QueueChanged", () => RefreshInBackground());
-        hubConnection.On<dynamic>("MessageReceived", _ => RefreshInBackground());
-
-        try { await hubConnection.StartAsync(); }
-        catch { /* hub unavailable — manual refresh still works */ }
+    private void OnActivity(ActivityEvent e)
+    {
+        // The queue changes when a message is queued, delivered, or removed; refresh on those signals.
+        // RefreshAsync re-reads only this circuit's tenant queue, so reacting to a broadcast is harmless.
+        if (e.Kind is ActivityKind.QueueChanged
+            || (e.Kind is ActivityKind.MessageReceived
+                && (e.TenantId is null || CurrentTenant.IsHostScope || e.TenantId == CurrentTenant.TenantId)))
+            RefreshInBackground();
     }
 
     private void RefreshInBackground()
@@ -245,10 +244,9 @@ else
         _ => "badge-muted"
     };
 
-    public async ValueTask DisposeAsync()
+    public void Dispose()
     {
         _disposed = true;
-        if (hubConnection is not null)
-            await hubConnection.DisposeAsync();
+        Feed.Received -= OnActivity;
     }
 }

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.SignalR;
 using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
+using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.AdminApi;
 
@@ -36,10 +37,12 @@ public class ActivityHub : Hub
     public static string TenantGroup(int tenantId) => $"tenant:{tenantId}";
 }
 
-public class ActivityNotifier(IHubContext<ActivityHub> hub) : IActivityNotifier
+public class ActivityNotifier(IHubContext<ActivityHub> hub, IActivityFeed feed) : IActivityNotifier
 {
     public async Task NotifyMessageReceivedAsync(string messageId, string sender, string recipients, int sizeBytes, int tenantId)
     {
+        feed.Publish(new ActivityEvent(ActivityKind.MessageReceived, tenantId, DateTimeOffset.UtcNow,
+            MessageId: messageId, Sender: sender, Recipients: recipients, SizeBytes: sizeBytes));
         await hub.Clients.Groups([ActivityHub.AllTenantsGroup, ActivityHub.TenantGroup(tenantId)]).SendAsync("MessageReceived", new
         {
             MessageId = messageId,
@@ -52,6 +55,8 @@ public class ActivityNotifier(IHubContext<ActivityHub> hub) : IActivityNotifier
 
     public async Task NotifyDeliveryAttemptAsync(string messageId, string recipient, string statusCode, string? remoteServer, int tenantId)
     {
+        feed.Publish(new ActivityEvent(ActivityKind.DeliveryAttempt, tenantId, DateTimeOffset.UtcNow,
+            MessageId: messageId, Recipient: recipient, StatusCode: statusCode, RemoteServer: remoteServer));
         await hub.Clients.Groups([ActivityHub.AllTenantsGroup, ActivityHub.TenantGroup(tenantId)]).SendAsync("DeliveryAttempt", new
         {
             MessageId = messageId,
@@ -64,6 +69,8 @@ public class ActivityNotifier(IHubContext<ActivityHub> hub) : IActivityNotifier
 
     public async Task NotifyConnectionAsync(string sourceIp, string eventType)
     {
+        feed.Publish(new ActivityEvent(ActivityKind.SmtpConnection, null, DateTimeOffset.UtcNow,
+            SourceIp: sourceIp, EventType: eventType));
         await hub.Clients.All.SendAsync("SmtpConnection", new
         {
             SourceIp = sourceIp,
@@ -74,6 +81,7 @@ public class ActivityNotifier(IHubContext<ActivityHub> hub) : IActivityNotifier
 
     public async Task NotifyQueueChangedAsync()
     {
+        feed.Publish(new ActivityEvent(ActivityKind.QueueChanged, null, DateTimeOffset.UtcNow));
         await hub.Clients.All.SendAsync("QueueChanged");
     }
 }

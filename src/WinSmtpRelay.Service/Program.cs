@@ -108,6 +108,9 @@ if (adminUiConfig.Enabled)
     builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IQueueDepthRecorder>(sp => sp.GetRequiredService<WinSmtpRelay.Storage.QueueDepthRecorder>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<WinSmtpRelay.Storage.QueueDepthRecorder>());
     builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IActivityNotifier, WinSmtpRelay.AdminApi.ActivityNotifier>();
+    // In-process live-activity feed: the server-rendered Blazor pages subscribe to this directly instead
+    // of a server-to-self SignalR connection (which cannot carry the signed-in user's auth/tenant).
+    builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IActivityFeed, WinSmtpRelay.Core.InProcessActivityFeed>();
     builder.Services.AddHttpClient();
     builder.Services.AddHostedService<WinSmtpRelay.Service.TrayIconService>();
     builder.Services.AddHostedService<WinSmtpRelay.Service.StatisticsAggregator>();

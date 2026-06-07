@@ -1,7 +1,9 @@
 @page "/activity"
-@using Microsoft.AspNetCore.SignalR.Client
-@inject NavigationManager Navigation
-@implements IAsyncDisposable
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@implements IDisposable
+@inject IActivityFeed Feed
+@inject ICurrentTenant CurrentTenant
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -26,9 +28,7 @@
 </div>
 
 <div style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem;">
-    <span class="badge-status @(isConnected ? "badge-success" : "badge-error")">
-        @(isConnected ? "Connected" : "Disconnected")
-    </span>
+    <span class="badge-status badge-success">Live</span>
     <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Outline" @onclick="ClearFeed">
         <LucideIcon Name="eraser" />
         Clear
@@ -58,8 +58,8 @@
         </BbDialogHeader>
         <div style="font-size:0.875rem;line-height:1.6;">
             <p>
-                This page shows a real-time feed of everything happening on the SMTP relay,
-                streamed via SignalR (WebSocket).
+                This page shows a real-time feed of what's happening on the SMTP relay, updated live as
+                events occur on the server (no page refresh needed).
             </p>
             <h4 style="margin-top:1rem;">Event types</h4>
             <ul style="padding-left:1.25rem;">
@@ -67,13 +67,10 @@
                 <li><strong>&lt;&lt;&lt; Delivery Attempt</strong> &mdash; the relay tried to deliver a message. Shows the SMTP status code (250 = success) and the remote server used.</li>
                 <li><strong>... SMTP Connection</strong> &mdash; a client connected to or disconnected from the SMTP listener.</li>
             </ul>
-            <h4 style="margin-top:1rem;">Connection status</h4>
             <p>
-                The badge at the top shows whether the browser is connected to the server's SignalR hub.
-                If disconnected, the feed will pause and automatically reconnect.
-            </p>
-            <p>
-                The feed holds up to 200 events. Use <strong>Clear</strong> to reset.
+                The feed holds up to 200 events and shows the activity your account is scoped to (a host
+                admin in "All tenants" sees everything; otherwise just the selected tenant). Use
+                <strong>Clear</strong> to reset.
             </p>
         </div>
         <BbDialogFooter>
@@ -86,76 +83,54 @@
 
 @code {
     private bool showHelp;
-    private HubConnection? hubConnection;
-    private bool isConnected;
     private bool _disposed;
-    private readonly List<ActivityEvent> events = [];
+    private readonly List<FeedItem> events = [];
     private const int MaxEvents = 200;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized() => Feed.Received += OnActivity;
+
+    private void OnActivity(ActivityEvent e)
     {
-        var hubUrl = Navigation.ToAbsoluteUri("/hubs/activity");
-        hubConnection = new HubConnectionBuilder()
-            .WithUrl(hubUrl)
-            .WithAutomaticReconnect()
-            .Build();
+        if (_disposed || !IsForMe(e))
+            return;
 
-        hubConnection.On<dynamic>("MessageReceived", (data) =>
+        var (icon, text, css) = e.Kind switch
         {
-            AddEvent(">>>", $"Message received from {data.GetProperty("sender")} to {data.GetProperty("recipients")} ({data.GetProperty("sizeBytes")} bytes)", "activity-received");
-        });
+            ActivityKind.MessageReceived =>
+                (">>>", $"Message received from {e.Sender} to {e.Recipients} ({e.SizeBytes} bytes)", "activity-received"),
+            ActivityKind.DeliveryAttempt =>
+                ("<<<", $"Delivery to {e.Recipient}: {e.StatusCode} via {e.RemoteServer}",
+                    e.StatusCode == "250" ? "activity-delivered" : "activity-error"),
+            ActivityKind.SmtpConnection =>
+                ("...", $"SMTP {e.EventType} from {e.SourceIp}", "activity-connection"),
+            _ => ("", "", "")
+        };
+        if (icon.Length == 0)
+            return; // e.g. QueueChanged — not shown in this feed
 
-        hubConnection.On<dynamic>("DeliveryAttempt", (data) =>
-        {
-            var status = data.GetProperty("statusCode").ToString();
-            var cssClass = status == "250" ? "activity-delivered" : "activity-error";
-            AddEvent("<<<", $"Delivery to {data.GetProperty("recipient")}: {status} via {data.GetProperty("remoteServer")}", cssClass);
-        });
-
-        hubConnection.On<dynamic>("SmtpConnection", (data) =>
-        {
-            AddEvent("...", $"SMTP {data.GetProperty("eventType")} from {data.GetProperty("sourceIp")}", "activity-connection");
-        });
-
-        hubConnection.Closed += _ => { isConnected = false; if (!_disposed) InvokeAsync(StateHasChanged); return Task.CompletedTask; };
-        hubConnection.Reconnected += _ => { isConnected = true; if (!_disposed) InvokeAsync(StateHasChanged); return Task.CompletedTask; };
-
-        try
-        {
-            await hubConnection.StartAsync();
-            isConnected = true;
-        }
-        catch
-        {
-            isConnected = false;
-        }
-    }
-
-    private void AddEvent(string icon, string text, string cssClass)
-    {
-        if (_disposed) return;
-        // SignalR handlers run off the circuit's sync context; marshal the list mutation AND the
-        // render onto the dispatcher so the non-thread-safe List is only ever touched there (the
-        // renderer and ClearFeed also run on the dispatcher), avoiding torn state / "collection
-        // modified" while enumerating.
+        // Feed handlers run on the publisher's thread; marshal the list mutation AND the render onto the
+        // circuit's dispatcher so the non-thread-safe List is only ever touched there.
         _ = InvokeAsync(() =>
         {
             if (_disposed) return;
-            events.Insert(0, new ActivityEvent(DateTimeOffset.UtcNow, icon, text, cssClass));
+            events.Insert(0, new FeedItem(e.TimestampUtc, icon, text, css));
             if (events.Count > MaxEvents)
                 events.RemoveAt(events.Count - 1);
             StateHasChanged();
         });
     }
 
+    /// <summary>Show an event when it isn't tenant-scoped, or it matches this circuit's scope.</summary>
+    private bool IsForMe(ActivityEvent e)
+        => e.TenantId is null || CurrentTenant.IsHostScope || e.TenantId == CurrentTenant.TenantId;
+
     private void ClearFeed() => events.Clear();
 
-    public async ValueTask DisposeAsync()
+    public void Dispose()
     {
         _disposed = true;
-        if (hubConnection is not null)
-            await hubConnection.DisposeAsync();
+        Feed.Received -= OnActivity;
     }
 
-    private record ActivityEvent(DateTimeOffset Timestamp, string Icon, string Text, string CssClass);
+    private record FeedItem(DateTimeOffset Timestamp, string Icon, string Text, string CssClass);
 }
