@@ -24,7 +24,15 @@ public sealed class PublicDnsLookupClient
             IPAddress.Parse("1.1.1.1"))
         {
             UseCache = true,
-            Timeout = TimeSpan.FromSeconds(5),
+            // Always try the servers in the listed order (8.8.8.8 first), never at random. DnsClient
+            // randomises the name server per query by default, so on a network where one resolver is
+            // slow or black-holed (e.g. 1.1.1.1 blocked by a firewall) ~half the lookups would burn the
+            // full timeout — making the deliverability page, which runs many sequential lookups, appear
+            // to hang. Pinning the order means 1.1.1.1 is only used if 8.8.8.8 actually fails.
+            UseRandomNameServer = false,
+            // Bounded per-query cost so a single dead resolver can't dominate page load. 1 retry on the
+            // next server keeps a one-off packet loss from failing the check.
+            Timeout = TimeSpan.FromSeconds(2.5),
             Retries = 1,
         });
     }
