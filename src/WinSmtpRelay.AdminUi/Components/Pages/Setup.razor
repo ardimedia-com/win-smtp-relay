@@ -60,10 +60,6 @@ else
                 <div class="setup-row-title">
                     @item.Title
                     <span class="badge-status @StatusBadge(item.Status)">@StatusText(item.Status)</span>
-                    @if (item.Group == SetupGroup.Recommended)
-                    {
-                        <span class="badge-status badge-muted">Best practice</span>
-                    }
                 </div>
                 <div class="setup-row-detail">@item.Detail</div>
             </div>
@@ -189,7 +185,7 @@ else
         </BbCard>
     </AuthorizeView>
 
-    <div class="setup-group-label">Basic <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— your organization and the sending identity it relays with</span></div>
+    <div class="setup-group-label">Basic <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— your organization and the sending identity it relays with · @basicDone of @basicTotal in place</span></div>
     <BbCard>
         <BbCardContent>
             @* Basic can otherwise read all-green while the org still can't send (no submission path),
@@ -212,7 +208,7 @@ else
         </BbCardContent>
     </BbCard>
 
-    <div class="setup-group-label">Best practices <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— secure submission and reaching the inbox</span></div>
+    <div class="setup-group-label">Best practices <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— secure submission and reaching the inbox · @recDone of @recTotal in place</span></div>
     <BbCard>
         <BbCardContent>
             @foreach (var item in recommendedItems) { @row(item) }
@@ -279,7 +275,7 @@ else
             <p>This page checks your organization's configuration in real time and groups it into three tiers:</p>
             <ul style="padding-left:1.25rem;">
                 <li><strong>Basic</strong> — your organization and the sending identity the rest of the config builds on (public hostname + IP). The <em>Can send mail</em> tile turns green once the org is active and clients can submit (set up under <em>Submission access</em>).</li>
-                <li><strong>Best practices</strong> — secure submission (SMTP credentials) plus deliverability best practice (verified domains, DKIM, published DNS). Mail can still flow without them, but authenticated submission and these records keep it out of spam. Each carries a <em>Best practice</em> tag.</li>
+                <li><strong>Best practices</strong> — secure submission (SMTP credentials) plus deliverability best practice (verified domains, DKIM, published DNS). Mail can still flow without them, but authenticated submission and these records keep it out of spam.</li>
                 <li><strong>Optional</strong> — refinements with a sensible default; an empty list usually means "allow all", shown as <em>Default</em>.</li>
             </ul>
             <h4 style="margin-top:1rem;">Status badges</h4>
@@ -317,6 +313,8 @@ else
     private SetupItem? nextAction;
     private int recDone;
     private int recTotal;
+    private int basicDone;
+    private int basicTotal;
     private bool isLoading = true;
     private bool dnsLoading;
     private bool showHelp;
@@ -493,6 +491,8 @@ else
             recommendedItems.Add(dnsItem);
         recTotal = recommendedItems.Count;
         recDone = recommendedItems.Count(i => i.Status == SetupStatus.Done);
+        basicTotal = readiness.Required.Count();
+        basicDone = readiness.Required.Count(i => i.Status == SetupStatus.Done);
         // The submission path determines whether mail can flow at all, so when the tenant can't send,
         // surface that item first — even though it now lives under Recommended. Otherwise fall back to
         // the usual Basic-then-Recommended attention order.

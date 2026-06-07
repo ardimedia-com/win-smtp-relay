@@ -391,7 +391,7 @@ else
                 var egress = tenant?.EgressIpAddress?.Trim();
                 if (!string.IsNullOrWhiteSpace(egress) && !sendingIps.Any(s => IpEquals(s, egress)))
                 {
-                    ipGroups.Add(new CheckGroup(egress, "Tenant egress IP — outbound mail for this tenant leaves from here",
+                    ipGroups.Add(new CheckGroup(egress, "Tenant outbound IP — outbound mail for this tenant leaves from here",
                         [await dns.CheckReverseDnsAsync(egress, ct), await dns.CheckBlocklistsAsync(egress, ct), SpfCoverage(egress, inSpf: false)]));
                     ips.Add(egress);
                 }

@@ -21,6 +21,8 @@ public static class RelayAdminUiExtensions
         services.AddScoped<Services.BrowserTimeService>();
         // Proposes the relay's public IP (via an external lookup) when configuring Sending IPs.
         services.AddScoped<Services.PublicIpDetector>();
+        // Lists the host's local IPv4s and tests outbound SMTP from a chosen source IP (egress-IP UI).
+        services.AddSingleton<Services.LocalNetworkProbe>();
         return services;
     }
 }

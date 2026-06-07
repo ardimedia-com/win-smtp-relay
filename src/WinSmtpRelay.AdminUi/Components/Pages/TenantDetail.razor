@@ -5,6 +5,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject WinSmtpRelay.AdminUi.Services.LocalNetworkProbe NetProbe
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -68,10 +69,38 @@ else
                         <p class="text-muted" style="font-size:0.78rem;margin-top:0.25rem;">Enabling a pending self-service signup also confirms and unlocks its admins.</p>
                     }
                 </div>
-                <div class="form-group" style="max-width:320px;">
-                    <BbLabel For="egress-ip-address">Egress IP address</BbLabel>
+                <div class="form-group col-span-full">
+                    <BbLabel For="egress-ip-address">Outbound (sending) IP</BbLabel>
                     <BbInput Id="egress-ip-address" @bind-Value="egress" Placeholder="(OS default)" />
                     <p class="text-muted" style="font-size:0.78rem;margin-top:0.25rem;">Outbound mail for this tenant binds to this source IP. The host must own it; leave blank for the OS default.</p>
+                    <div class="flex gap-1 items-center" style="margin-top:0.5rem;flex-wrap:wrap;">
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="DetectLocalIps">
+                            <LucideIcon Name="search" /> Detect local IPs
+                        </BbButton>
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="TestOutboundAsync" Disabled="@probing">
+                            <LucideIcon Name="plug" /> @(probing ? "Testing…" : "Test outbound")
+                        </BbButton>
+                    </div>
+                    @if (localIps.Count > 0)
+                    {
+                        <div style="margin-top:0.4rem;display:flex;gap:0.35rem;flex-wrap:wrap;align-items:center;">
+                            <span class="text-muted" style="font-size:0.78rem;">Detected — click to use:</span>
+                            @foreach (var ip in localIps)
+                            {
+                                <button type="button" class="badge-status badge-muted" style="cursor:pointer;border:none;" title="Use this IP" @onclick="@(() => egress = ip)">@ip</button>
+                            }
+                        </div>
+                    }
+                    @if (probeResults.Count > 0)
+                    {
+                        <div style="margin-top:0.4rem;font-size:0.78rem;line-height:1.5;">
+                            <div class="text-muted">Outbound test from @(string.IsNullOrWhiteSpace(egress) ? "the OS-default IP" : egress):</div>
+                            @foreach (var r in probeResults)
+                            {
+                                <div class="@(r.Ok ? "" : "text-danger")">@(r.Ok ? "✓" : "✗") @r.Label — @r.Message</div>
+                            }
+                        </div>
+                    }
                 </div>
                 <div class="form-group">
                     <BbLabel>Created</BbLabel>
@@ -111,6 +140,32 @@ else
     private string egress = "";
     private bool wasEnabled;
     private DateTimeOffset createdUtc;
+
+    // Outbound-IP helpers: list the host's local IPv4s to pick from, and test outbound SMTP from the
+    // chosen source IP so the operator can confirm it can actually reach the internet on the SMTP ports.
+    private List<string> localIps = [];
+    private bool probing;
+    private readonly List<(bool Ok, string Label, string Message)> probeResults = [];
+
+    private void DetectLocalIps() => localIps = [.. NetProbe.GetLocalIpv4Addresses()];
+
+    private async Task TestOutboundAsync()
+    {
+        probing = true;
+        probeResults.Clear();
+        try
+        {
+            var src = string.IsNullOrWhiteSpace(egress) ? null : egress.Trim();
+            var mx = await NetProbe.TestOutboundAsync(src, "gmail-smtp-in.l.google.com", 25);
+            probeResults.Add((mx.Ok, "Port 25 → public MX (direct delivery)", mx.Message));
+            var sub = await NetProbe.TestOutboundAsync(src, "smtp-relay.brevo.com", 587);
+            probeResults.Add((sub.Ok, "Port 587 → Brevo (smart host)", sub.Message));
+        }
+        finally
+        {
+            probing = false;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
