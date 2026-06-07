@@ -23,6 +23,7 @@ public class ConfigurationSeeder(
     IOptions<EmailAuthenticationOptions> emailAuthOpts,
     IOptions<BackupMxOptions> backupMxOpts,
     IOptions<StatisticsOptions> statisticsOpts,
+    IOptions<DataRetentionOptions> dataRetentionOpts,
     IOptions<DnsOptions> dnsOpts,
     ILogger<ConfigurationSeeder> logger) : IHostedService
 {
@@ -41,6 +42,7 @@ public class ConfigurationSeeder(
         await SeedEmailAuthSettingsAsync(db, cancellationToken);
         await SeedBackupMxSettingsAsync(db, cancellationToken);
         await SeedStatisticsRetentionSettingsAsync(db, cancellationToken);
+        await SeedDataRetentionSettingsAsync(db, cancellationToken);
         await SeedDnsSettingsAsync(db, cancellationToken);
         await SeedMessageFiltersAsync(db, cancellationToken);
     }
@@ -277,6 +279,26 @@ public class ConfigurationSeeder(
         existing.UpdatedUtc = SeedSentinel;
         await db.SaveChangesAsync(ct);
         logger.LogInformation("Applied statistics retention settings from appsettings (row not yet edited)");
+    }
+
+    private async Task SeedDataRetentionSettingsAsync(RelayDbContext db, CancellationToken ct)
+    {
+        var existing = await db.DataRetentionSettings.FindAsync([1], ct);
+        if (existing is null) return; // seeded by EF HasData
+
+        if (existing.UpdatedUtc != SeedSentinel)
+            return; // edited via UI — DB authoritative
+
+        var opts = dataRetentionOpts.Value;
+        existing.Profile = opts.Profile;
+        existing.StripBodyOnDelivery = opts.StripBodyOnDelivery;
+        existing.MessageHistoryDays = opts.MessageHistoryDays;
+        existing.DeliveryLogDays = Math.Max(DataRetentionSettings.DeliveryLogFloorDays, opts.DeliveryLogDays);
+        existing.SuppressionDays = opts.SuppressionDays;
+        // Keep UpdatedUtc at the sentinel (explicitly) so appsettings remains the source until a UI edit.
+        existing.UpdatedUtc = SeedSentinel;
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Applied data-retention settings from appsettings (row not yet edited)");
     }
 
     private async Task SeedDnsSettingsAsync(RelayDbContext db, CancellationToken ct)

@@ -193,6 +193,21 @@ public class DeliveryWorker(
             await queue.UpdateStatusAsync(message.Id, MessageStatus.Delivered, cancellationToken: cancellationToken);
             _ = activityNotifier.NotifyQueueChangedAsync();
 
+            // Data-retention policy: drop the message body once delivered (the metadata row stays for the
+            // queue/audit history). Archive/regulated profiles turn this off to retain the content. Best-effort:
+            // this runs after delivery already succeeded, so a settings-read hiccup must never revert the
+            // message to Queued — and the nightly retention purge removes the body either way.
+            try
+            {
+                var retention = scope.ServiceProvider.GetService<IDataRetentionSettingsService>();
+                if (retention is not null && (await retention.GetAsync(cancellationToken)).StripBodyOnDelivery)
+                    await queue.StripBodyAsync(message.Id, cancellationToken);
+            }
+            catch (Exception stripEx)
+            {
+                logger.LogWarning(stripEx, "Could not strip body for delivered message {QueueId}", message.Id);
+            }
+
             // Log per-recipient delivery results and broadcast via SignalR
             foreach (var dr in deliveryResults)
             {

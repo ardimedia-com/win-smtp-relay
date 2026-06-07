@@ -36,8 +36,17 @@ public class MessageQueue(RelayDbContext db) : IMessageQueue
             .ExecuteUpdateAsync(s => s
                 .SetProperty(m => m.Status, status)
                 .SetProperty(m => m.LastError, error)
-                .SetProperty(m => m.CompletedUtc, status is MessageStatus.Delivered or MessageStatus.Bounced ? DateTimeOffset.UtcNow : (DateTimeOffset?)null),
+                .SetProperty(m => m.CompletedUtc, status is MessageStatus.Delivered or MessageStatus.Bounced or MessageStatus.Failed or MessageStatus.Suppressed ? DateTimeOffset.UtcNow : (DateTimeOffset?)null),
                 cancellationToken);
+    }
+
+    public async Task StripBodyAsync(long messageId, CancellationToken cancellationToken = default)
+    {
+        // Data minimisation: once a message is delivered its body is no longer needed. Drop the raw bytes
+        // while keeping the metadata row (sender/recipients/status) for the audit/queue history.
+        await db.QueuedMessages
+            .Where(m => m.Id == messageId)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.RawMessage, Array.Empty<byte>()), cancellationToken);
     }
 
     public async Task<QueuedMessage?> GetByIdAsync(long messageId, CancellationToken cancellationToken = default)

@@ -34,6 +34,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEmailAuthSettingsService, EmailAuthSettingsService>();
         services.AddScoped<IBackupMxSettingsService, BackupMxSettingsService>();
         services.AddScoped<IStatisticsRetentionSettingsService, StatisticsRetentionSettingsService>();
+        services.AddScoped<IDataRetentionSettingsService, DataRetentionSettingsService>();
+        services.AddScoped<IRetentionService, RetentionService>();
         services.AddScoped<IReportingSettingsService, ReportingSettingsService>();
         services.AddScoped<IDnsSettingsService, DnsSettingsService>();
         services.AddScoped<IMessageFilterService, MessageFilterService>();

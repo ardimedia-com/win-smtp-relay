@@ -34,6 +34,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<EmailAuthSettings> EmailAuthSettings => Set<EmailAuthSettings>();
     public DbSet<BackupMxSettings> BackupMxSettings => Set<BackupMxSettings>();
     public DbSet<StatisticsRetentionSettings> StatisticsRetentionSettings => Set<StatisticsRetentionSettings>();
+    public DbSet<DataRetentionSettings> DataRetentionSettings => Set<DataRetentionSettings>();
     public DbSet<ReportingSettings> ReportingSettings => Set<ReportingSettings>();
     public DbSet<DnsSettings> DnsSettings => Set<DnsSettings>();
     public DbSet<HeaderRewriteEntry> HeaderRewriteEntries => Set<HeaderRewriteEntry>();
@@ -270,6 +271,22 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 Id = 1,
                 RetentionDays = 90,
                 AggregationTimeUtc = "00:00",
+                UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
+            });
+        });
+
+        modelBuilder.Entity<DataRetentionSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Profile).HasMaxLength(20);
+            entity.HasData(new DataRetentionSettings
+            {
+                Id = 1,
+                Profile = "Standard",
+                StripBodyOnDelivery = true,
+                MessageHistoryDays = 30,
+                DeliveryLogDays = 90,
+                SuppressionDays = 0,
                 UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });

@@ -129,6 +129,38 @@ public class MessageQueueStorageTests
         Assert.IsNull(deleted);
     }
 
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task StripBodyAsync_ClearsRawMessageKeepsMetadata()
+    {
+        var msg = CreateMessage();
+        var id = await _queue.EnqueueAsync(msg);
+
+        await _queue.StripBodyAsync(id);
+
+        _db.ChangeTracker.Clear();
+        var stripped = await _queue.GetByIdAsync(id);
+        Assert.IsNotNull(stripped);
+        Assert.AreEqual(0, stripped.RawMessage.Length);
+        Assert.AreEqual("sender@example.com", stripped.Sender);
+        Assert.AreEqual(100, stripped.SizeBytes);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task UpdateStatusAsync_SetsCompletedForAllTerminalStates()
+    {
+        foreach (var status in new[] { MessageStatus.Bounced, MessageStatus.Failed, MessageStatus.Suppressed })
+        {
+            var id = await _queue.EnqueueAsync(CreateMessage());
+            await _queue.UpdateStatusAsync(id, status);
+            _db.ChangeTracker.Clear();
+            var updated = await _queue.GetByIdAsync(id);
+            Assert.IsNotNull(updated);
+            Assert.IsNotNull(updated.CompletedUtc, $"CompletedUtc should be set for {status}");
+        }
+    }
+
     private static QueuedMessage CreateMessage() => new()
     {
         MessageId = $"<{Guid.NewGuid()}@test>",

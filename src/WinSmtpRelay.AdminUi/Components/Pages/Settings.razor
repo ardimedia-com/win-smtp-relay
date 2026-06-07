@@ -1,6 +1,7 @@
 @page "/settings"
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Configuration
+@using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
 @inject WinSmtpRelay.AdminUi.Services.PublicIpDetector IpDetector
@@ -34,7 +35,7 @@ else
             <BbTabsTrigger Value="email-auth">Email auth</BbTabsTrigger>
             <BbTabsTrigger Value="signup">Signup</BbTabsTrigger>
             <BbTabsTrigger Value="backup-mx">Backup MX</BbTabsTrigger>
-            <BbTabsTrigger Value="statistics">Statistics</BbTabsTrigger>
+            <BbTabsTrigger Value="statistics">Data retention</BbTabsTrigger>
             <BbTabsTrigger Value="reporting">Reporting</BbTabsTrigger>
         </BbTabsList>
 
@@ -219,26 +220,94 @@ else
         <BbTabsContent Value="statistics">
     <BbCard>
         <BbCardHeader>
-            <BbCardTitle>Statistics retention</BbCardTitle>
+            <BbCardTitle>Data retention</BbCardTitle>
+            <BbCardDescription>
+                How long each category of accumulating data is kept before the nightly maintenance run purges it.
+                Pick a template, then fine-tune any value. Templates are best-practice starting points, not legal
+                advice — verify obligations for your jurisdiction and business with your compliance/legal advisor.
+            </BbCardDescription>
         </BbCardHeader>
         <BbCardContent>
             <div class="settings-group">
-                <div class="settings-group-title">Retention</div>
+                <div class="settings-group-title">Template</div>
+                <div class="form-group">
+                    <BbLabel For="retention-profile">Retention profile</BbLabel>
+                    <select class="account-input" id="retention-profile" value="@CurrentProfileKey" @onchange="OnProfileChanged">
+                        @foreach (var p in RetentionProfiles.All)
+                        {
+                            <option value="@p.Key">@p.Name</option>
+                        }
+                        <option value="@RetentionProfiles.Custom">Custom</option>
+                    </select>
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.35rem;margin-bottom:0;">@ProfileBasis</p>
+            </div>
+
+            <div class="settings-group">
+                <div class="settings-group-title">Message content &amp; history</div>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <BbSwitch Checked="drStripBody" CheckedChanged="(bool v) => drStripBody = v" id="strip-body" AriaLabel="Strip the message body once delivered" />
+                    <span>Strip the message body once delivered (keep only metadata)</span>
+                </div>
+                <div class="form-group" style="margin-top:0.75rem;">
+                    <BbLabel For="msg-days">Keep delivered / bounced / failed messages (days)</BbLabel>
+                    <BbInput Id="msg-days" Type="InputType.Number" @bind-Value="drMessageDays" />
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">
+                    In-flight messages (queued / delivering) are never purged. With strip-on-delivery off, full
+                    message bodies are retained for this whole window.
+                </p>
+            </div>
+
+            <div class="settings-group">
+                <div class="settings-group-title">Audit &amp; statistics</div>
                 <div class="form-grid">
                     <div class="form-group">
-                        <BbLabel For="retention">Retention (days)</BbLabel>
-                        <BbInput Id="retention" Type="InputType.Number" @bind-Value="statRetentionDays" />
+                        <BbLabel For="log-days">Delivery audit log / Journal (days)</BbLabel>
+                        <BbInput Id="log-days" Type="InputType.Number" @bind-Value="drLogDays" />
                     </div>
                     <div class="form-group">
-                        <BbLabel For="daily-aggregation-time">Daily aggregation time (UTC, HH:mm)</BbLabel>
-                        <BbInput Id="daily-aggregation-time" @bind-Value="statAggTime" Placeholder="00:00" />
+                        <BbLabel For="retention">Statistics (days)</BbLabel>
+                        <BbInput Id="retention" Type="InputType.Number" @bind-Value="statRetentionDays" />
                     </div>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">
-                    Daily statistics older than the retention window are purged by the background aggregator, which runs at the configured UTC time.
+                    The delivery audit log cannot be set below @DataRetentionSettings.DeliveryLogFloorDays days, so delivery evidence is preserved.
                 </p>
             </div>
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveStatisticsAsync" Class="mt-1">
+
+            <div class="settings-group">
+                <div class="settings-group-title">Suppression list</div>
+                <div class="form-group">
+                    <BbLabel For="suppression-days">Keep suppression entries (days — 0 = keep forever)</BbLabel>
+                    <BbInput Id="suppression-days" Type="InputType.Number" @bind-Value="drSuppressionDays" />
+                </div>
+            </div>
+
+            <div class="settings-group">
+                <div class="settings-group-title">Maintenance schedule</div>
+                <div class="form-group">
+                    <BbLabel For="daily-aggregation-time">Daily run time (UTC, HH:mm)</BbLabel>
+                    <BbInput Id="daily-aggregation-time" @bind-Value="statAggTime" Placeholder="00:00" />
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">
+                    The nightly maintenance run aggregates statistics and purges everything past its window at this UTC time.
+                </p>
+            </div>
+
+            @if (RetentionWarnings.Count > 0)
+            {
+                <div class="settings-group">
+                    @foreach (var w in RetentionWarnings)
+                    {
+                        <p style="display:flex;gap:0.5rem;align-items:flex-start;font-size:0.8rem;color:var(--warning);margin:0 0 0.4rem;">
+                            <LucideIcon Name="triangle-alert" Size="14" /> <span>@w</span>
+                        </p>
+                    }
+                </div>
+            }
+
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveDataRetentionAsync" Class="mt-1">
                 <LucideIcon Name="save" /> Save
             </BbButton>
             @if (!string.IsNullOrEmpty(statisticsStatus))
@@ -420,6 +489,12 @@ else
     private string statAggTime = "00:00";
     private string? statisticsStatus;
 
+    // Data retention (statistics days + schedule reuse statRetentionDays / statAggTime above).
+    private bool drStripBody = true;
+    private string drMessageDays = "30";
+    private string drLogDays = "90";
+    private string drSuppressionDays = "0";
+
     private string? dnsPublicHostname;
     private string? dnsSendingIps;
     private string? dnsSpfIncludes;
@@ -470,6 +545,12 @@ else
         var stats = await sp.GetRequiredService<IStatisticsRetentionSettingsService>().GetAsync();
         statRetentionDays = stats.RetentionDays.ToString();
         statAggTime = stats.AggregationTimeUtc;
+
+        var retention = await sp.GetRequiredService<IDataRetentionSettingsService>().GetAsync();
+        drStripBody = retention.StripBodyOnDelivery;
+        drMessageDays = retention.MessageHistoryDays.ToString();
+        drLogDays = retention.DeliveryLogDays.ToString();
+        drSuppressionDays = retention.SuppressionDays.ToString();
 
         var dns = await sp.GetRequiredService<IDnsSettingsService>().GetAsync();
         dnsPublicHostname = dns.PublicHostname;
@@ -560,16 +641,94 @@ else
             : "Backup MX disabled.";
     }
 
-    private async Task SaveStatisticsAsync()
+    // Data-retention profile reconciliation: the dropdown reflects whichever template the current field
+    // values match (or "Custom"), and selecting a template fills the fields.
+    private string CurrentProfileKey => MatchProfileKey();
+
+    private string ProfileBasis =>
+        RetentionProfiles.Find(CurrentProfileKey)?.Basis
+        ?? "Custom — the values below don't match a built-in template.";
+
+    private string MatchProfileKey()
     {
-        var days = int.TryParse(statRetentionDays, out var d) ? Math.Max(1, d) : 90;
+        if (!int.TryParse(drMessageDays, out var msg)) return RetentionProfiles.Custom;
+        if (!int.TryParse(drLogDays, out var log)) return RetentionProfiles.Custom;
+        if (!int.TryParse(statRetentionDays, out var stat)) return RetentionProfiles.Custom;
+        if (!int.TryParse(drSuppressionDays, out var sup)) return RetentionProfiles.Custom;
+
+        foreach (var p in RetentionProfiles.All)
+        {
+            if (p.StripBodyOnDelivery == drStripBody && p.MessageHistoryDays == msg
+                && p.DeliveryLogDays == log && p.StatisticsDays == stat && p.SuppressionDays == sup)
+                return p.Key;
+        }
+        return RetentionProfiles.Custom;
+    }
+
+    private void OnProfileChanged(ChangeEventArgs e)
+    {
+        var p = RetentionProfiles.Find(e.Value?.ToString() ?? "");
+        if (p is null) return; // "Custom" selected — keep the current field values
+
+        drStripBody = p.StripBodyOnDelivery;
+        drMessageDays = p.MessageHistoryDays.ToString();
+        drLogDays = p.DeliveryLogDays.ToString();
+        statRetentionDays = p.StatisticsDays.ToString();
+        drSuppressionDays = p.SuppressionDays.ToString();
+    }
+
+    private List<string> RetentionWarnings
+    {
+        get
+        {
+            var list = new List<string>();
+            if (!drStripBody)
+                list.Add("Message bodies are kept for the full message-history window — significant personal data at rest. "
+                       + "This relay is not an encrypted or tamper-proof (WORM) archive; ensure access controls and a lawful basis for the retention period.");
+            if (int.TryParse(drLogDays, out var log) && log < 30)
+                list.Add("Short delivery-audit-log retention: dispute and abuse evidence will be lost quickly.");
+            if (int.TryParse(drSuppressionDays, out var sup) && sup > 0)
+                list.Add("Expiring suppression entries re-enables sending to addresses that previously hard-bounced or complained.");
+            if (CurrentProfileKey is "Financial" or "Healthcare")
+                list.Add("Regulated template: it sets long retention durations only. True MiFID II / SEC 17a-4 / HIPAA compliance also "
+                       + "requires WORM/tamper-proof storage, encryption, and legal hold — verify with your compliance or legal advisor.");
+            return list;
+        }
+    }
+
+    private async Task SaveDataRetentionAsync()
+    {
+        var statDays = int.TryParse(statRetentionDays, out var sd) ? Math.Max(1, sd) : 365;
         var time = TimeOnly.TryParse(statAggTime, out var t) ? t.ToString("HH:mm") : "00:00";
-        using var scope = ScopeFactory.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IStatisticsRetentionSettingsService>()
-            .UpdateAsync(days, time);
-        statRetentionDays = days.ToString();
+        var msgDays = int.TryParse(drMessageDays, out var md) ? Math.Max(1, md) : 30;
+        var logDays = int.TryParse(drLogDays, out var ld) ? Math.Max(DataRetentionSettings.DeliveryLogFloorDays, ld) : 90;
+        var supDays = int.TryParse(drSuppressionDays, out var sup) ? Math.Max(0, sup) : 0;
+
+        // Reflect normalised values before reconciling the profile so the saved Profile matches what's stored.
+        statRetentionDays = statDays.ToString();
         statAggTime = time;
-        statisticsStatus = $"Statistics retention set to {days} days; aggregation at {time} UTC.";
+        drMessageDays = msgDays.ToString();
+        drLogDays = logDays.ToString();
+        drSuppressionDays = supDays.ToString();
+        var profile = MatchProfileKey();
+
+        using var scope = ScopeFactory.CreateScope();
+        // Statistics retention + the shared maintenance schedule live in their own settings row.
+        await scope.ServiceProvider.GetRequiredService<IStatisticsRetentionSettingsService>()
+            .UpdateAsync(statDays, time);
+        await scope.ServiceProvider.GetRequiredService<IDataRetentionSettingsService>()
+            .UpdateAsync(new DataRetentionSettings
+            {
+                Profile = profile,
+                StripBodyOnDelivery = drStripBody,
+                MessageHistoryDays = msgDays,
+                DeliveryLogDays = logDays,
+                SuppressionDays = supDays
+            });
+
+        var profileName = profile == RetentionProfiles.Custom ? "Custom" : RetentionProfiles.Find(profile)?.Name;
+        statisticsStatus = $"Data-retention saved ({profileName}). Messages {msgDays}d, audit log {logDays}d, "
+                         + $"statistics {statDays}d, suppression {(supDays == 0 ? "kept" : supDays + "d")}. Maintenance at {time} UTC.";
     }
 
     private async Task SaveDnsAsync()

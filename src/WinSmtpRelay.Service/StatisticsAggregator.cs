@@ -57,6 +57,10 @@ public class StatisticsAggregator(
                 await stats.AggregateDayAsync(yesterday, stoppingToken);
                 await stats.PurgeOldStatisticsAsync(retentionDays, stoppingToken);
 
+                // Same nightly maintenance pass also applies the data-retention policy (message history,
+                // delivery audit log, suppression list). Unscoped scope ⇒ purge spans all tenants.
+                await scope.ServiceProvider.GetRequiredService<IRetentionService>().RunPurgeAsync(stoppingToken);
+
                 logger.LogInformation("Statistics aggregation complete for {Date}", yesterday);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

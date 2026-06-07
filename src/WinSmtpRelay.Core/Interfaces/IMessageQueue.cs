@@ -24,4 +24,8 @@ public interface IMessageQueue
     /// <summary>Records the ";"-delimited set of recipients that have now received a 250, so a retry of
     /// this message skips them (prevents duplicate delivery to already-succeeded recipients).</summary>
     Task SetDeliveredRecipientsAsync(long messageId, string deliveredRecipients, CancellationToken cancellationToken = default);
+
+    /// <summary>Clears a message's raw body (keeps the metadata row) — used by the strip-on-delivery
+    /// data-retention policy once a message has been delivered.</summary>
+    Task StripBodyAsync(long messageId, CancellationToken cancellationToken = default);
 }

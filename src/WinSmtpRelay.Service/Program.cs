@@ -40,6 +40,7 @@ builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(Webh
 builder.Services.Configure<MessageFilterOptions>(builder.Configuration.GetSection(MessageFilterOptions.SectionName));
 builder.Services.Configure<BackupMxOptions>(builder.Configuration.GetSection(BackupMxOptions.SectionName));
 builder.Services.Configure<StatisticsOptions>(builder.Configuration.GetSection(StatisticsOptions.SectionName));
+builder.Services.Configure<DataRetentionOptions>(builder.Configuration.GetSection(DataRetentionOptions.SectionName));
 builder.Services.Configure<DnsOptions>(builder.Configuration.GetSection(DnsOptions.SectionName));
 
 // Storage
