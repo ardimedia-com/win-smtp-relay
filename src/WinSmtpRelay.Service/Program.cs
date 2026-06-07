@@ -63,19 +63,25 @@ var adminUiConfig = builder.Configuration.GetSection(AdminUiOptions.SectionName)
 // self-signed certificate generated next to the service binaries. This keeps the admin plane on HTTPS
 // out of the box — a self-signed cert just means a one-time browser warning until a trusted certificate
 // is imported via the admin UI.
-System.Security.Cryptography.X509Certificates.X509Certificate2? adminCert = null;
+// A shared provider holds the certificate Kestrel serves. It starts as the configured PFX or the
+// generated self-signed cert; an operator can later import a trusted certificate via the admin UI, which
+// swaps it at runtime (Kestrel reads the provider per TLS handshake, so no restart is needed).
+var adminCertProvider = new WinSmtpRelay.Core.AdminCertificateProvider();
 if (adminUiConfig.Enabled && adminUiConfig.UseHttps)
 {
     using var certLoggerFactory = LoggerFactory.Create(b => b.AddConsole());
-    adminCert = WinSmtpRelay.Security.AdminUiCertificate.Resolve(
+    var initialCert = WinSmtpRelay.Security.AdminUiCertificate.Resolve(
         adminUiConfig, AppContext.BaseDirectory,
         certLoggerFactory.CreateLogger("WinSmtpRelay.AdminUiCertificate"));
+    if (initialCert is not null)
+        adminCertProvider.Set(initialCert);
 }
+builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IAdminCertificateProvider>(adminCertProvider);
 
-// HTTPS is active when UseHttps is on and a certificate is available (configured/self-signed), or the
-// ASP.NET Core dev certificate in Development.
+// HTTPS is active when UseHttps is on and a certificate is available (configured/self-signed/imported),
+// or the ASP.NET Core dev certificate in Development.
 var adminHttpsActive = adminUiConfig.UseHttps &&
-    (adminCert is not null || builder.Environment.IsDevelopment());
+    (adminCertProvider.Current is not null || builder.Environment.IsDevelopment());
 
 if (adminUiConfig.Enabled)
 {
@@ -86,11 +92,12 @@ if (adminUiConfig.Enabled)
             if (!adminUiConfig.UseHttps)
                 return; // explicit opt-out → serve HTTP
 
-            if (adminCert is not null)
-                listen.UseHttps(adminCert);
+            if (adminCertProvider.Current is not null)
+                // Read the certificate per handshake so an admin-UI import takes effect without a restart.
+                listen.UseHttps(https => https.ServerCertificateSelector = (_, _) => adminCertProvider.Current);
             else if (builder.Environment.IsDevelopment())
-                listen.UseHttps(); // ASP.NET Core development certificate
-            // else: certificate resolution failed (logged above) and not Development — HTTPS not bound
+                listen.UseHttps(); // dev certificate fallback when self-signed generation is unavailable
+            // else: no certificate (logged above) and not Development — HTTPS not bound
         });
     });
 
@@ -140,6 +147,30 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
     await db.Database.MigrateAsync();
+}
+
+// Apply an operator-imported admin-UI certificate (stored in the DB via the admin UI) over the startup
+// default, if one is present. The provider is read by Kestrel per handshake, so this takes effect for
+// new connections.
+if (adminUiConfig.Enabled && adminUiConfig.UseHttps)
+{
+    using var scope = app.Services.CreateScope();
+    try
+    {
+        var imported = await scope.ServiceProvider
+            .GetRequiredService<WinSmtpRelay.Core.Interfaces.IAdminCertificateService>()
+            .LoadImportedAsync();
+        if (imported is not null)
+        {
+            adminCertProvider.Set(imported);
+            app.Logger.LogInformation("Admin UI HTTPS: using imported certificate {Subject} (expires {Expiry:u}).",
+                imported.Subject, imported.NotAfter);
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Admin UI HTTPS: could not load the imported certificate — keeping the startup default.");
+    }
 }
 
 if (adminUiConfig.Enabled)

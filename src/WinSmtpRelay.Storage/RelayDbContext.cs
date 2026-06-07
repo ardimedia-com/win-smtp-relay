@@ -35,6 +35,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<BackupMxSettings> BackupMxSettings => Set<BackupMxSettings>();
     public DbSet<StatisticsRetentionSettings> StatisticsRetentionSettings => Set<StatisticsRetentionSettings>();
     public DbSet<DataRetentionSettings> DataRetentionSettings => Set<DataRetentionSettings>();
+    public DbSet<AdminCertificateSettings> AdminCertificateSettings => Set<AdminCertificateSettings>();
     public DbSet<ReportingSettings> ReportingSettings => Set<ReportingSettings>();
     public DbSet<DnsSettings> DnsSettings => Set<DnsSettings>();
     public DbSet<HeaderRewriteEntry> HeaderRewriteEntries => Set<HeaderRewriteEntry>();
@@ -273,6 +274,16 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 AggregationTimeUtc = "00:00",
                 UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
+        });
+
+        modelBuilder.Entity<AdminCertificateSettings>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Subject).HasMaxLength(500);
+            entity.Property(e => e.Thumbprint).HasMaxLength(100);
+            // Encrypt the stored PFX at rest via DPAPI (same converter as the DKIM key / smart-host password).
+            entity.Property(e => e.PfxBase64)
+                .HasConversion(v => SecretProtector.Protect(v), v => SecretProtector.Unprotect(v));
         });
 
         modelBuilder.Entity<DataRetentionSettings>(entity =>

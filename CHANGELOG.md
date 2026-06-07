@@ -10,10 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Windows installer: a **Start menu** entry ("WIN-SMTP-RELAY") that opens the admin UI, and the installer's final screen now shows the admin URL.
+- **Import an HTTPS certificate** for the admin UI from a new host-only page (Server → **HTTPS Certificate**): upload a PFX / PKCS#12 (with its password), which is validated (must include a private key), stored password-less and encrypted at rest (DPAPI), and applied to **new connections immediately — no service restart**. A "Remove" action reverts to the built-in self-signed certificate. Migration `AddAdminCertificateSettings`.
 
 ### Changed
 
-- The admin UI is now served over **HTTPS by default**. When no certificate is configured, the service generates a persistent **self-signed certificate** (stored next to the service binaries) and binds HTTPS to it, instead of falling back to plain HTTP — so the management plane is always encrypted. Browsers show a one-time warning for the self-signed certificate; a configured PFX (`AdminUi:CertificatePath`) still takes priority. (Importing a trusted certificate from the admin UI follows next.)
+- The admin UI is now served over **HTTPS by default**. When no certificate is configured, the service generates a persistent **self-signed certificate** (stored next to the service binaries) and binds HTTPS to it, instead of falling back to plain HTTP — so the management plane is always encrypted. Browsers show a one-time warning for the self-signed certificate; a configured PFX (`AdminUi:CertificatePath`) still takes priority, and a certificate can be imported at runtime from the admin UI (see Added).
 
 ## [1.0.0-beta1-build27] - 2026-06-07
 

@@ -1,0 +1,215 @@
+@page "/settings/certificate"
+@using Microsoft.AspNetCore.Components.Forms
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Configuration
+@using WinSmtpRelay.Core.Models
+@using Microsoft.Extensions.Options
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
+@inject IServiceScopeFactory ScopeFactory
+@inject IAdminCertificateProvider CertProvider
+@inject IOptions<AdminUiOptions> AdminUiOpts
+@inject ILogger<AdminCertificate> Logger
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>HTTPS certificate</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>HTTPS certificate</h1>
+    <p>The certificate the admin UI is served with. Out of the box the relay generates a self-signed certificate (browsers show a warning) — import a trusted certificate here to remove the warning.</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[160px] w-full" />
+}
+else
+{
+    <BbCard Class="mb-1">
+        <BbCardHeader>
+            <BbCardTitle>Current certificate</BbCardTitle>
+        </BbCardHeader>
+        <BbCardContent>
+            <div class="dns-record">
+                <div class="dns-record-head">
+                    <strong>@(info.HasImportedCertificate ? "Imported certificate" : "Built-in self-signed certificate")</strong>
+                    <span class="badge-status @(info.HasImportedCertificate ? "badge-success" : "badge-warning")">
+                        @(info.HasImportedCertificate ? "Trusted (imported)" : "Self-signed")
+                    </span>
+                </div>
+                @if (!info.HasImportedCertificate)
+                {
+                    <div class="text-muted" style="font-size:0.8rem;">
+                        Browsers will warn about this certificate because it is not issued by a trusted authority.
+                        That is expected; the connection is still encrypted. Import a real certificate below to remove the warning.
+                    </div>
+                }
+                <div class="dns-record-row">
+                    <span class="dns-record-label">Subject</span>
+                    <code class="mono dns-record-value">@(CurrentSubject ?? "—")</code>
+                </div>
+                <div class="dns-record-row">
+                    <span class="dns-record-label">Expires</span>
+                    <code class="mono dns-record-value">@(CurrentExpiry?.ToString("yyyy-MM-dd") ?? "—")</code>
+                </div>
+                @if (!string.IsNullOrEmpty(CurrentThumbprint))
+                {
+                    <div class="dns-record-row">
+                        <span class="dns-record-label">Thumbprint</span>
+                        <code class="mono dns-record-value">@CurrentThumbprint</code>
+                    </div>
+                }
+            </div>
+
+            @if (info.HasImportedCertificate)
+            {
+                <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="RemoveAsync" Disabled="@busy" Class="mt-1">
+                    <LucideIcon Name="trash-2" /> Remove imported certificate (revert to self-signed)
+                </BbButton>
+            }
+        </BbCardContent>
+    </BbCard>
+
+    <BbCard Class="mb-1">
+        <BbCardHeader>
+            <BbCardTitle>Import a certificate</BbCardTitle>
+            <BbCardDescription>Upload a <strong>PFX / PKCS#12</strong> file that includes the private key. The new certificate is applied to new connections immediately — no service restart needed.</BbCardDescription>
+        </BbCardHeader>
+        <BbCardContent>
+            <div class="form-group" style="max-width:520px;">
+                <BbLabel For="pfx">Certificate file (.pfx / .p12)</BbLabel>
+                <InputFile id="pfx" OnChange="OnFileSelected" accept=".pfx,.p12" />
+            </div>
+            <div class="form-group" style="max-width:520px;margin-top:0.75rem;">
+                <BbLabel For="pfx-pass">Password (if the PFX is password-protected)</BbLabel>
+                <BbInput Id="pfx-pass" Type="InputType.Password" @bind-Value="password" Placeholder="PFX password" />
+            </div>
+
+            <BbButton Variant="ButtonVariant.Default" @onclick="ImportAsync" Disabled="@(busy || selectedFile is null)" Class="mt-1">
+                <LucideIcon Name="upload" /> @(busy ? "Importing…" : "Import certificate")
+            </BbButton>
+
+            @if (!string.IsNullOrEmpty(statusMessage))
+            {
+                <p class="text-muted" style="margin-top:0.5rem;">@statusMessage</p>
+            }
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <p class="text-danger" style="margin-top:0.5rem;">@errorMessage</p>
+            }
+
+            <p class="text-muted" style="font-size:0.78rem;margin-top:0.75rem;margin-bottom:0;">
+                The certificate (without its password) is stored encrypted in the database. After importing, reload this
+                page over the new certificate to confirm the browser no longer warns.
+            </p>
+        </BbCardContent>
+    </BbCard>
+}
+
+@code {
+    private bool isLoading = true;
+    private bool busy;
+    private AdminCertificateSettings info = new();
+    private IBrowserFile? selectedFile;
+    private string? password;
+    private string? statusMessage;
+    private string? errorMessage;
+
+    // Snapshot of the certificate Kestrel is currently serving (self-signed or imported).
+    private string? CurrentSubject;
+    private DateTime? CurrentExpiry;
+    private string? CurrentThumbprint;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        info = await scope.ServiceProvider.GetRequiredService<IAdminCertificateService>().GetAsync();
+
+        var current = CertProvider.Current;
+        CurrentSubject = current?.Subject;
+        CurrentExpiry = current?.NotAfter;
+        CurrentThumbprint = current?.Thumbprint;
+        isLoading = false;
+    }
+
+    private void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        statusMessage = null;
+        errorMessage = null;
+    }
+
+    private async Task ImportAsync()
+    {
+        if (selectedFile is null) return;
+        busy = true;
+        statusMessage = null;
+        errorMessage = null;
+        try
+        {
+            using var ms = new MemoryStream();
+            await selectedFile.OpenReadStream(maxAllowedSize: 512 * 1024).CopyToAsync(ms);
+
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IAdminCertificateService>();
+            await svc.ImportAsync(ms.ToArray(), password);
+
+            // Apply immediately (hot-swap): Kestrel reads the provider per handshake.
+            var cert = await svc.LoadImportedAsync();
+            if (cert is not null)
+                CertProvider.Set(cert);
+
+            password = null;
+            selectedFile = null;
+            await LoadAsync();
+            statusMessage = "Certificate imported and applied. New connections use it now — reload this page to confirm.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Could not import the certificate: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RemoveAsync()
+    {
+        busy = true;
+        statusMessage = null;
+        errorMessage = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<IAdminCertificateService>().ClearAsync();
+
+            // Revert the served certificate to the self-signed one immediately.
+            var selfSigned = WinSmtpRelay.Security.AdminUiCertificate.Resolve(
+                AdminUiOpts.Value, AppContext.BaseDirectory, Logger);
+            if (selfSigned is not null)
+                CertProvider.Set(selfSigned);
+
+            await LoadAsync();
+            statusMessage = "Imported certificate removed. The built-in self-signed certificate is in use again.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Could not remove the certificate: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}
