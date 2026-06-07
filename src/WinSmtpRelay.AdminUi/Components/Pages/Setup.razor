@@ -274,17 +274,15 @@ else
         <div style="font-size:0.875rem;line-height:1.6;">
             <p>This page checks your organization's configuration in real time and groups it into three tiers:</p>
             <ul style="padding-left:1.25rem;">
-                <li><strong>Basic</strong> — your organization and the sending identity the rest of the config builds on (public hostname + IP). The <em>Can send mail</em> tile turns green once the org is active and clients can submit (set up under <em>Submission access</em>).</li>
+                <li><strong>Basic</strong> — your organization and the sending identity the rest of the config builds on (public hostname + IP). The <em>Inbound</em> tile turns green once the org is active and clients can submit; the <em>Outbound</em> tile reflects whether mail actually leaves the relay.</li>
                 <li><strong>Best practices</strong> — secure submission (SMTP credentials) plus deliverability best practice (verified domains, DKIM, published DNS). Mail can still flow without them, but authenticated submission and these records keep it out of spam.</li>
-                <li><strong>Optional</strong> — refinements with a sensible default; an empty list usually means "allow all", shown as <em>Default</em>.</li>
+                <li><strong>Optional</strong> — refinements where a sensible default already applies (e.g. an empty list means "allow all"); these show as Done with the default noted.</li>
             </ul>
             <h4 style="margin-top:1rem;">Status badges</h4>
             <ul style="padding-left:1.25rem;">
-                <li><strong>Done</strong> — configured and valid.</li>
+                <li><strong>Done</strong> — configured, or a sensible default already applies; nothing to do.</li>
                 <li><strong>In progress</strong> — started but incomplete (e.g. some domains verified).</li>
-                <li><strong>To do</strong> — not configured yet.</li>
-                <li><strong>Blocked</strong> — waiting on a prerequisite (e.g. add a sender domain before verifying it).</li>
-                <li><strong>Default</strong> — an intentional permissive default applies (e.g. an empty sender-domain list means "accept any From"). Safe; no action needed.</li>
+                <li><strong>To do</strong> — a recommended step that isn't set up yet (do its prerequisite first if it mentions one).</li>
             </ul>
             <h4 style="margin-top:1rem;">Receiving mail</h4>
             <p class="text-muted">Sending (outbound) needs nothing host-side. To <em>receive</em> mail for your domains, a host administrator must run an SMTP listener (Receive Connector) and your domain's <strong>MX</strong> record must point to it.</p>
@@ -459,7 +457,7 @@ else
     {
         if (results.Count == 0)
             return new SetupItem("dns", "Publish SPF / DKIM / DMARC", SetupGroup.Recommended,
-                SetupStatus.Blocked, "Add a sender domain first", "/domains/sender", "Sender domains");
+                SetupStatus.Todo, "Add a sender domain first", "/domains/sender", "Sender domains");
 
         // Only records with an expected value are "publishable"; NotConfigured records (e.g. DKIM not
         // set up, or no sending IPs configured) have nothing to publish yet and are covered elsewhere.

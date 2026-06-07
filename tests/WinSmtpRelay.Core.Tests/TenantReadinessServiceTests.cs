@@ -130,17 +130,17 @@ public class TenantReadinessServiceTests
         var r = await Build(_current).GetAsync();
 
         Assert.IsTrue(r.CanSend, "An allow IP rule permits unauthenticated submission");
-        Assert.AreEqual(SetupStatus.Permissive, Item(r, "smtp-users").Status);
+        Assert.AreEqual(SetupStatus.Done, Item(r, "smtp-users").Status);
     }
 
     [TestMethod]
     [TestCategory("Unit")]
-    public async Task NoSenderDomains_IsPermissive_AndVerificationIsBlocked()
+    public async Task NoSenderDomains_AndVerification_AreTodo()
     {
         var r = await Build(_current).GetAsync();
 
-        Assert.AreEqual(SetupStatus.Permissive, Item(r, "sender-domains").Status);
-        Assert.AreEqual(SetupStatus.Blocked, Item(r, "sender-verified").Status);
+        Assert.AreEqual(SetupStatus.Todo, Item(r, "sender-domains").Status);
+        Assert.AreEqual(SetupStatus.Todo, Item(r, "sender-verified").Status);
     }
 
     [TestMethod]
@@ -163,10 +163,10 @@ public class TenantReadinessServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
-    public async Task SenderDomains_PartiallyVerified_WithoutEnforcement_IsPermissive()
+    public async Task SenderDomains_PartiallyVerified_WithoutEnforcement_IsDone()
     {
-        // Enforcement off (default): unverified domains are not rejected, so "verify ownership" is an
-        // optional default rather than a pending task that nags the operator.
+        // Enforcement off (default): unverified domains are not rejected, so "verify ownership" is a
+        // handled default (shown as Done), not a pending task that nags the operator.
         var senders = new AcceptedSenderDomainService(_db);
         var a = await senders.CreateAsync("acme.com");
         await senders.CreateAsync("acme.net");
@@ -174,7 +174,7 @@ public class TenantReadinessServiceTests
 
         var r = await Build(_current).GetAsync();
 
-        Assert.AreEqual(SetupStatus.Permissive, Item(r, "sender-verified").Status);
+        Assert.AreEqual(SetupStatus.Done, Item(r, "sender-verified").Status);
     }
 
     [TestMethod]
@@ -210,19 +210,18 @@ public class TenantReadinessServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
-    public async Task OptionalListsEmpty_ArePermissive_IncludingOutboundDirectMx()
+    public async Task OptionalDefaults_ShowAsDone()
     {
         var r = await Build(_current).GetAsync();
 
-        // Direct-to-MX (no send connector) is a permissive default, consistent with the other optional
-        // items — not a green "Done".
-        Assert.AreEqual(SetupStatus.Permissive, Item(r, "outbound").Status);
-        Assert.AreEqual(SetupStatus.Permissive, Item(r, "recipient-domains").Status);
-        Assert.AreEqual(SetupStatus.Permissive, Item(r, "ip-rules").Status);
-        Assert.AreEqual(SetupStatus.Permissive, Item(r, "filters").Status);
-        Assert.AreEqual(SetupStatus.Permissive, Item(r, "api-keys").Status);
-        Assert.AreEqual(SetupStatus.Permissive, Item(r, "suppression-list").Status);
-        Assert.AreEqual(SetupStatus.Permissive, Item(r, "egress-ip").Status);
+        // Sensible defaults already apply, so optional items show as Done (no separate "Default" state).
+        Assert.AreEqual(SetupStatus.Done, Item(r, "outbound").Status);
+        Assert.AreEqual(SetupStatus.Done, Item(r, "recipient-domains").Status);
+        Assert.AreEqual(SetupStatus.Done, Item(r, "ip-rules").Status);
+        Assert.AreEqual(SetupStatus.Done, Item(r, "filters").Status);
+        Assert.AreEqual(SetupStatus.Done, Item(r, "api-keys").Status);
+        Assert.AreEqual(SetupStatus.Done, Item(r, "suppression-list").Status);
+        Assert.AreEqual(SetupStatus.Done, Item(r, "egress-ip").Status);
     }
 
     [TestMethod]
@@ -264,7 +263,7 @@ public class TenantReadinessServiceTests
         Assert.AreEqual(9999, r.TenantId);
         Assert.IsFalse(r.TenantActive);
         Assert.IsFalse(r.CanSend);
-        Assert.AreEqual(SetupStatus.Blocked, Item(r, "tenant-active").Status);
+        Assert.AreEqual(SetupStatus.Todo, Item(r, "tenant-active").Status);
     }
 
     [TestMethod]

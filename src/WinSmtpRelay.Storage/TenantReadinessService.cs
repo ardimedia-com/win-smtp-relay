@@ -75,7 +75,7 @@ public class TenantReadinessService(
         {
             // ----- Required: needed before any mail can flow -----
             new("tenant-active", "Organization active", SetupGroup.Required,
-                tenantActive ? SetupStatus.Done : SetupStatus.Blocked,
+                tenantActive ? SetupStatus.Done : SetupStatus.Todo,
                 tenantActive ? "Approved and enabled by the host" : "Awaiting host approval",
                 "", ""),
 
@@ -95,7 +95,7 @@ public class TenantReadinessService(
             // ----- Recommended: secure submission + inbox deliverability -----
             new("smtp-users", "Submission access", SetupGroup.Recommended,
                 enabledUsers > 0 ? SetupStatus.Done
-                    : allowIpRules > 0 ? SetupStatus.Permissive
+                    : allowIpRules > 0 ? SetupStatus.Done
                     : SetupStatus.Todo,
                 enabledUsers > 0
                     ? $"{enabledUsers} SMTP user{Plural(enabledUsers)} can submit mail"
@@ -105,17 +105,17 @@ public class TenantReadinessService(
                 "/smtpusers", "Manage users"),
 
             new("sender-domains", "Sender domain(s)", SetupGroup.Recommended,
-                senderList.Count > 0 ? SetupStatus.Done : SetupStatus.Permissive,
+                senderList.Count > 0 ? SetupStatus.Done : SetupStatus.Todo,
                 senderList.Count > 0
                     ? $"{senderList.Count} domain{Plural(senderList.Count)} accepted"
                     : "Any From address is accepted — add your domains to control what you send as",
                 "/domains/sender", "Manage sender domains"),
 
             new("sender-verified", "Verify domain ownership", SetupGroup.Recommended,
-                senderList.Count == 0 ? SetupStatus.Blocked
+                senderList.Count == 0 ? SetupStatus.Todo
                     : verifiedSenders == senderList.Count ? SetupStatus.Done
                     : requireSenderVerification ? (verifiedSenders > 0 ? SetupStatus.Partial : SetupStatus.Todo)
-                    : SetupStatus.Permissive,
+                    : SetupStatus.Done,
                 senderList.Count == 0
                     ? "Add a sender domain first"
                     : verifiedSenders == senderList.Count
@@ -134,49 +134,49 @@ public class TenantReadinessService(
 
             // ----- Optional: sensible defaults already apply -----
             new("outbound", "Outbound delivery", SetupGroup.Optional,
-                enabledConnectors > 0 ? SetupStatus.Done : SetupStatus.Permissive,
+                SetupStatus.Done,
                 enabledConnectors > 0
                     ? $"{enabledConnectors} send connector{Plural(enabledConnectors)} configured"
                     : "Direct-to-MX (default) — add a send connector to route via a smart host",
                 "/connectors/send", "Send connectors"),
 
             new("recipient-domains", "Recipient domains (inbound)", SetupGroup.Optional,
-                recipientList.Count > 0 ? SetupStatus.Done : SetupStatus.Permissive,
+                SetupStatus.Done,
                 recipientList.Count > 0
                     ? $"Accepts inbound mail for {recipientList.Count} domain{Plural(recipientList.Count)}"
                     : "Outbound only — not acting as inbound MX for any domain",
                 "/domains", "Recipient domains"),
 
             new("ip-rules", "IP access rules", SetupGroup.Optional,
-                ipRuleList.Count > 0 ? SetupStatus.Done : SetupStatus.Permissive,
+                SetupStatus.Done,
                 ipRuleList.Count > 0
                     ? $"{ipRuleList.Count} rule{Plural(ipRuleList.Count)} configured"
                     : "No IP restrictions — submission is controlled by credentials",
                 "/ip-rules", "IP access rules"),
 
             new("filters", "Message filters", SetupGroup.Optional,
-                filterCount > 0 ? SetupStatus.Done : SetupStatus.Permissive,
+                SetupStatus.Done,
                 filterCount > 0
                     ? $"{filterCount} rewrite rule{Plural(filterCount)} active"
                     : "No header/sender rewriting rules",
                 "/filters", "Message filters"),
 
             new("api-keys", "API keys", SetupGroup.Optional,
-                keyList.Count > 0 ? SetupStatus.Done : SetupStatus.Permissive,
+                SetupStatus.Done,
                 keyList.Count > 0
                     ? $"{keyList.Count} API key{Plural(keyList.Count)} issued"
                     : "No API keys issued",
                 "/apikeys", "API keys"),
 
             new("suppression-list", "Suppression list", SetupGroup.Optional,
-                SetupStatus.Permissive,
+                SetupStatus.Done,
                 suppressionCount > 0
                     ? $"{suppressionCount} address{(suppressionCount == 1 ? "" : "es")} suppressed — auto-added on hard bounces and complaints"
                     : "No suppressed addresses — hard bounces and complaints are added here automatically",
                 "/suppressions", "Suppression list"),
 
             new("egress-ip", "Dedicated sending IP", SetupGroup.Optional,
-                string.IsNullOrWhiteSpace(tenant?.EgressIpAddress) ? SetupStatus.Permissive : SetupStatus.Done,
+                SetupStatus.Done,
                 string.IsNullOrWhiteSpace(tenant?.EgressIpAddress)
                     ? "Shared sending IP (default)"
                     : $"Sending from {tenant!.EgressIpAddress}",
