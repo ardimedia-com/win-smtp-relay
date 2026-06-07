@@ -203,7 +203,27 @@ else
             }
             @foreach (var item in requiredItems) { @row(item) }
             <div style="margin-top:0.85rem;">
+                <div class="text-muted" style="font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.45rem;">Sending outbound mail — pick one</div>
+                @* Option 1: relay through a smart host (Brevo). Any AdminFull user can set this up. *@
                 <BrevoConnectorInfo Compact="true" />
+                @* Option 2: deliver directly from the host's own IP. The sending IP lives on the host-owned
+                   Tenants page, so this is offered to host administrators only. *@
+                <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin" Context="ownIpAuth">
+                    <div style="margin-top:0.6rem;border:1px solid var(--border);border-radius:var(--radius);padding:0.75rem 1rem;background:var(--muted);">
+                        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                            <LucideIcon Name="globe" Size="18" />
+                            <strong>…or send directly from your own IP</strong>
+                        </div>
+                        <p class="text-muted" style="font-size:0.82rem;margin:0.5rem 0 0.75rem;">
+                            Have a static IP with correct reverse DNS (PTR) and SPF, and outbound port 25 open? Deliver
+                            straight to recipients with no smart host. Set this tenant's <strong>Outbound (sending) IP</strong>,
+                            then use <strong>Test outbound</strong> there to confirm it can reach the internet on port 25.
+                        </p>
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo($"/tenants/{readiness!.TenantId}"))">
+                            <LucideIcon Name="globe" /> Set outbound IP
+                        </BbButton>
+                    </div>
+                </AuthorizeView>
             </div>
         </BbCardContent>
     </BbCard>
