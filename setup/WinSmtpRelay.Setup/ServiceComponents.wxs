@@ -67,9 +67,9 @@
                             Scope="any"
                             Profile="all" />
 
-      <fw:FirewallException Id="AdminUiPort8025"
-                            Name="WinSmtpRelay Admin UI (8025)"
-                            Port="8025"
+      <fw:FirewallException Id="AdminUiPort"
+                            Name="WinSmtpRelay Admin UI"
+                            Port="[ADMINUIPORT]"
                             Protocol="tcp"
                             Scope="any"
                             Profile="all" />
@@ -97,11 +97,12 @@
     <!-- Start menu shortcut to the admin UI (opens the URL in the default browser). The URL is the
          default admin endpoint; a future installer step can substitute the chosen port. -->
     <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="f4a2c1d7-8b3e-4c5a-9d6f-2e1b7c0a5d3e">
-      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" Name="StartMenuShortcut"
+      <!-- KeyPath must be under HKCU because the shortcut installs to a (per-user) Start-menu folder (ICE38). -->
+      <RegistryValue Root="HKCU" Key="Software\ARDIMEDIA\WinSmtpRelay" Name="StartMenuShortcut"
                      Type="integer" Value="1" KeyPath="yes" />
       <util:InternetShortcut Id="AdminUiInternetShortcut"
                              Name="WIN-SMTP-RELAY"
-                             Target="https://localhost:8025"
+                             Target="[ADMINUIURL]"
                              Type="url" />
     </Component>
 

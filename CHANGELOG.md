@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build28] - 2026-06-07
+
 ### Added
 
 - Windows installer: a **Start menu** entry ("WIN-SMTP-RELAY") that opens the admin UI, and the installer's final screen now shows the admin URL.
 - **Import an HTTPS certificate** for the admin UI from a new host-only page (Server → **HTTPS Certificate**): upload a PFX / PKCS#12 (with its password), which is validated (must include a private key), stored password-less and encrypted at rest (DPAPI), and applied to **new connections immediately — no service restart**. A "Remove" action reverts to the built-in self-signed certificate. Migration `AddAdminCertificateSettings`.
+- Installer **port check**: on a fresh install the setup detects whether TCP **25** and **8025** are already in use. If 8025 is taken it automatically picks the next free port (8125, 8225, …) and configures the admin UI on it; if **25** is in use it shows a warning (port 25 can't be changed). The chosen admin port flows into the config, the Start-menu shortcut, the firewall rule, and the final-screen URL.
+- Installer **network-access option**: a new setup dialog asks whether the admin UI should be reachable from the network. **Off by default** (binds to `127.0.0.1`, this computer only); when enabled it binds to `0.0.0.0` and the admin-port firewall rule is opened. The choice is written to `appsettings.Production.json`, layered over the shipped config.
+- Setup checklist: a host-only **Admin UI HTTPS certificate** item under Basic — shows whether a trusted certificate is imported or the built-in self-signed one is in use, linking to the HTTPS Certificate page.
 
 ### Changed
 

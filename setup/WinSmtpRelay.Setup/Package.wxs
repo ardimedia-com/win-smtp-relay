@@ -20,6 +20,36 @@
 
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
 
+    <!-- Custom dialog: choose whether the admin UI is reachable from the network. Inserted between
+         InstallDirDlg and VerifyReadyDlg. Default off (loopback only) — secure by default. -->
+    <UI>
+      <Dialog Id="NetworkOptionsDlg" Width="370" Height="270" Title="WIN-SMTP-RELAY Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Admin UI network access" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="Who may reach the admin web interface" />
+
+        <Control Id="NetworkCheckbox" Type="CheckBox" X="20" Y="65" Width="330" Height="18"
+                 Property="NETWORKACCESS" CheckBoxValue="1"
+                 Text="Make the admin UI reachable from other computers on the network" />
+        <Control Id="Info" Type="Text" X="35" Y="88" Width="315" Height="100" Transparent="yes" NoPrefix="yes"
+                 Text="Off (recommended): the admin UI binds to 127.0.0.1 and is reachable only from this computer.&#xD;&#xA;&#xD;&#xA;On: it binds to all network interfaces and the firewall is opened for the admin port, so you can manage it from another machine. The connection is always HTTPS (a self-signed certificate until you import a trusted one in the admin UI)." />
+
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <!-- Flow: InstallDirDlg → NetworkOptionsDlg → VerifyReadyDlg (higher Order overrides the defaults). -->
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="NetworkOptionsDlg" Order="10" Condition="WIXUI_INSTALLDIR_VALID=&quot;1&quot;" />
+      <Publish Dialog="NetworkOptionsDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" Order="10" />
+      <Publish Dialog="NetworkOptionsDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="10" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="NetworkOptionsDlg" Order="10" Condition="NOT Installed" />
+    </UI>
+
     <!-- Detect whether the service was running before upgrade (read during AppSearch, before service is stopped) -->
     <Property Id="SERVICEWASRUNNING">
       <RegistrySearch Id="ServiceWasRunningSearch"
@@ -57,7 +87,42 @@
                   Return="ignore"
                   Impersonate="no" />
 
+    <!-- ============================================================
+         Managed custom actions: detect ports + write appsettings.Production.json.
+         Defaults below apply on upgrades/maintenance (CheckPorts only runs on a fresh install,
+         so an upgrade preserves the existing config/port).
+         ============================================================ -->
+    <Binary Id="WinSmtpRelayCA"
+            SourceFile="$(var.WinSmtpRelay.Setup.CustomActions.TargetDir)WinSmtpRelay.Setup.CustomActions.CA.dll" />
+
+    <Property Id="ADMINUIPORT" Value="8025" />
+    <Property Id="ADMINUIURL" Value="https://localhost:8025" />
+    <!-- Admin-UI network exposure: off by default (loopback only); the Network options dialog sets it to 1. -->
+    <Property Id="NETWORKACCESS" Value="0" />
+
+    <!-- Immediate: pick a free admin port (8025 → 8125 …), detect port 25, and set
+         ADMINUIPORT / ADMINUIURL / PORT25INUSE plus the dynamic exit-dialog text. -->
+    <CustomAction Id="CheckPorts" BinaryRef="WinSmtpRelayCA" DllEntry="CheckPorts"
+                  Execute="immediate" Return="check" />
+
+    <!-- Deferred: write appsettings.Production.json (admin Port + BindAddress) into the install dir. -->
+    <SetProperty Id="WriteAdminConfig"
+                 Value="DIR=[INSTALLFOLDER]|PORT=[ADMINUIPORT]|NET=[NETWORKACCESS]"
+                 Before="WriteAdminConfig" Sequence="execute"
+                 Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+    <CustomAction Id="WriteAdminConfig" BinaryRef="WinSmtpRelayCA" DllEntry="WriteAdminConfig"
+                  Execute="deferred" Impersonate="no" Return="check" />
+
+    <InstallUISequence>
+      <Custom Action="CheckPorts" After="CostFinalize"
+              Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+    </InstallUISequence>
+
     <InstallExecuteSequence>
+      <Custom Action="CheckPorts" After="CostFinalize"
+              Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+      <Custom Action="WriteAdminConfig" After="InstallFiles"
+              Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
       <Custom Action="StartServiceOnUpgrade"
               After="StartServices"
               Condition="WIX_UPGRADE_DETECTED AND (SERVICEWASRUNNING = &quot;#1&quot;)" />

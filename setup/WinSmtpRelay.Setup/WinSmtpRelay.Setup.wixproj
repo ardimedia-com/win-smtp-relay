@@ -23,5 +23,11 @@
     <PackageReference Include="WixToolset.Util.wixext" Version="5.0.*" />
   </ItemGroup>
 
+  <!-- Managed custom actions (port detection + appsettings.Production.json). The packed *.CA.dll is
+       referenced as a Binary in Package.wxs via $(var.WinSmtpRelay.Setup.CustomActions.TargetDir). -->
+  <ItemGroup>
+    <ProjectReference Include="..\WinSmtpRelay.Setup.CustomActions\WinSmtpRelay.Setup.CustomActions.csproj" />
+  </ItemGroup>
+
 
 </Project>
