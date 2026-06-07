@@ -395,8 +395,8 @@ else
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<ITenantReadinessService>();
         readiness = await svc.GetAsync();
-        Recompute();
         await LoadOutboundHealthAsync();
+        Recompute();
     }
 
     // ----- Outbound delivery health (from recent delivery-log outcomes) -----
@@ -572,13 +572,26 @@ else
         }
         basicTotal = requiredItems.Count;
         basicDone = requiredItems.Count(i => i.Status == SetupStatus.Done);
-        // The submission path determines whether mail can flow at all, so when the tenant can't send,
-        // surface that item first — even though it now lives under Recommended. Otherwise fall back to
-        // the usual Basic-then-Recommended attention order.
+        // Next-best-action priority: (1) if clients can't even submit, fix that first; (2) else if mail
+        // IS being submitted but outbound delivery is failing, point at how we send (the real blocker)
+        // rather than the next best practice; (3) otherwise the usual Basic-then-Recommended order.
         var submissionBlocker = readiness.CanSend
             ? null
             : readiness.Items.FirstOrDefault(i => i.Key == "smtp-users" && i.NeedsAttention);
+        var outboundBlocker = outbound switch
+        {
+            OutboundHealth.Failing => new SetupItem("outbound-health", "Set up outbound sending", SetupGroup.Required,
+                SetupStatus.Todo,
+                "Outbound delivery is failing — choose how to send (in Basic below): relay through Brevo (recommended), or send directly from your own IP.",
+                "/connectors/send/new?template=brevo", "Set up Brevo"),
+            OutboundHealth.Degraded => new SetupItem("outbound-health", "Outbound delivery is unreliable", SetupGroup.Required,
+                SetupStatus.Partial,
+                "Some recent sends failed — consider relaying through Brevo (recommended) or checking your own sending IP.",
+                "/connectors/send/new?template=brevo", "Set up Brevo"),
+            _ => null
+        };
         nextAction = submissionBlocker
+                     ?? outboundBlocker
                      ?? requiredItems.FirstOrDefault(i => i.NeedsAttention)
                      ?? recommendedItems.FirstOrDefault(i => i.NeedsAttention);
     }

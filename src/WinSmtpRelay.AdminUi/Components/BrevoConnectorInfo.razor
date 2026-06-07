@@ -46,6 +46,13 @@
     <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="AddBrevo">
         <LucideIcon Name="mail-check" /> Add Brevo Connector
     </BbButton>
+
+    <div style="margin-top:0.75rem;border-left:3px solid var(--primary);background:color-mix(in oklch, var(--primary) 8%, transparent);padding:0.5rem 0.75rem;border-radius:0 var(--radius) var(--radius) 0;font-size:0.8rem;line-height:1.5;">
+        <strong>Why prefer this?</strong> Brevo sends from warmed, monitored IPs with SPF/DKIM and feedback
+        loops, so your mail reaches the inbox even from a dynamic or residential connection — you avoid
+        port 25 blocks and the risk of your own IP getting blocklisted. Sending directly from your own IP
+        only works well with a static IP, correct reverse DNS (PTR), and a clean sending reputation.
+    </div>
 </div>
 
 @code {
