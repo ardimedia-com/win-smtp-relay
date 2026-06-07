@@ -201,7 +201,7 @@ else
                     </span>
                 </div>
             }
-            @foreach (var item in readiness.Required) { @row(item) }
+            @foreach (var item in requiredItems) { @row(item) }
             <div style="margin-top:0.85rem;">
                 <BrevoConnectorInfo Compact="true" />
             </div>
@@ -308,6 +308,8 @@ else
 
     private TenantReadiness? readiness;
     private List<SetupItem> recommendedItems = [];
+    private List<SetupItem> requiredItems = [];
+    private string? identityIssue;
     private SetupItem? nextAction;
     private int recDone;
     private int recTotal;
@@ -432,12 +434,14 @@ else
 
     private async Task LoadDnsAsync()
     {
+        identityIssue = null;
         try
         {
             using var scope = ScopeFactory.CreateScope();
             var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
             dnsResults = [.. await dns.CheckAllSenderDomainsAsync()];
             dnsItem = BuildDnsItem(dnsResults);
+            identityIssue = await CheckSendingIdentityAsync();
         }
         catch
         {
@@ -450,6 +454,47 @@ else
         {
             dnsLoading = false;
             Recompute();
+        }
+    }
+
+    /// <summary>
+    /// Live correctness of the sending identity: does the public hostname resolve to a configured sending
+    /// IP, and is the detected outbound IP one of them? Returns a problem description, or null when it
+    /// looks fine (or there is nothing configured to validate against). Best-effort — never throws.
+    /// </summary>
+    private async Task<string?> CheckSendingIdentityAsync()
+    {
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
+            var settingsSvc = scope.ServiceProvider.GetRequiredService<IDnsSettingsService>();
+            var ipDetector = scope.ServiceProvider.GetRequiredService<WinSmtpRelay.AdminUi.Services.PublicIpDetector>();
+
+            var settings = await settingsSvc.GetAsync();
+            var sendingIps = (settings.SendingIpAddresses ?? "")
+                .Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (sendingIps.Length == 0)
+                return null; // nothing configured to validate against
+
+            var problems = new List<string>();
+
+            var hostname = await dns.CheckHostnameAsync();
+            if (hostname.Status is DnsRecordStatus.Mismatch or DnsRecordStatus.Missing)
+                problems.Add("the public hostname doesn't resolve to a sending IP");
+
+            var outbound = await ipDetector.DetectAsync();
+            var unlisted = outbound.FirstOrDefault(o => !sendingIps.Contains(o, StringComparer.OrdinalIgnoreCase));
+            if (unlisted is not null)
+                problems.Add($"the detected outbound IP ({unlisted}) isn't among your sending IPs");
+
+            return problems.Count == 0
+                ? null
+                : $"Live check: {string.Join("; ", problems)} — mail may be rejected. Review the Deliverability page.";
+        }
+        catch
+        {
+            return null; // best-effort; never break the page
         }
     }
 
@@ -489,8 +534,24 @@ else
             recommendedItems.Add(dnsItem);
         recTotal = recommendedItems.Count;
         recDone = recommendedItems.Count(i => i.Status == SetupStatus.Done);
-        basicTotal = readiness.Required.Count();
-        basicDone = readiness.Required.Count(i => i.Status == SetupStatus.Done);
+        // Basic items, with the live sending-identity correctness check folded into the sending-identity
+        // row — downgraded to "In progress" when the public hostname / outbound IP don't match the
+        // configured sending IPs (a problem that "the fields are filled in" alone cannot detect).
+        requiredItems = [.. readiness.Required];
+        if (identityIssue is not null)
+        {
+            var idx = requiredItems.FindIndex(x => x.Key == "sending-identity");
+            if (idx >= 0)
+                requiredItems[idx] = requiredItems[idx] with
+                {
+                    Status = SetupStatus.Partial,
+                    Detail = identityIssue,
+                    ActionUrl = "/deliverability",
+                    ActionLabel = "Deliverability"
+                };
+        }
+        basicTotal = requiredItems.Count;
+        basicDone = requiredItems.Count(i => i.Status == SetupStatus.Done);
         // The submission path determines whether mail can flow at all, so when the tenant can't send,
         // surface that item first — even though it now lives under Recommended. Otherwise fall back to
         // the usual Basic-then-Recommended attention order.
@@ -498,7 +559,7 @@ else
             ? null
             : readiness.Items.FirstOrDefault(i => i.Key == "smtp-users" && i.NeedsAttention);
         nextAction = submissionBlocker
-                     ?? readiness.Required.FirstOrDefault(i => i.NeedsAttention)
+                     ?? requiredItems.FirstOrDefault(i => i.NeedsAttention)
                      ?? recommendedItems.FirstOrDefault(i => i.NeedsAttention);
     }
 
