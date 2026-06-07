@@ -351,21 +351,28 @@ public class DnsSetupService(
 
     private async Task<List<string>> ResolveAddressesAsync(string host, CancellationToken ct)
     {
+        // Resolve A and AAAA INDEPENDENTLY: a failed or slow AAAA lookup must never discard a successful
+        // A result. Most hosts have no IPv6 record, and a transient AAAA timeout (or a momentary fallback
+        // to a flaky public resolver) would otherwise throw and wipe out the A answer — making a hostname
+        // that resolves fine read as "not found" / FCrDNS-incomplete.
+        var addresses = new List<System.Net.IPAddress>();
+        addresses.AddRange(await ResolveByTypeAsync(host, QueryType.A, ct));
+        addresses.AddRange(await ResolveByTypeAsync(host, QueryType.AAAA, ct));
+        // Dedupe by IPAddress (handles differing IPv6 textual forms), then render canonical strings.
+        return addresses.Distinct().Select(ip => ip.ToString()).ToList();
+    }
+
+    private async Task<IReadOnlyList<System.Net.IPAddress>> ResolveByTypeAsync(string host, QueryType type, CancellationToken ct)
+    {
         try
         {
-            var a = await publicDns.Client.QueryAsync(host, QueryType.A, cancellationToken: ct);
-            var aaaa = await publicDns.Client.QueryAsync(host, QueryType.AAAA, cancellationToken: ct);
-            // Dedupe by IPAddress (handles differing IPv6 textual forms), then render canonical strings.
-            return a.Answers.OfType<ARecord>().Select(r => r.Address)
-                .Concat(aaaa.Answers.OfType<AaaaRecord>().Select(r => r.Address))
-                .Distinct()
-                .Select(ip => ip.ToString())
-                .ToList();
+            var result = await publicDns.Client.QueryAsync(host, type, cancellationToken: ct);
+            return result.Answers.OfType<AddressRecord>().Select(r => r.Address).ToList();
         }
         catch (DnsResponseException) { return []; }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "DNS A/AAAA lookup failed for {Host}", host);
+            logger.LogWarning(ex, "DNS {Type} lookup failed for {Host}", type, host);
             return [];
         }
     }

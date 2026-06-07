@@ -30,10 +30,12 @@ public sealed class PublicDnsLookupClient
             // full timeout — making the deliverability page, which runs many sequential lookups, appear
             // to hang. Pinning the order means 1.1.1.1 is only used if 8.8.8.8 actually fails.
             UseRandomNameServer = false,
-            // Bounded per-query cost so a single dead resolver can't dominate page load. 1 retry on the
-            // next server keeps a one-off packet loss from failing the check.
-            Timeout = TimeSpan.FromSeconds(2.5),
-            Retries = 1,
+            // Generous per-query timeout: a cold/slow-but-alive 8.8.8.8 response (seen spiking to ~5s on
+            // some networks) must NOT be treated as a failure, or DnsClient marks the primary down and
+            // routes to the (here flaky) secondary. The deliverability checks run concurrently, so a high
+            // timeout doesn't serialise page load. Retries handles one-off packet loss.
+            Timeout = TimeSpan.FromSeconds(5),
+            Retries = 2,
         });
     }
 }
