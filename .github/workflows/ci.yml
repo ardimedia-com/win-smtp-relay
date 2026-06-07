@@ -41,6 +41,19 @@ jobs:
             fi
           fi
 
+      # Fail fast (before the long build) if a tagged release has no matching CHANGELOG section. This
+      # makes it impossible to publish a release whose CHANGELOG entry was forgotten — promote the
+      # [Unreleased] section to "## [<version>] - <date>" in the release-prep commit before tagging.
+      - name: Verify CHANGELOG has an entry for this release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          if ! grep -qF "## [${TAG_LABEL}]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [${TAG_LABEL}]' section. Promote the [Unreleased] section to '## [${TAG_LABEL}] - <date>' before tagging this release."
+            exit 1
+          fi
+          echo "CHANGELOG.md has a section for ${TAG_LABEL}."
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -187,9 +200,20 @@ jobs:
             IS_PRERELEASE="--prerelease"
           fi
 
+          # Release notes are the matching CHANGELOG.md section (single source of truth): the body
+          # between "## [<version>]" and the next "## [" header. The guard step above guarantees it exists.
+          awk -v ver="## [${TAG_LABEL}]" 'index($0, ver) == 1 { f = 1; next } /^## \[/ { if (f) exit } f { print }' CHANGELOG.md > RELEASE_NOTES.md
+
+          if [ -s RELEASE_NOTES.md ]; then
+            NOTES_ARG=(--notes-file RELEASE_NOTES.md)
+          else
+            # Should not happen (guard ensures the section exists), but never publish empty notes.
+            NOTES_ARG=(--generate-notes)
+          fi
+
           gh release create "$GITHUB_REF_NAME" \
             --title "WinSmtpRelay $TAG_LABEL" \
-            --generate-notes \
+            "${NOTES_ARG[@]}" \
             $IS_PRERELEASE \
             "msi-sc/WinSmtpRelay-${TAG_LABEL}-x64-self-contained.msi#WinSmtpRelay ${TAG_LABEL} (x64, self-contained)" \
             "msi-fd/WinSmtpRelay-${TAG_LABEL}-x64.msi#WinSmtpRelay ${TAG_LABEL} (x64, requires .NET 10)"

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build27] - 2026-06-07
+
 ### Added
 
 - Web-admin authentication: sign-in is now required for the Blazor admin UI and the REST API. Built on ASP.NET Core Identity with a tenant-aware admin account model and the roles `HostAdmin`, `TenantAdmin`, and `TenantViewer`.
