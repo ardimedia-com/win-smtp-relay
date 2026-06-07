@@ -29,7 +29,8 @@
                       Type="raw" />
     </Property>
 
-    <!-- Exit dialog: "Start service now?" checkbox -->
+    <!-- Exit dialog: admin URL text + "Start service now?" checkbox -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Value="WIN-SMTP-RELAY is installed. Open the admin UI at https://localhost:8025 (also added to the Start menu). The built-in certificate is self-signed, so your browser will warn once — you can import a trusted certificate later in the admin UI." />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Start WinSmtpRelay service now" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
@@ -79,6 +80,8 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="WinSmtpRelay" />
     </StandardDirectory>
+    <!-- Start menu (All Users) — holds the admin-UI shortcut -->
+    <StandardDirectory Id="ProgramMenuFolder" />
 
     <!-- Single feature containing all components -->
     <Feature Id="Complete" Title="WinSmtpRelay" Level="1">
@@ -87,6 +90,7 @@
       <ComponentRef Id="FirewallRules" />
       <ComponentRef Id="EventLogSource" />
       <ComponentRef Id="InstallDirPermissions" />
+      <ComponentRef Id="StartMenuShortcut" />
 
       <!-- Auto-harvested published files -->
       <Files Directory="INSTALLFOLDER" Include="$(var.HarvestPath)**">

@@ -59,10 +59,23 @@ builder.Services.AddHostedService<WinSmtpRelay.Service.ServiceStateReporter>();
 // Kestrel for Admin UI + API
 var adminUiConfig = builder.Configuration.GetSection(AdminUiOptions.SectionName).Get<AdminUiOptions>() ?? new();
 
-// Whether the admin plane will actually serve HTTPS (a cert is available).
+// Resolve the admin HTTPS certificate up front: a configured PFX if set, otherwise a persistent
+// self-signed certificate generated next to the service binaries. This keeps the admin plane on HTTPS
+// out of the box — a self-signed cert just means a one-time browser warning until a trusted certificate
+// is imported via the admin UI.
+System.Security.Cryptography.X509Certificates.X509Certificate2? adminCert = null;
+if (adminUiConfig.Enabled && adminUiConfig.UseHttps)
+{
+    using var certLoggerFactory = LoggerFactory.Create(b => b.AddConsole());
+    adminCert = WinSmtpRelay.Security.AdminUiCertificate.Resolve(
+        adminUiConfig, AppContext.BaseDirectory,
+        certLoggerFactory.CreateLogger("WinSmtpRelay.AdminUiCertificate"));
+}
+
+// HTTPS is active when UseHttps is on and a certificate is available (configured/self-signed), or the
+// ASP.NET Core dev certificate in Development.
 var adminHttpsActive = adminUiConfig.UseHttps &&
-    ((!string.IsNullOrWhiteSpace(adminUiConfig.CertificatePath) && File.Exists(adminUiConfig.CertificatePath))
-     || builder.Environment.IsDevelopment());
+    (adminCert is not null || builder.Environment.IsDevelopment());
 
 if (adminUiConfig.Enabled)
 {
@@ -71,13 +84,13 @@ if (adminUiConfig.Enabled)
         options.Listen(System.Net.IPAddress.Parse(adminUiConfig.BindAddress), adminUiConfig.Port, listen =>
         {
             if (!adminUiConfig.UseHttps)
-                return;
+                return; // explicit opt-out → serve HTTP
 
-            if (!string.IsNullOrWhiteSpace(adminUiConfig.CertificatePath) && File.Exists(adminUiConfig.CertificatePath))
-                listen.UseHttps(adminUiConfig.CertificatePath, adminUiConfig.CertificatePassword);
+            if (adminCert is not null)
+                listen.UseHttps(adminCert);
             else if (builder.Environment.IsDevelopment())
                 listen.UseHttps(); // ASP.NET Core development certificate
-            // else: no certificate available — serves HTTP (warned at startup)
+            // else: certificate resolution failed (logged above) and not Development — HTTPS not bound
         });
     });
 
