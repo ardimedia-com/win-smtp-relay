@@ -19,7 +19,9 @@ public class TenantReadinessService(
     IIpAccessRuleService ipRules,
     IMessageFilterService messageFilters,
     IApiKeyService apiKeys,
-    IDnsSettingsService dnsSettings) : ITenantReadinessService
+    IDnsSettingsService dnsSettings,
+    IEmailAuthSettingsService emailAuth,
+    ISuppressionService suppressions) : ITenantReadinessService
 {
     public async Task<TenantReadiness> GetAsync(CancellationToken ct = default)
     {
@@ -58,6 +60,12 @@ public class TenantReadinessService(
         var dns = await dnsSettings.GetAsync(ct);
         var hasHostname = !string.IsNullOrWhiteSpace(dns.PublicHostname);
         var hasSendingIps = !string.IsNullOrWhiteSpace(dns.SendingIpAddresses);
+
+        // Inbound verification enforcement gates whether unverified sender domains are actually rejected;
+        // when it's off, "verify ownership" is optional rather than a pending task. Suppression count is
+        // informational (the list auto-grows on hard bounces/complaints).
+        var requireSenderVerification = (await emailAuth.GetAsync(ct)).RequireSenderDomainVerification;
+        var suppressionCount = (await suppressions.GetAllAsync(ct)).Count;
 
         // The hard minimum to relay mail: an active tenant with a way for clients to submit — either
         // SMTP credentials, or an allow IP rule (unauthenticated submission from trusted IPs).
@@ -106,11 +114,15 @@ public class TenantReadinessService(
             new("sender-verified", "Verify domain ownership", SetupGroup.Recommended,
                 senderList.Count == 0 ? SetupStatus.Blocked
                     : verifiedSenders == senderList.Count ? SetupStatus.Done
-                    : verifiedSenders > 0 ? SetupStatus.Partial
-                    : SetupStatus.Todo,
+                    : requireSenderVerification ? (verifiedSenders > 0 ? SetupStatus.Partial : SetupStatus.Todo)
+                    : SetupStatus.Permissive,
                 senderList.Count == 0
                     ? "Add a sender domain first"
-                    : $"{verifiedSenders} of {senderList.Count} verified",
+                    : verifiedSenders == senderList.Count
+                        ? $"All {senderList.Count} verified"
+                        : requireSenderVerification
+                            ? $"{verifiedSenders} of {senderList.Count} verified — required: your inbound policy enforces sender-domain verification"
+                            : $"{verifiedSenders} of {senderList.Count} verified — optional unless you enable verification enforcement (Settings → Email auth)",
                 "/domains/sender", "Verify ownership"),
 
             new("dkim", "DKIM signing", SetupGroup.Recommended,
@@ -122,7 +134,7 @@ public class TenantReadinessService(
 
             // ----- Optional: sensible defaults already apply -----
             new("outbound", "Outbound delivery", SetupGroup.Optional,
-                SetupStatus.Done,
+                enabledConnectors > 0 ? SetupStatus.Done : SetupStatus.Permissive,
                 enabledConnectors > 0
                     ? $"{enabledConnectors} send connector{Plural(enabledConnectors)} configured"
                     : "Direct-to-MX (default) — add a send connector to route via a smart host",
@@ -155,6 +167,13 @@ public class TenantReadinessService(
                     ? $"{keyList.Count} API key{Plural(keyList.Count)} issued"
                     : "No API keys issued",
                 "/apikeys", "API keys"),
+
+            new("suppression-list", "Suppression list", SetupGroup.Optional,
+                SetupStatus.Permissive,
+                suppressionCount > 0
+                    ? $"{suppressionCount} address{(suppressionCount == 1 ? "" : "es")} suppressed — auto-added on hard bounces and complaints"
+                    : "No suppressed addresses — hard bounces and complaints are added here automatically",
+                "/suppressions", "Suppression list"),
 
             new("egress-ip", "Dedicated sending IP", SetupGroup.Optional,
                 string.IsNullOrWhiteSpace(tenant?.EgressIpAddress) ? SetupStatus.Permissive : SetupStatus.Done,

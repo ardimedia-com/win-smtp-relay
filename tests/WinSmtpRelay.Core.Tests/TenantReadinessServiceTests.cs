@@ -43,9 +43,22 @@ public class TenantReadinessServiceTests
         new IpAccessRuleService(_db, null!),
         new MessageFilterService(_db),
         new ApiKeyService(_db),
-        new DnsSettingsService(_db));
+        new DnsSettingsService(_db),
+        new EmailAuthSettingsService(_db, null!),
+        new SuppressionService(_db));
 
     private static SetupItem Item(TenantReadiness r, string key) => r.Items.Single(i => i.Key == key);
+
+    private async Task SetSenderVerificationEnforcementAsync(bool on)
+    {
+        var ea = await _db.EmailAuthSettings.FirstOrDefaultAsync();
+        if (ea is null)
+            _db.EmailAuthSettings.Add(new EmailAuthSettings { RequireSenderDomainVerification = on });
+        else
+            ea.RequireSenderDomainVerification = on;
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+    }
 
     [TestMethod]
     [TestCategory("Unit")]
@@ -132,8 +145,9 @@ public class TenantReadinessServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
-    public async Task SenderDomains_PartiallyVerified_ReportsPartial()
+    public async Task SenderDomains_PartiallyVerified_WithEnforcement_ReportsPartial()
     {
+        await SetSenderVerificationEnforcementAsync(true);
         var senders = new AcceptedSenderDomainService(_db);
         var a = await senders.CreateAsync("acme.com");
         await senders.CreateAsync("acme.net");
@@ -145,6 +159,22 @@ public class TenantReadinessServiceTests
         var verify = Item(r, "sender-verified");
         Assert.AreEqual(SetupStatus.Partial, verify.Status);
         StringAssert.Contains(verify.Detail, "1 of 2");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task SenderDomains_PartiallyVerified_WithoutEnforcement_IsPermissive()
+    {
+        // Enforcement off (default): unverified domains are not rejected, so "verify ownership" is an
+        // optional default rather than a pending task that nags the operator.
+        var senders = new AcceptedSenderDomainService(_db);
+        var a = await senders.CreateAsync("acme.com");
+        await senders.CreateAsync("acme.net");
+        await senders.MarkVerifiedAsync(a.Id);
+
+        var r = await Build(_current).GetAsync();
+
+        Assert.AreEqual(SetupStatus.Permissive, Item(r, "sender-verified").Status);
     }
 
     [TestMethod]
@@ -180,16 +210,30 @@ public class TenantReadinessServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
-    public async Task OptionalListsEmpty_ArePermissive_AndOutboundIsDoneByDefault()
+    public async Task OptionalListsEmpty_ArePermissive_IncludingOutboundDirectMx()
     {
         var r = await Build(_current).GetAsync();
 
-        Assert.AreEqual(SetupStatus.Done, Item(r, "outbound").Status, "Direct-to-MX is the default");
+        // Direct-to-MX (no send connector) is a permissive default, consistent with the other optional
+        // items — not a green "Done".
+        Assert.AreEqual(SetupStatus.Permissive, Item(r, "outbound").Status);
         Assert.AreEqual(SetupStatus.Permissive, Item(r, "recipient-domains").Status);
         Assert.AreEqual(SetupStatus.Permissive, Item(r, "ip-rules").Status);
         Assert.AreEqual(SetupStatus.Permissive, Item(r, "filters").Status);
         Assert.AreEqual(SetupStatus.Permissive, Item(r, "api-keys").Status);
+        Assert.AreEqual(SetupStatus.Permissive, Item(r, "suppression-list").Status);
         Assert.AreEqual(SetupStatus.Permissive, Item(r, "egress-ip").Status);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task Outbound_IsDone_WhenAnEnabledSendConnectorExists()
+    {
+        await new SendConnectorService(_db).CreateAsync(new SendConnector { Name = "Brevo", IsEnabled = true });
+
+        var r = await Build(_current).GetAsync();
+
+        Assert.AreEqual(SetupStatus.Done, Item(r, "outbound").Status);
     }
 
     [TestMethod]

@@ -72,40 +72,6 @@ else
             }
         </div>;
 
-    <AuthorizeView Policy="@AuthorizationPolicies.AdminFull">
-        <BbCard Class="mb-1">
-            <BbCardHeader>
-                <BbCardTitle>Send a test message</BbCardTitle>
-                <BbCardDescription>Confirm outbound delivery works end-to-end (MX lookup, TLS, and DKIM if configured). Send to an address you control, then watch the result under Journal.</BbCardDescription>
-            </BbCardHeader>
-            <BbCardContent>
-                <div class="test-send-row">
-                    <div class="form-group">
-                        <BbLabel For="from">From</BbLabel>
-                        <BbInput Id="from" @bind-Value="testFrom" Placeholder="test@your-domain.com" />
-                    </div>
-                    <div class="form-group">
-                        <BbLabel For="to">To</BbLabel>
-                        <BbInput Id="to" @bind-Value="testTo" Placeholder="you@example.com" />
-                    </div>
-                    <div class="test-send-action">
-                        <BbButton Variant="ButtonVariant.Default" @onclick="SendTestAsync" Disabled="@testSending">
-                            <LucideIcon Name="send" /> @(testSending ? "Sending…" : "Send test")
-                        </BbButton>
-                    </div>
-                </div>
-                @if (!string.IsNullOrEmpty(testError))
-                {
-                    <p class="text-danger" style="font-size:0.8rem;margin:0.5rem 0 0;">@testError</p>
-                }
-                @if (!string.IsNullOrEmpty(testResult))
-                {
-                    <p style="font-size:0.8rem;color:var(--primary);margin:0.5rem 0 0;">@testResult</p>
-                }
-            </BbCardContent>
-        </BbCard>
-    </AuthorizeView>
-
     <div class="setup-summary">
         <div class="setup-tile">
             <div class="setup-tile-icon @(readiness.CanSend ? "setup-tile-ok" : "setup-tile-bad")">
@@ -175,6 +141,40 @@ else
         </div>
     }
 
+    <AuthorizeView Policy="@AuthorizationPolicies.AdminFull">
+        <BbCard Class="mb-1">
+            <BbCardHeader>
+                <BbCardTitle>Send a test message</BbCardTitle>
+                <BbCardDescription>Once the steps below are in place, send a test email to confirm outbound delivery works end to end — recipient (MX) lookup, a secure TLS connection, and DKIM signing if configured. Send to an address you control, then watch the result under Journal.</BbCardDescription>
+            </BbCardHeader>
+            <BbCardContent>
+                <div class="test-send-row">
+                    <div class="form-group">
+                        <BbLabel For="from">From</BbLabel>
+                        <BbInput Id="from" @bind-Value="testFrom" Placeholder="test@your-domain.com" />
+                    </div>
+                    <div class="form-group">
+                        <BbLabel For="to">To</BbLabel>
+                        <BbInput Id="to" @bind-Value="testTo" Placeholder="you@example.com" />
+                    </div>
+                    <div class="test-send-action">
+                        <BbButton Variant="ButtonVariant.Default" @onclick="SendTestAsync" Disabled="@testSending">
+                            <LucideIcon Name="send" /> @(testSending ? "Sending…" : "Send test")
+                        </BbButton>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(testError))
+                {
+                    <p class="text-danger" style="font-size:0.8rem;margin:0.5rem 0 0;">@testError</p>
+                }
+                @if (!string.IsNullOrEmpty(testResult))
+                {
+                    <p style="font-size:0.8rem;color:var(--primary);margin:0.5rem 0 0;">@testResult</p>
+                }
+            </BbCardContent>
+        </BbCard>
+    </AuthorizeView>
+
     <div class="setup-group-label">Basic <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— your organization and the sending identity it relays with</span></div>
     <BbCard>
         <BbCardContent>
@@ -232,7 +232,7 @@ else
                         <div class="dns-record-row">
                             <span class="dns-record-label">Expected</span>
                             <code class="mono dns-record-value">@entry.Record.Expected</code>
-                            <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => CopyAsync(entry.Record.Expected)" title="Copy">
+                            <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => CopyAsync(entry.Record.Expected)" AriaLabel="Copy expected DNS record value" title="Copy">
                                 <LucideIcon Name="copy" />
                             </BbButton>
                         </div>
@@ -274,7 +274,17 @@ else
                 <li><strong>In progress</strong> — started but incomplete (e.g. some domains verified).</li>
                 <li><strong>To do</strong> — not configured yet.</li>
                 <li><strong>Blocked</strong> — waiting on a prerequisite (e.g. add a sender domain before verifying it).</li>
-                <li><strong>Default</strong> — an intentional permissive default applies.</li>
+                <li><strong>Default</strong> — an intentional permissive default applies (e.g. an empty sender-domain list means "accept any From"). Safe; no action needed.</li>
+            </ul>
+            <h4 style="margin-top:1rem;">Receiving mail</h4>
+            <p class="text-muted">Sending (outbound) needs nothing host-side. To <em>receive</em> mail for your domains, a host administrator must run an SMTP listener (Receive Connector) and your domain's <strong>MX</strong> record must point to it.</p>
+            <h4 style="margin-top:1rem;">Glossary</h4>
+            <ul style="padding-left:1.25rem;">
+                <li><strong>SPF</strong> — a DNS record listing which servers may send mail for your domain.</li>
+                <li><strong>DKIM</strong> — a cryptographic signature on your mail proving it's genuine and unaltered.</li>
+                <li><strong>DMARC</strong> — a DNS policy telling receivers what to do when SPF/DKIM fail.</li>
+                <li><strong>MX</strong> — the DNS record that points a domain's incoming mail at a server.</li>
+                <li><strong>TLS</strong> — encryption for the SMTP connection.</li>
             </ul>
             <p class="text-muted">Use <strong>Re-check</strong> after making changes to refresh the status.</p>
         </div>
@@ -551,7 +561,8 @@ else
     private static string StatusBadge(SetupStatus s) => s switch
     {
         SetupStatus.Done => "badge-success",
-        SetupStatus.Partial or SetupStatus.Todo => "badge-warning",
+        SetupStatus.Partial => "badge-info",
+        SetupStatus.Todo => "badge-warning",
         _ => "badge-muted"
     };
 
