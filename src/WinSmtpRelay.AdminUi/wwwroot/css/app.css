@@ -277,6 +277,11 @@ h1:focus-visible {
 /* Utility */
 .mono { font-family: monospace; }
 .nowrap { white-space: nowrap; }
+
+/* Button labels must never wrap (e.g. "Re-check" breaking onto two lines). Applies to every button,
+   including BlazorBlueprint's <button> and its anchor (Href) buttons. */
+button,
+a[class*="button" i] { white-space: nowrap; }
 .text-muted { color: var(--muted-foreground); }
 .text-danger { color: var(--destructive); }
 .mt-1 { margin-top: 1rem; }
