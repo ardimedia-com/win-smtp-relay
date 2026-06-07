@@ -265,7 +265,7 @@ else
             client.DefaultRequestHeaders.Add("User-Agent", "WinSmtpRelay-Admin");
             client.Timeout = TimeSpan.FromSeconds(15);
 
-            var response = await client.GetAsync("https://api.github.com/repos/ardimedia/winsmtprelay/releases?per_page=30");
+            var response = await client.GetAsync("https://api.github.com/repos/ardimedia-com/win-smtp-relay/releases?per_page=30");
             if (!response.IsSuccessStatusCode)
             {
                 errorMessage = $"GitHub API returned {response.StatusCode}. No releases published yet?";
