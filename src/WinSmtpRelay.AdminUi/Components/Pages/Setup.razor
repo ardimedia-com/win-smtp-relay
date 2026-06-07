@@ -1,5 +1,6 @@
 @page "/setup"
 @using WinSmtpRelay.AdminUi.Components.Account
+@using Microsoft.EntityFrameworkCore
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
@@ -59,6 +60,10 @@ else
                 <div class="setup-row-title">
                     @item.Title
                     <span class="badge-status @StatusBadge(item.Status)">@StatusText(item.Status)</span>
+                    @if (item.Group == SetupGroup.Recommended)
+                    {
+                        <span class="badge-status badge-muted">Best practice</span>
+                    }
                 </div>
                 <div class="setup-row-detail">@item.Detail</div>
             </div>
@@ -78,8 +83,17 @@ else
                 <LucideIcon Name="@(readiness.CanSend ? "check" : "x")" Size="20" />
             </div>
             <div>
-                <div class="setup-tile-label">Mail relay</div>
-                <div class="setup-tile-value">@(readiness.CanSend ? "Can send mail" : "Not ready to send")</div>
+                <div class="setup-tile-label">Inbound (submission)</div>
+                <div class="setup-tile-value">@(readiness.CanSend ? "Relay can receive mail" : "Not ready to receive")</div>
+            </div>
+        </div>
+        <div class="setup-tile">
+            <div class="setup-tile-icon @OutboundTileClass()">
+                <LucideIcon Name="@OutboundTileIcon()" Size="20" />
+            </div>
+            <div>
+                <div class="setup-tile-label">Outbound (delivery)</div>
+                <div class="setup-tile-value">@OutboundTileText()</div>
             </div>
         </div>
         <div class="setup-tile">
@@ -87,8 +101,8 @@ else
                 <LucideIcon Name="shield-check" Size="20" />
             </div>
             <div>
-                <div class="setup-tile-label">Deliverability</div>
-                <div class="setup-tile-value">@recDone of @recTotal best practices</div>
+                <div class="setup-tile-label">Best practices</div>
+                <div class="setup-tile-value">@recDone of @recTotal in place</div>
             </div>
         </div>
     </div>
@@ -198,7 +212,7 @@ else
         </BbCardContent>
     </BbCard>
 
-    <div class="setup-group-label">Recommended <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— secure submission and reaching the inbox</span></div>
+    <div class="setup-group-label">Best practices <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— secure submission and reaching the inbox</span></div>
     <BbCard>
         <BbCardContent>
             @foreach (var item in recommendedItems) { @row(item) }
@@ -265,7 +279,7 @@ else
             <p>This page checks your organization's configuration in real time and groups it into three tiers:</p>
             <ul style="padding-left:1.25rem;">
                 <li><strong>Basic</strong> — your organization and the sending identity the rest of the config builds on (public hostname + IP). The <em>Can send mail</em> tile turns green once the org is active and clients can submit (set up under <em>Submission access</em>).</li>
-                <li><strong>Recommended</strong> — secure submission (SMTP credentials) plus deliverability best practice (verified domains, DKIM, published DNS). Mail can still flow without them, but authenticated submission and these records keep it out of spam.</li>
+                <li><strong>Best practices</strong> — secure submission (SMTP credentials) plus deliverability best practice (verified domains, DKIM, published DNS). Mail can still flow without them, but authenticated submission and these records keep it out of spam. Each carries a <em>Best practice</em> tag.</li>
                 <li><strong>Optional</strong> — refinements with a sensible default; an empty list usually means "allow all", shown as <em>Default</em>.</li>
             </ul>
             <h4 style="margin-top:1rem;">Status badges</h4>
@@ -364,7 +378,61 @@ else
         var svc = scope.ServiceProvider.GetRequiredService<ITenantReadinessService>();
         readiness = await svc.GetAsync();
         Recompute();
+        await LoadOutboundHealthAsync();
     }
+
+    // ----- Outbound delivery health (from recent delivery-log outcomes) -----
+    private enum OutboundHealth { Untested, Healthy, Degraded, Failing }
+    private OutboundHealth outbound = OutboundHealth.Untested;
+
+    /// <summary>Classifies the last few delivery attempts so the Outbound tile reflects whether mail
+    /// actually leaves the relay — not just whether clients can submit to it.</summary>
+    private async Task LoadOutboundHealthAsync()
+    {
+        outbound = OutboundHealth.Untested;
+        if (readiness is null or { IsHostScope: true })
+            return;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            var recent = await db.DeliveryLogs.AsNoTracking()
+                .OrderByDescending(l => l.Id)
+                .Take(20)
+                .Select(l => l.StatusCode)
+                .ToListAsync();
+            if (recent.Count == 0)
+                return; // no attempts yet → Untested
+            var delivered = recent.Count(s => s.StartsWith("2", StringComparison.Ordinal));
+            outbound = delivered == 0 ? OutboundHealth.Failing
+                     : delivered == recent.Count ? OutboundHealth.Healthy
+                     : OutboundHealth.Degraded;
+        }
+        catch { outbound = OutboundHealth.Untested; }
+    }
+
+    private string OutboundTileClass() => outbound switch
+    {
+        OutboundHealth.Healthy => "setup-tile-ok",
+        OutboundHealth.Failing => "setup-tile-bad",
+        _ => "setup-tile-warn",
+    };
+
+    private string OutboundTileIcon() => outbound switch
+    {
+        OutboundHealth.Healthy => "check",
+        OutboundHealth.Failing => "x",
+        OutboundHealth.Degraded => "alert-triangle",
+        _ => "circle",
+    };
+
+    private string OutboundTileText() => outbound switch
+    {
+        OutboundHealth.Healthy => "Can send mail",
+        OutboundHealth.Degraded => "Some recent sends failed",
+        OutboundHealth.Failing => "Outbound delivery failing",
+        _ => "Not tested yet",
+    };
 
     private async Task LoadDnsAsync()
     {
