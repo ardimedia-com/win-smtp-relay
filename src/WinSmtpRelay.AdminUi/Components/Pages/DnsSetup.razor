@@ -33,7 +33,15 @@
 
 @if (isLoading)
 {
-    <BbSkeleton Class="h-[200px] w-full" />
+    <BbCard>
+        <BbCardContent>
+            <div style="display:flex;align-items:center;gap:0.75rem;padding:0.4rem 0 0.8rem;">
+                <span class="spin" style="display:inline-flex;"><LucideIcon Name="loader-circle" /></span>
+                <span>Checking live DNS records@(totalChecks > 0 ? $" — {completedChecks} of {totalChecks}" : "")…</span>
+            </div>
+            <BbSkeleton Class="h-[140px] w-full" />
+        </BbCardContent>
+    </BbCard>
 }
 else if (loadError is not null)
 {
@@ -293,6 +301,10 @@ else
     private string? loadError;
     private bool showHelp;
 
+    // Live progress for the loading indicator while the (now concurrent) DNS checks run.
+    private int totalChecks;
+    private int completedChecks;
+
     // Cancels the in-flight (possibly slow) live DNS lookups if the user navigates away / the circuit
     // is disposed, so a background continuation can't keep querying or touch a disposed renderer.
     private readonly CancellationTokenSource _cts = new();
@@ -322,39 +334,98 @@ else
     {
         isLoading = true;
         loadError = null;
+        completedChecks = 0;
+        totalChecks = 0;
         StateHasChanged();
-        var ct = _cts.Token;
         try
         {
-            using var scope = ScopeFactory.CreateScope();
-            var sp = scope.ServiceProvider;
-            var dns = sp.GetRequiredService<IDnsSetupService>();
-            var current = sp.GetRequiredService<ICurrentTenant>();
+            // ----- Phase 1: read all DB-backed config once (fast, single scope, no concurrency) -----
+            // The live DNS lookups in phase 2 run concurrently, each in its own scope, because
+            // DnsSetupService is scoped + stateful (it caches DnsSettings and uses the DbContext), so it
+            // can't be shared across parallel calls. Gather everything they need here first.
+            bool isHostScope;
+            int? tenantId;
+            DnsSettings settings;
+            List<string> senderDomainNames;
+            List<(string Domain, bool Backup)> mxDomains;
+            string? egress = null;
+            List<DkimDomain> dkimList;
 
-            // ----- Domains: sending identity (SPF/DKIM/DMARC per sender domain) -----
-            senderGroups = [.. (await dns.CheckAllSenderDomainsAsync(ct))
-                .Select(s => new CheckGroup(s.Domain, "Sending identity — you send mail as this domain", [s.Spf, s.Dkim, s.Dmarc]))];
-
-            // ----- Domains: inbound (tenant-scoped) + backup-MX (host-level, only in host scope) -----
-            inboundGroups = [];
-            var recipients = await sp.GetRequiredService<IAcceptedDomainService>().GetAllAsync();
-            foreach (var d in recipients.Select(x => x.Domain.Trim().ToLowerInvariant()).Where(x => x.Length > 0).Distinct())
-                inboundGroups.Add(new CheckGroup(d, "Inbound — this relay accepts mail for this domain", [await dns.CheckMxAsync(d, ct)]));
-            if (current.IsHostScope)
+            using (var scope = ScopeFactory.CreateScope())
             {
-                var backup = await sp.GetRequiredService<IBackupMxSettingsService>().GetAsync();
-                foreach (var d in backup.DomainList.Select(x => x.Trim().ToLowerInvariant()).Where(x => x.Length > 0).Distinct())
-                    inboundGroups.Add(new CheckGroup(d, "Backup MX (host-level) — holds mail when the primary is unreachable", [await dns.CheckMxAsync(d, ct)]));
+                var sp = scope.ServiceProvider;
+                var current = sp.GetRequiredService<ICurrentTenant>();
+                isHostScope = current.IsHostScope;
+                tenantId = current.TenantId;
+
+                settings = await sp.GetRequiredService<IDnsSettingsService>().GetAsync();
+                senderDomainNames = [.. (await sp.GetRequiredService<IAcceptedSenderDomainService>().GetAllAsync())
+                    .Select(s => s.Domain.Trim().ToLowerInvariant()).Where(d => d.Length > 0).Distinct()];
+
+                List<string> recipients = [.. (await sp.GetRequiredService<IAcceptedDomainService>().GetAllAsync())
+                    .Select(x => x.Domain.Trim().ToLowerInvariant()).Where(x => x.Length > 0).Distinct()];
+                mxDomains = [.. recipients.Select(d => (Domain: d, Backup: false))];
+                if (isHostScope)
+                {
+                    var backup = await sp.GetRequiredService<IBackupMxSettingsService>().GetAsync();
+                    foreach (var d in backup.DomainList.Select(x => x.Trim().ToLowerInvariant()).Where(x => x.Length > 0).Distinct())
+                        mxDomains.Add((d, true));
+                }
+
+                // Relay-security posture: open-relay protection is always enforced (external relay needs AUTH
+                // or an explicit, non-"any" allow-IP rule). Surface which allow networks grant unauthenticated
+                // relay, and flag an "any" (…/0) allow rule which does NOT grant relay.
+                var relayRules = await sp.GetRequiredService<IRuntimeConfigCache>().GetIpAccessRulesAsync(_cts.Token);
+                var allowNetworks = relayRules.Where(r => r.Action == IpAccessAction.Allow).Select(r => r.Network.Trim()).ToList();
+                relayExplicitAllow = [.. allowNetworks.Where(n => !n.EndsWith("/0"))];
+                relayAnyAllow = allowNetworks.Any(n => n.EndsWith("/0"));
+
+                if (tenantId is { } tid)
+                    egress = (await sp.GetRequiredService<ITenantService>().GetByIdAsync(tid))?.EgressIpAddress?.Trim();
+
+                dkimList = [.. await sp.GetRequiredService<IDkimDomainService>().GetAllAsync()];
             }
 
-            // ----- IP addresses: public hostname + reverse DNS per sending/egress IP -----
-            var settings = await sp.GetRequiredService<IDnsSettingsService>().GetAsync();
             var sendingIps = SplitList(settings.SendingIpAddresses);
+            // A tenant egress IP is only an extra check when it isn't already one of the sending IPs.
+            var egressExtra = !string.IsNullOrWhiteSpace(egress) && !sendingIps.Any(s => IpEquals(s, egress)) ? egress : null;
+            var ipList = new List<string>(sendingIps);
+            if (egressExtra is not null) ipList.Add(egressExtra);
+
+            // ----- Phase 2: run every live DNS / HTTP check concurrently (each in its own scope) -----
+            var ipDetectTask = Track(IpDetector.DetectAsync(_cts.Token));
+            var senderTasks = senderDomainNames.Select(d => Check((s, c) => s.CheckDomainAsync(d, c))).ToList();
+            var mxTasks = mxDomains.Select(m => Check((s, c) => s.CheckMxAsync(m.Domain, c))).ToList();
+            var hostnameTask = Check((s, c) => s.CheckHostnameAsync(c));
+            var ptrTasks = ipList.Select(ip => Check((s, c) => s.CheckReverseDnsAsync(ip, c))).ToList();
+            var blTasks = ipList.Select(ip => Check((s, c) => s.CheckBlocklistsAsync(ip, c))).ToList();
+
+            totalChecks = 1 + senderTasks.Count + mxTasks.Count + 1 + ptrTasks.Count + blTasks.Count;
+            await InvokeAsync(StateHasChanged);
+
+            var allTasks = new List<Task> { ipDetectTask, hostnameTask };
+            allTasks.AddRange(senderTasks);
+            allTasks.AddRange(mxTasks);
+            allTasks.AddRange(ptrTasks);
+            allTasks.AddRange(blTasks);
+            await Task.WhenAll(allTasks);
+
+            // ----- Phase 3: assemble the display groups from the completed results -----
+            senderGroups = [.. senderTasks.Select(t => t.Result)
+                .Select(s => new CheckGroup(s.Domain, "Sending identity — you send mail as this domain", [s.Spf, s.Dkim, s.Dmarc]))];
+
+            inboundGroups = [];
+            for (var i = 0; i < mxDomains.Count; i++)
+                inboundGroups.Add(new CheckGroup(mxDomains[i].Domain,
+                    mxDomains[i].Backup
+                        ? "Backup MX (host-level) — holds mail when the primary is unreachable"
+                        : "Inbound — this relay accepts mail for this domain",
+                    [mxTasks[i].Result]));
 
             // Detected outbound IP vs the configured sending IPs — flags a stale config when this server's
             // public IP has changed (e.g. a dynamic ISP address), which the per-IP checks below cannot show
             // because they only validate whatever is configured. On a problem, link to the settings section.
-            var outboundCheck = BuildOutboundIpCheck(await IpDetector.DetectAsync(ct), sendingIps);
+            var outboundCheck = BuildOutboundIpCheck(ipDetectTask.Result, sendingIps);
             var outboundIssue = outboundCheck.Status is DnsRecordStatus.Mismatch or DnsRecordStatus.NotConfigured;
             outboundIpGroup = new CheckGroup("Outbound IP",
                 "What this server actually sends from, compared with your configured sending IPs",
@@ -362,46 +433,27 @@ else
                 outboundIssue ? "/settings?tab=dns" : null,
                 outboundIssue ? "Update sending IPs in Settings" : null);
 
-            // Relay-security posture: open-relay protection is always enforced (external relay needs AUTH
-            // or an explicit, non-"any" allow-IP rule). Surface which allow networks grant unauthenticated
-            // relay, and flag an "any" (…/0) allow rule which does NOT grant relay.
-            var relayRules = await sp.GetRequiredService<IRuntimeConfigCache>().GetIpAccessRulesAsync(ct);
-            var allowNetworks = relayRules
-                .Where(r => r.Action == IpAccessAction.Allow)
-                .Select(r => r.Network.Trim())
-                .ToList();
-            relayExplicitAllow = [.. allowNetworks.Where(n => !n.EndsWith("/0"))];
-            relayAnyAllow = allowNetworks.Any(n => n.EndsWith("/0"));
-
             hostnameGroup = new CheckGroup(
                 string.IsNullOrWhiteSpace(settings.PublicHostname) ? "(public hostname)" : settings.PublicHostname,
                 "Public hostname — used in SPF (a:) and as the EHLO name",
-                [await dns.CheckHostnameAsync(ct)]);
+                [hostnameTask.Result]);
 
             ipGroups = [];
-            foreach (var ip in sendingIps)
-                ipGroups.Add(new CheckGroup(ip, "Sending IP", [await dns.CheckReverseDnsAsync(ip, ct), await dns.CheckBlocklistsAsync(ip, ct)]));
-
-            var ips = new List<string>(sendingIps);
-
-            // Tenant egress IP: reverse DNS + SPF coverage (only when not already a configured sending IP).
-            if (current.TenantId is { } tenantId)
+            for (var i = 0; i < ipList.Count; i++)
             {
-                var tenant = await sp.GetRequiredService<ITenantService>().GetByIdAsync(tenantId);
-                var egress = tenant?.EgressIpAddress?.Trim();
-                if (!string.IsNullOrWhiteSpace(egress) && !sendingIps.Any(s => IpEquals(s, egress)))
-                {
-                    ipGroups.Add(new CheckGroup(egress, "Tenant outbound IP — outbound mail for this tenant leaves from here",
-                        [await dns.CheckReverseDnsAsync(egress, ct), await dns.CheckBlocklistsAsync(egress, ct), SpfCoverage(egress, inSpf: false)]));
-                    ips.Add(egress);
-                }
+                var isEgress = egressExtra is not null && i == ipList.Count - 1;
+                List<DnsRecordResult> records = isEgress
+                    ? [ptrTasks[i].Result, blTasks[i].Result, SpfCoverage(ipList[i], inSpf: false)]
+                    : [ptrTasks[i].Result, blTasks[i].Result];
+                ipGroups.Add(new CheckGroup(ipList[i],
+                    isEgress ? "Tenant outbound IP — outbound mail for this tenant leaves from here" : "Sending IP",
+                    records));
             }
-            candidateIps = ips;
+            candidateIps = ipList;
 
             // ----- Check-DNS candidates: domains in use that aren't already auto-checked above.
             // Helps when no sender/recipient domain is configured yet (e.g. derive ardimedia.com
             // from the public hostname smtp2.ardimedia.com).
-            var dkimList = await sp.GetRequiredService<IDkimDomainService>().GetAllAsync();
             // A domain that is now a configured sender/recipient domain shouldn't also linger as an
             // ad-hoc result card; drop those so it shows once (under its configured group).
             var configuredDomains = new HashSet<string>(
@@ -420,8 +472,8 @@ else
                 if (checkedDomains.Contains(d) || cands.Any(c => string.Equals(c.Domain, d, StringComparison.OrdinalIgnoreCase))) return;
                 cands.Add(new DomainCandidate(d, source));
             }
-            if (PublicSuffix.GetRegistrableDomain(settings.PublicHostname) is { } host)
-                AddCandidate(host, $"derived from {settings.PublicHostname}");
+            if (PublicSuffix.GetRegistrableDomain(settings.PublicHostname) is { } regHost)
+                AddCandidate(regHost, $"derived from {settings.PublicHostname}");
             foreach (var dk in dkimList)
                 AddCandidate(dk.Domain, "DKIM domain");
             AddCandidate(EmailDomain(settings.DmarcReportEmail), "DMARC report address");
@@ -435,6 +487,42 @@ else
         {
             isLoading = false;
         }
+    }
+
+    // Runs a single live DNS check in its own tenant-scoped DI scope and reports progress when it
+    // finishes. DnsSetupService is scoped + stateful and touches the DbContext, so each concurrent
+    // check needs its own scope (the active tenant is propagated by ScopeFactory).
+    private Task<T> Check<T>(Func<IDnsSetupService, CancellationToken, Task<T>> check)
+    {
+        var ct = _cts.Token;
+        return Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = ScopeFactory.CreateScope();
+                var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
+                return await check(dns, ct);
+            }
+            finally
+            {
+                await ReportProgressAsync();
+            }
+        }, ct);
+    }
+
+    // Wraps a non-scoped async task (e.g. the HTTP IP detection) so it also advances the progress count.
+    private async Task<T> Track<T>(Task<T> inner)
+    {
+        try { return await inner; }
+        finally { await ReportProgressAsync(); }
+    }
+
+    private async Task ReportProgressAsync()
+    {
+        System.Threading.Interlocked.Increment(ref completedChecks);
+        try { await InvokeAsync(StateHasChanged); }
+        catch (ObjectDisposedException) { /* circuit gone */ }
+        catch (OperationCanceledException) { /* circuit gone */ }
     }
 
     private static bool IpEquals(string? a, string? b) =>
