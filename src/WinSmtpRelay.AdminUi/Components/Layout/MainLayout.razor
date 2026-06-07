@@ -5,6 +5,11 @@
 @inject ICurrentTenant CurrentTenant
 @inject WinSmtpRelay.AdminUi.Services.BrowserTimeService BrowserTime
 
+@* Constant browser-tab title for every interactive page. Without an always-rendered PageTitle, the
+   interactive HeadOutlet blanks the document title on navigation and the browser falls back to the URL
+   (e.g. "localhost:8025/update"). Static SSR account pages keep the static <title> in App.razor. *@
+<PageTitle>WIN-SMTP-RELAY</PageTitle>
+
 <BbTooltipProvider>
 <BbSidebarProvider DefaultOpen="true">
     <BbSidebar>
