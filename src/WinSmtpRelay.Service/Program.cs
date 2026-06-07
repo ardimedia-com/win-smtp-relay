@@ -84,7 +84,10 @@ if (adminUiConfig.Enabled)
     builder.Services.AddRelayAdminAuth();
     builder.Services.AddRelayAdminUiAuth();
 
-    // DNS setup / domain-authentication checks (uses the singleton ILookupClient from the delivery engine).
+    // DNS setup / domain-authentication checks. Public-record checks (hostname A/AAAA, MX, PTR,
+    // SPF/DKIM/DMARC TXT) go through a public resolver (8.8.8.8/1.1.1.1) to avoid split-horizon answers;
+    // the DNSBL check stays on the host's own ILookupClient (Spamhaus refuses public resolvers).
+    builder.Services.AddSingleton<WinSmtpRelay.Security.PublicDnsLookupClient>();
     builder.Services.AddScoped<WinSmtpRelay.Core.Interfaces.IDnsSetupService, WinSmtpRelay.Security.DnsSetupService>();
     // Public Suffix List lookup (embedded snapshot, parsed once) for registrable-domain derivation.
     builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IPublicSuffixService, WinSmtpRelay.Security.PublicSuffixService>();

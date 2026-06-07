@@ -11,6 +11,7 @@ namespace WinSmtpRelay.Security;
 
 public class DnsSetupService(
     ILookupClient dns,
+    PublicDnsLookupClient publicDns,
     IOptions<DnsOptions> options,
     IDkimDomainService dkimDomains,
     IAcceptedSenderDomainService senderDomains,
@@ -352,8 +353,8 @@ public class DnsSetupService(
     {
         try
         {
-            var a = await dns.QueryAsync(host, QueryType.A, cancellationToken: ct);
-            var aaaa = await dns.QueryAsync(host, QueryType.AAAA, cancellationToken: ct);
+            var a = await publicDns.Client.QueryAsync(host, QueryType.A, cancellationToken: ct);
+            var aaaa = await publicDns.Client.QueryAsync(host, QueryType.AAAA, cancellationToken: ct);
             // Dedupe by IPAddress (handles differing IPv6 textual forms), then render canonical strings.
             return a.Answers.OfType<ARecord>().Select(r => r.Address)
                 .Concat(aaaa.Answers.OfType<AaaaRecord>().Select(r => r.Address))
@@ -374,7 +375,7 @@ public class DnsSetupService(
     {
         try
         {
-            var result = await dns.QueryAsync(domain, QueryType.MX, cancellationToken: ct);
+            var result = await publicDns.Client.QueryAsync(domain, QueryType.MX, cancellationToken: ct);
             return result.Answers.OfType<MxRecord>()
                 .OrderBy(m => m.Preference)
                 .Select(m => m.Exchange.Value.TrimEnd('.').ToLowerInvariant())
@@ -394,7 +395,7 @@ public class DnsSetupService(
             return null;
         try
         {
-            var result = await dns.QueryReverseAsync(addr, ct);
+            var result = await publicDns.Client.QueryReverseAsync(addr, ct);
             return result.Answers.OfType<PtrRecord>()
                 .Select(p => p.PtrDomainName.Value.TrimEnd('.').ToLowerInvariant())
                 .FirstOrDefault();
@@ -488,7 +489,7 @@ public class DnsSetupService(
     {
         try
         {
-            var result = await dns.QueryAsync(name, QueryType.TXT, cancellationToken: ct);
+            var result = await publicDns.Client.QueryAsync(name, QueryType.TXT, cancellationToken: ct);
             return result.Answers
                 .OfType<TxtRecord>()
                 .Select(txt => string.Join("", txt.Text)) // long records arrive as multiple strings
