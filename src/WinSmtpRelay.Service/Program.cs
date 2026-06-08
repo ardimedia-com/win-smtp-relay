@@ -69,7 +69,14 @@ var adminUiConfig = builder.Configuration.GetSection(AdminUiOptions.SectionName)
 var adminCertProvider = new WinSmtpRelay.Core.AdminCertificateProvider();
 if (adminUiConfig.Enabled && adminUiConfig.UseHttps)
 {
-    using var certLoggerFactory = LoggerFactory.Create(b => b.AddConsole());
+    // Log certificate resolution to the Windows Event Log (and console) so a failure is diagnosable on a
+    // headless service host — this runs before the host (and its logging) is built.
+    using var certLoggerFactory = LoggerFactory.Create(b =>
+    {
+        b.AddConsole();
+        if (OperatingSystem.IsWindows())
+            b.AddEventLog(s => s.SourceName = "WinSmtpRelay.Service");
+    });
     var initialCert = WinSmtpRelay.Security.AdminUiCertificate.Resolve(
         adminUiConfig, AppContext.BaseDirectory,
         certLoggerFactory.CreateLogger("WinSmtpRelay.AdminUiCertificate"));
@@ -78,10 +85,8 @@ if (adminUiConfig.Enabled && adminUiConfig.UseHttps)
 }
 builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IAdminCertificateProvider>(adminCertProvider);
 
-// HTTPS is active when UseHttps is on and a certificate is available (configured/self-signed/imported),
-// or the ASP.NET Core dev certificate in Development.
-var adminHttpsActive = adminUiConfig.UseHttps &&
-    (adminCertProvider.Current is not null || builder.Environment.IsDevelopment());
+// HTTPS is active only when UseHttps is on and a certificate is actually available.
+var adminHttpsActive = adminUiConfig.UseHttps && adminCertProvider.Current is not null;
 
 if (adminUiConfig.Enabled)
 {
@@ -89,15 +94,12 @@ if (adminUiConfig.Enabled)
     {
         options.Listen(System.Net.IPAddress.Parse(adminUiConfig.BindAddress), adminUiConfig.Port, listen =>
         {
-            if (!adminUiConfig.UseHttps)
-                return; // explicit opt-out → serve HTTP
-
-            if (adminCertProvider.Current is not null)
+            // Configure HTTPS only when a certificate is available. If none could be prepared we deliberately
+            // do NOT fall back to the ASP.NET Core dev certificate (absent on a server → startup crash):
+            // the service serves HTTP and the loopback guard below refuses that on a network address.
+            if (adminUiConfig.UseHttps && adminCertProvider.Current is not null)
                 // Read the certificate per handshake so an admin-UI import takes effect without a restart.
                 listen.UseHttps(https => https.ServerCertificateSelector = (_, _) => adminCertProvider.Current);
-            else if (builder.Environment.IsDevelopment())
-                listen.UseHttps(); // dev certificate fallback when self-signed generation is unavailable
-            // else: no certificate (logged above) and not Development — HTTPS not bound
         });
     });
 

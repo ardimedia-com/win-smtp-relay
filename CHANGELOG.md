@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build29] - 2026-06-08
+
+### Fixed
+
+- Fixed the installed service **crashing at startup** with "Unable to configure HTTPS endpoint … the default developer certificate could not be found" when the self-signed admin certificate couldn't be prepared under the service account. The admin HTTPS endpoint no longer falls back to the ASP.NET Core developer certificate (which is absent on a server). The self-signed certificate is now loaded with a **cascade of key-storage strategies** (machine then user key sets) so it works under the restricted `NetworkService` account, and any failure is written to the **Windows Event Log**. If no certificate can be prepared, the service serves HTTP on loopback instead of crashing.
+
 ## [1.0.0-beta1-build28] - 2026-06-07
 
 ### Added
