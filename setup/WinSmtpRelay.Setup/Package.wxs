@@ -114,10 +114,13 @@
 
     <Property Id="ADMINUIPORT" Value="8025" />
     <Property Id="ADMINUIURL" Value="https://localhost:8025" />
-    <!-- Admin-UI network exposure: off by default (loopback only); the Network options dialog sets it to 1. -->
-    <Property Id="NETWORKACCESS" Value="0" />
-    <!-- Lost-password recovery: off by default; the options dialog sets it to 1 to regenerate admin@local. -->
-    <Property Id="RESETADMINPASSWORD" Value="0" />
+    <!-- Options-dialog checkboxes, both UNCHECKED by default. No Value on purpose: an MSI CheckBox shows
+         CHECKED whenever its property is non-empty, so a "0" default would display as ticked — leaving them
+         undefined makes them default to unchecked. Secure="yes" passes the value set in the (un-elevated)
+         UI sequence to the (elevated) execute sequence, so the firewall rule / bind address / reset flag
+         actually take effect. The checkboxes set the value to "1" when ticked. -->
+    <Property Id="NETWORKACCESS" Secure="yes" />
+    <Property Id="RESETADMINPASSWORD" Secure="yes" />
 
     <!-- Immediate: pick a free admin port (8025 → 8125 …), detect port 25, and set
          ADMINUIPORT / ADMINUIURL / PORT25INUSE plus the dynamic exit-dialog text. -->

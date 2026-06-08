@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build34] - 2026-06-08
+
+### Fixed
+
+- Installer **Options checkboxes** ("Make the admin UI reachable…" and "Reset the admin@local password") **appeared checked by default**. An MSI checkbox renders as checked whenever its property is non-empty, and these had a `"0"` default — they now have no default and so render **unchecked**.
+- Those options could also be **silently ignored** on a per-machine (elevated) install: the properties were set in the un-elevated UI but read in the elevated execute sequence. They are now declared `Secure`, so the chosen values reach the execute sequence and the **firewall rule / bind address / password-reset flag actually take effect**.
+
 ## [1.0.0-beta1-build33] - 2026-06-08
 
 ### Added
