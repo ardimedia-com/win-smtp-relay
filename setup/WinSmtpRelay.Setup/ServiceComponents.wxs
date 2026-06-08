@@ -67,6 +67,14 @@
                             Scope="any"
                             Profile="all" />
 
+    </Component>
+
+    <!-- Admin-UI firewall rule — opened ONLY when the operator chose network access (NETWORKACCESS=1).
+         Without it the admin UI binds to 127.0.0.1 and needs no firewall opening (secure default). -->
+    <Component Id="AdminUiFirewall" Directory="INSTALLFOLDER" Guid="d8c1f4a2-7b6e-4a3c-9e2f-1c5b8a0d4f6e"
+               Condition="NETWORKACCESS = &quot;1&quot;">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" Name="AdminUiFirewall"
+                     Type="integer" Value="1" KeyPath="yes" />
       <fw:FirewallException Id="AdminUiPort"
                             Name="WinSmtpRelay Admin UI"
                             Port="[ADMINUIPORT]"

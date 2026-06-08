@@ -60,7 +60,7 @@
     </Property>
 
     <!-- Exit dialog: admin URL text + "Start service now?" checkbox -->
-    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Value="WIN-SMTP-RELAY is installed. Open the admin UI at https://localhost:8025 (also added to the Start menu). The built-in certificate is self-signed, so your browser will warn once — you can import a trusted certificate later in the admin UI." />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Value="WIN-SMTP-RELAY is installed. Open the admin UI at https://localhost:8025 (also added to the Start menu). The built-in certificate is self-signed, so your browser will warn once — you can import a trusted certificate later in the admin UI.  Sign in as admin@local — the one-time initial password is in 'initial-admin-password.txt' in the install folder (also in the Windows Event Log, source WinSmtpRelay.Service)." />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Start WinSmtpRelay service now" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
@@ -170,6 +170,7 @@
       <ComponentRef Id="ServiceComponent" />
       <ComponentRef Id="ConfigComponent" />
       <ComponentRef Id="FirewallRules" />
+      <ComponentRef Id="AdminUiFirewall" />
       <ComponentRef Id="EventLogSource" />
       <ComponentRef Id="InstallDirPermissions" />
       <ComponentRef Id="StartMenuShortcut" />

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build32] - 2026-06-08
+
+### Added
+
+- The one-time **initial admin password** is now written to **`initial-admin-password.txt`** next to the service binaries on first run, and the **sign-in page links to it** (first run only), so you no longer have to dig through the Event Log. The file is **deleted automatically** the first time the password is changed (and the sign-in hint disappears). The password is still also logged to the Event Log as a fallback.
+
+### Changed
+
+- The admin-UI **firewall rule is now opened only when network access is enabled** during setup (the `NETWORKACCESS` option). With the default loopback-only install, no firewall rule is created for the admin port — secure by default. The SMTP firewall rules (25 / 587 / 465) are unchanged.
+- The installer's final screen now points at `initial-admin-password.txt` for the initial sign-in credentials.
+
 ## [1.0.0-beta1-build31] - 2026-06-08
 
 ### Fixed

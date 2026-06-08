@@ -11,6 +11,26 @@
 <h1 class="account-title">Sign in</h1>
 <p class="account-subtitle">Enter your administrator credentials.</p>
 
+@if (showInitialHint)
+{
+    <div role="note" style="border:1px solid #d6d6d6;border-radius:6px;padding:0.6rem 0.8rem;margin-bottom:1rem;font-size:0.82rem;line-height:1.5;background:#f6f6f6;color:#333;">
+        <strong>First run?</strong> Sign in as <code>admin@local</code>.
+        @if (passwordFileExists)
+        {
+            <text>
+                The initial password is in this file on the server:<br />
+                <a href="@passwordFileUrl"><code>@passwordFilePath</code></a><br />
+                <span style="color:#666;">If your browser blocks opening it, copy that path into Windows Explorer. The file is removed automatically once you change the password.</span>
+            </text>
+        }
+        else
+        {
+            <text>The one-time initial password is in the <strong>Windows Event Log</strong> (Application, source <code>WinSmtpRelay.Service</code>) — entry &ldquo;INITIAL ADMIN ACCOUNT CREATED&rdquo;.</text>
+        }
+        You&rsquo;ll be asked to change it on sign-in.
+    </div>
+}
+
 @if (errorMessage is not null)
 {
     <div class="account-error" role="alert">@errorMessage</div>
@@ -57,9 +77,26 @@
 
     private string? errorMessage;
     private bool signupEnabled;
+    private bool showInitialHint;
+    private bool passwordFileExists;
+    private string passwordFilePath = "";
+    private string passwordFileUrl = "";
 
     protected override async Task OnInitializedAsync()
-        => signupEnabled = (await PortalSettings.GetAsync()).SelfServiceSignupEnabled;
+    {
+        signupEnabled = (await PortalSettings.GetAsync()).SelfServiceSignupEnabled;
+
+        // First-run hint: surface where the one-time initial password is. The seeder writes it to a file
+        // next to the binaries (deleted on first password change); link to it while it exists, otherwise
+        // point at the Event Log. Also show the hint while the seeded admin still must change its password.
+        passwordFilePath = Path.Combine(AppContext.BaseDirectory, WinSmtpRelay.Core.AdminBootstrap.PasswordFileName);
+        passwordFileExists = File.Exists(passwordFilePath);
+        if (passwordFileExists)
+            passwordFileUrl = new Uri(passwordFilePath).AbsoluteUri;
+
+        var seeded = await SignInManager.UserManager.FindByNameAsync(WinSmtpRelay.Core.AdminBootstrap.InitialAdminEmail);
+        showInitialHint = passwordFileExists || seeded is { MustChangePassword: true };
+    }
 
     private async Task LoginUser()
     {

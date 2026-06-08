@@ -43,7 +43,10 @@ namespace WinSmtpRelay.Setup.CustomActions
                 // Build the exit-dialog text dynamically so the operator sees any port issues at the end.
                 string text = "WIN-SMTP-RELAY is installed. Open the admin UI at https://localhost:" + adminPort
                     + " (also added to the Start menu). The built-in certificate is self-signed, so your browser "
-                    + "will warn once — you can import a trusted certificate later in the admin UI.";
+                    + "will warn once — you can import a trusted certificate later in the admin UI."
+                    + "  Sign in as admin@local — the one-time initial password is in "
+                    + "'initial-admin-password.txt' in the install folder (also in the Windows Event Log, "
+                    + "source WinSmtpRelay.Service).";
                 if (adminReassigned)
                     text = "Port 8025 was already in use, so the admin UI was moved to port " + adminPort + ". " + text;
                 if (port25InUse)
