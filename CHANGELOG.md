@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build33] - 2026-06-08
+
+### Added
+
+- Installer **"Reset the admin@local password" option** (on the setup Options dialog — also reachable when re-running the installer and choosing *Change*). When ticked, the installer sets a flag that makes the service, on its **next start**, regenerate the `admin@local` password exactly like a fresh install: a new one-time password written to `initial-admin-password.txt` and the Windows Event Log, flagged must-change-on-sign-in, and any account lockout cleared. This is the recovery path when the admin password is lost. The flag (a registry value the service can clear) is consumed once and cleared.
+
 ## [1.0.0-beta1-build32] - 2026-06-08
 
 ### Added

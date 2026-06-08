@@ -27,14 +27,20 @@
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
-        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Admin UI network access" />
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="Who may reach the admin web interface" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Options" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15" Transparent="yes" NoPrefix="yes" Text="Network access and admin-password recovery" />
 
-        <Control Id="NetworkCheckbox" Type="CheckBox" X="20" Y="65" Width="330" Height="18"
+        <Control Id="NetworkCheckbox" Type="CheckBox" X="20" Y="60" Width="330" Height="18"
                  Property="NETWORKACCESS" CheckBoxValue="1"
                  Text="Make the admin UI reachable from other computers on the network" />
-        <Control Id="Info" Type="Text" X="35" Y="88" Width="315" Height="100" Transparent="yes" NoPrefix="yes"
-                 Text="Off (recommended): the admin UI binds to 127.0.0.1 and is reachable only from this computer.&#xD;&#xA;&#xD;&#xA;On: it binds to all network interfaces and the firewall is opened for the admin port, so you can manage it from another machine. The connection is always HTTPS (a self-signed certificate until you import a trusted one in the admin UI)." />
+        <Control Id="Info" Type="Text" X="35" Y="82" Width="315" Height="52" Transparent="yes" NoPrefix="yes"
+                 Text="Off (recommended): the admin UI binds to 127.0.0.1, reachable only from this computer. On: it binds to all interfaces and the admin-port firewall rule is opened. The connection is always HTTPS." />
+
+        <Control Id="ResetPwCheckbox" Type="CheckBox" X="20" Y="145" Width="330" Height="18"
+                 Property="RESETADMINPASSWORD" CheckBoxValue="1"
+                 Text="Reset the admin@local password (only if you have lost it)" />
+        <Control Id="ResetPwInfo" Type="Text" X="35" Y="167" Width="315" Height="58" Transparent="yes" NoPrefix="yes"
+                 Text="On the next service start a new one-time password is generated for admin@local and written to initial-admin-password.txt (and the Event Log). Leave this unchecked for normal installs." />
 
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
@@ -110,6 +116,8 @@
     <Property Id="ADMINUIURL" Value="https://localhost:8025" />
     <!-- Admin-UI network exposure: off by default (loopback only); the Network options dialog sets it to 1. -->
     <Property Id="NETWORKACCESS" Value="0" />
+    <!-- Lost-password recovery: off by default; the options dialog sets it to 1 to regenerate admin@local. -->
+    <Property Id="RESETADMINPASSWORD" Value="0" />
 
     <!-- Immediate: pick a free admin port (8025 → 8125 …), detect port 25, and set
          ADMINUIPORT / ADMINUIURL / PORT25INUSE plus the dynamic exit-dialog text. -->
@@ -128,6 +136,14 @@
     <CustomAction Id="WriteAdminConfig" BinaryRef="WinSmtpRelayCA" DllEntry="WriteAdminConfig"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
+    <!-- Lost-password recovery: when the operator ticks the reset option, set a registry flag the service
+         reads on its next start to regenerate the admin@local password (same as a fresh install). /reg:64
+         targets the 64-bit view the service reads. The service clears the flag after acting. -->
+    <CustomAction Id="SetResetAdminFlag"
+                  Directory="System64Folder"
+                  ExeCommand="reg.exe add HKLM\SOFTWARE\ARDIMEDIA\WinSmtpRelay /v ResetAdminPassword /t REG_DWORD /d 1 /f /reg:64"
+                  Execute="deferred" Return="ignore" Impersonate="no" />
+
     <InstallUISequence>
       <Custom Action="CheckPorts" After="CostFinalize"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
@@ -140,6 +156,8 @@
               Condition="NOT Installed" />
       <Custom Action="WriteAdminConfig" After="InstallFiles"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+      <Custom Action="SetResetAdminFlag" After="WriteRegistryValues"
+              Condition="RESETADMINPASSWORD = &quot;1&quot;" />
       <Custom Action="StartServiceOnUpgrade"
               After="StartServices"
               Condition="WIX_UPGRADE_DETECTED AND (SERVICEWASRUNNING = &quot;#1&quot;)" />
