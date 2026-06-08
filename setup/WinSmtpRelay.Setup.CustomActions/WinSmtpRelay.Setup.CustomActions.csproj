@@ -17,4 +17,11 @@
     <PackageReference Include="WixToolset.Dtf.CustomAction" Version="5.0.2" />
   </ItemGroup>
 
+  <!-- Packed into the custom-action package (MakeSfxCA includes @(Content)); MakeSfxCA uses a file named
+       CustomAction.config as the SFXCA CLR host config so the managed CA loads under .NET Framework 4.x. -->
+  <ItemGroup>
+    <None Remove="CustomAction.config" />
+    <Content Include="CustomAction.config" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

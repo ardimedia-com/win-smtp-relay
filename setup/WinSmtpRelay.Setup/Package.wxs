@@ -113,16 +113,20 @@
 
     <!-- Immediate: pick a free admin port (8025 → 8125 …), detect port 25, and set
          ADMINUIPORT / ADMINUIURL / PORT25INUSE plus the dynamic exit-dialog text. -->
+    <!-- Return="ignore": port detection is an optional convenience. If the managed CA can't run (e.g. an
+         old/odd .NET Framework state), the install must still succeed with the default port (8025). -->
     <CustomAction Id="CheckPorts" BinaryRef="WinSmtpRelayCA" DllEntry="CheckPorts"
-                  Execute="immediate" Return="check" />
+                  Execute="immediate" Return="ignore" />
 
     <!-- Deferred: write appsettings.Production.json (admin Port + BindAddress) into the install dir. -->
     <SetProperty Id="WriteAdminConfig"
                  Value="DIR=[INSTALLFOLDER]|PORT=[ADMINUIPORT]|NET=[NETWORKACCESS]"
                  Before="WriteAdminConfig" Sequence="execute"
                  Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+    <!-- Return="ignore": writing the port/bind override is optional; on failure the service falls back to
+         the shipped appsettings.json (port 8025, loopback) — never abort the install. -->
     <CustomAction Id="WriteAdminConfig" BinaryRef="WinSmtpRelayCA" DllEntry="WriteAdminConfig"
-                  Execute="deferred" Impersonate="no" Return="check" />
+                  Execute="deferred" Impersonate="no" Return="ignore" />
 
     <InstallUISequence>
       <Custom Action="CheckPorts" After="CostFinalize"

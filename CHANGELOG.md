@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build31] - 2026-06-08
+
+### Fixed
+
+- Fixed the installer **aborting (error 1603)** at the port-detection step with "SFXCA: Failed to get requested CLR info (0x80131700)". The managed custom action lacked a CLR host config, so on machines with only .NET Framework 4.x it could not load. Added `CustomAction.config` (`supportedRuntime v4.0.30319` + `useLegacyV2RuntimeActivationPolicy`), and made the port-detection / config-write custom actions **non-fatal** (`Return=ignore`) so they can never abort the install — if they cannot run, the install completes with the default admin port (8025). No additional .NET Framework is required (4.8 ships with Windows 10/11); the action targets .NET Framework because WiX/DTF custom actions cannot run on .NET 10.
+
 ## [1.0.0-beta1-build30] - 2026-06-08
 
 ### Fixed
