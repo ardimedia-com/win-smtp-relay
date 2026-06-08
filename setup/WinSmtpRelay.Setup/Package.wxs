@@ -87,6 +87,17 @@
                   Return="ignore"
                   Impersonate="no" />
 
+    <!-- Defensive cleanup: stop and delete any leftover WinSmtpRelay service before (re)installing it,
+         so a previous failed/crashed install doesn't block ServiceInstall with "service could not be
+         installed". Runs as SYSTEM, before InstallServices. (A service already 'marked for deletion' by
+         an open handle can only be cleared by a reboot — no installer can override that.) -->
+    <CustomAction Id="CleanupLeftoverService"
+                  Directory="SystemFolder"
+                  ExeCommand="cmd.exe /c &quot;sc.exe stop WinSmtpRelay &amp; sc.exe delete WinSmtpRelay&quot;"
+                  Execute="deferred"
+                  Return="ignore"
+                  Impersonate="no" />
+
     <!-- ============================================================
          Managed custom actions: detect ports + write appsettings.Production.json.
          Defaults below apply on upgrades/maintenance (CheckPorts only runs on a fresh install,
@@ -121,6 +132,8 @@
     <InstallExecuteSequence>
       <Custom Action="CheckPorts" After="CostFinalize"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+      <Custom Action="CleanupLeftoverService" Before="InstallServices"
+              Condition="NOT Installed" />
       <Custom Action="WriteAdminConfig" After="InstallFiles"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
       <Custom Action="StartServiceOnUpgrade"

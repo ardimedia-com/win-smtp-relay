@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build30] - 2026-06-08
+
+### Fixed
+
+- Installer: a leftover `WinSmtpRelay` service from a previously failed or crashed install no longer blocks reinstallation. The installer now stops and deletes any existing service before installing it, so `ServiceInstall` no longer fails with "Service could not be installed. Verify that you have sufficient privileges" (error 1923). Note: a service already *marked for deletion* by an open handle (e.g. `services.msc`/Event Viewer open, or a crash-looping process) still requires a reboot — no installer can override that.
+
 ## [1.0.0-beta1-build29] - 2026-06-08
 
 ### Fixed
