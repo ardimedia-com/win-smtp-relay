@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build42] - 2026-06-09
+
+### Added
+
+- The "Relay through Brevo" callout now links to Brevo's **real-time transactional email log** (`app.brevo.com/transactional/email/real-time`) so you can directly check whether messages are going through.
+
 ## [1.0.0-beta1-build41] - 2026-06-09
 
 ### Changed
