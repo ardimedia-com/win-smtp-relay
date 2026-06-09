@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build41] - 2026-06-09
+
+### Changed
+
+- The Setup page's **test-message address validation now explains why** an address is rejected (missing `@`, missing the part before/after `@`, more than one `@`, spaces, or a general typo) instead of the generic "Enter a valid recipient address."
+
 ## [1.0.0-beta1-build40] - 2026-06-09
 
 ### Changed

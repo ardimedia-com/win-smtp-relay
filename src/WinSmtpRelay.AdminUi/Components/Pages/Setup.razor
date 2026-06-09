@@ -658,8 +658,8 @@ else
         testError = null;
         var from = testFrom.Trim();
         var to = testTo.Trim();
-        if (!IsEmail(from)) { testError = "Enter a valid From address."; return; }
-        if (!IsEmail(to)) { testError = "Enter a valid recipient address."; return; }
+        if (ValidateEmail(from, "From") is { } fromErr) { testError = fromErr; return; }
+        if (ValidateEmail(to, "recipient") is { } toErr) { testError = toErr; return; }
         if (readiness?.TenantId is not { } tenantId) { testError = "No tenant in scope."; return; }
 
         // The AuthorizeView around the button only hides UI — the circuit handler must re-check the
@@ -711,12 +711,36 @@ else
         }
     }
 
-    /// <summary>Accepts a single bare email address (no display name, no second address).</summary>
-    private static bool IsEmail(string v)
-        => !string.IsNullOrWhiteSpace(v)
-           && !v.Contains(' ')
-           && System.Net.Mail.MailAddress.TryCreate(v, out var addr)
-           && string.Equals(addr.Address, v, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Validates a single bare email address (no display name, no second address). Returns null when it is
+    /// valid, otherwise a human-readable reason why it is not. <paramref name="label"/> is the field name
+    /// ("From" / "recipient") woven into the message. The final check keeps the same acceptance set as a
+    /// plain <see cref="System.Net.Mail.MailAddress"/> round-trip; the earlier checks just give a precise
+    /// reason for the common mistakes.
+    /// </summary>
+    private static string? ValidateEmail(string v, string label)
+    {
+        if (string.IsNullOrWhiteSpace(v))
+            return $"Enter a {label} address.";
+        if (v.Contains(' '))
+            return $"The {label} address must not contain spaces.";
+
+        var at = v.IndexOf('@');
+        if (at < 0)
+            return $"The {label} address must contain '@' (e.g. name@domain.com).";
+        if (at == 0)
+            return $"The {label} address is missing the part before '@'.";
+        if (at == v.Length - 1)
+            return $"The {label} address is missing the domain after '@'.";
+        if (v.IndexOf('@', at + 1) >= 0)
+            return $"The {label} address must contain exactly one '@'.";
+
+        if (!(System.Net.Mail.MailAddress.TryCreate(v, out var addr)
+              && string.Equals(addr.Address, v, StringComparison.OrdinalIgnoreCase)))
+            return $"'{v}' isn't a valid email address — check for typos.";
+
+        return null;
+    }
 
     private static string DnsBadgeClass(DnsRecordStatus status) => status switch
     {
