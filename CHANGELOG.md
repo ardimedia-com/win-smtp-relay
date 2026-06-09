@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build35] - 2026-06-09
+
+### Fixed
+
+- The admin-UI **bind address / port override could be silently ignored**, leaving the UI on loopback (`127.0.0.1`) even after the network-access option was chosen. The installer writes `appsettings.Production.json`, which the .NET host loads only when the environment is `Production`; on a host carrying a stray `ASPNETCORE_ENVIRONMENT=Development` the file was skipped and the admin UI reverted to the loopback default. The service now loads that override **explicitly, regardless of the hosting environment**, so the chosen port / network-access setting always applies.
+
+### Changed
+
+- The installer's admin-UI **firewall rule is now named "WinSmtpRelay Admin UI (<port>)"** with the actual (dynamic) port, matching the SMTP rules ("WinSmtpRelay SMTP (25)", etc.).
+
 ## [1.0.0-beta1-build34] - 2026-06-08
 
 ### Fixed

@@ -76,7 +76,7 @@
       <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" Name="AdminUiFirewall"
                      Type="integer" Value="1" KeyPath="yes" />
       <fw:FirewallException Id="AdminUiPort"
-                            Name="WinSmtpRelay Admin UI"
+                            Name="WinSmtpRelay Admin UI ([ADMINUIPORT])"
                             Port="[ADMINUIPORT]"
                             Protocol="tcp"
                             Scope="any"
