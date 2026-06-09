@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build39] - 2026-06-09
+
+### Fixed
+
+- **The Windows service was not started after installation, even with the "Start service now" option ticked.** The start ran `sc.exe start` from the exit dialog in the **un-elevated UI sequence**, where starting a service is denied — so it failed silently. The service is now started by MSI's `StartServices` action via `ServiceControl Start="install"` (which runs **elevated**), the reliable, convention-correct mechanism. The non-functional "Start service now" checkbox was removed (the service always starts on install).
+
 ## [1.0.0-beta1-build38] - 2026-06-09
 
 ### Fixed

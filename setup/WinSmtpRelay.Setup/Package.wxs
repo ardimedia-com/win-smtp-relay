@@ -65,25 +65,11 @@
                       Type="raw" />
     </Property>
 
-    <!-- Exit dialog: admin URL text + "Start service now?" checkbox -->
-    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Value="WIN-SMTP-RELAY is installed. Open the admin UI at https://localhost:8025 (also added to the Start menu). The built-in certificate is self-signed, so your browser will warn once — you can import a trusted certificate later in the admin UI.  Sign in as admin@local — the one-time initial password is in 'initial-admin-password.txt' in the install folder (also in the Windows Event Log, source WinSmtpRelay.Service)." />
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Start WinSmtpRelay service now" />
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
-
-    <!-- On upgrade where service was NOT running: uncheck the exit dialog checkbox -->
-    <SetProperty Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX"
-                 Value="{}"
-                 Before="CostFinalize"
-                 Sequence="ui"
-                 Condition="WIX_UPGRADE_DETECTED AND NOT (SERVICEWASRUNNING = &quot;#1&quot;)" />
-
-    <!-- WixUI ExitDlg triggers DoAction "LaunchApplication" when checkbox is checked -->
-    <CustomAction Id="LaunchApplication"
-                  Directory="SystemFolder"
-                  ExeCommand="sc.exe start WinSmtpRelay"
-                  Execute="immediate"
-                  Return="ignore"
-                  Impersonate="no" />
+    <!-- Exit dialog: post-install info text (admin URL + initial credentials). There is no "start service"
+         checkbox: the service is started by ServiceControl Start="install" in the elevated execute sequence.
+         The old checkbox ran sc.exe start from the un-elevated UI sequence, where it is denied, so the
+         service silently never started. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Value="WIN-SMTP-RELAY is installed and the service is starting. Open the admin UI at https://localhost:8025 (also added to the Start menu). The built-in certificate is self-signed, so your browser will warn once — you can import a trusted certificate later in the admin UI.  Sign in as admin@local — the one-time initial password is in 'initial-admin-password.txt' in the install folder (also in the Windows Event Log, source WinSmtpRelay.Service)." />
 
     <!-- Deferred CA: auto-start service during upgrade if it was running before -->
     <CustomAction Id="StartServiceOnUpgrade"

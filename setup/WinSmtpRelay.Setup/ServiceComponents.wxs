@@ -32,6 +32,15 @@
                       Stop="both"
                       Remove="uninstall"
                       Wait="yes" />
+
+      <!-- Start the service during install via MSI's StartServices action, which runs in the ELEVATED
+           execute sequence. (The previous mechanism started it from the ExitDlg in the un-elevated UI
+           sequence, where sc.exe start is denied, so the service silently never started.) Wait="no" so a
+           slow/failed start can't roll back the install — the service is auto-start with restart recovery. -->
+      <ServiceControl Id="StartWinSmtpRelay"
+                      Name="WinSmtpRelay"
+                      Start="install"
+                      Wait="no" />
     </Component>
 
     <!-- Configuration file — preserved on upgrade, kept on uninstall -->
