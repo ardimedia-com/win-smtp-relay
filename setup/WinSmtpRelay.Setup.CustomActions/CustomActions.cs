@@ -69,10 +69,11 @@ namespace WinSmtpRelay.Setup.CustomActions
         }
 
         /// <summary>
-        /// Deferred CA. Writes appsettings.Machine.json next to the service binaries with the chosen
-        /// admin-UI port and bind address. The service loads this environment-independent machine-config
-        /// file explicitly (in any environment), layering it over the shipped appsettings.json without us
-        /// having to parse/modify that file. Data is passed via CustomActionData as
+        /// Deferred CA. Writes appsettings.Production.json next to the service binaries with the chosen
+        /// admin-UI port and bind address. The service is installed to run in the Production environment
+        /// (ServiceInstall Arguments="--environment Production"), so ASP.NET Core layers this file over the
+        /// shipped appsettings.json via the standard appsettings.{Environment}.json convention — no custom
+        /// loading and no parsing of appsettings.json. Data is passed via CustomActionData as
         /// "DIR=&lt;installdir&gt;|PORT=&lt;port&gt;|BIND=&lt;address&gt;".
         /// </summary>
         [CustomAction]
@@ -105,7 +106,7 @@ namespace WinSmtpRelay.Setup.CustomActions
                     "  }\r\n" +
                     "}\r\n";
 
-                string path = Path.Combine(dir, "appsettings.Machine.json");
+                string path = Path.Combine(dir, "appsettings.Production.json");
                 File.WriteAllText(path, json);
                 session.Log("WinSmtpRelay WriteAdminConfig: wrote {0} (Port={1}, BindAddress={2})", path, portNum, bind);
                 return ActionResult.Success;

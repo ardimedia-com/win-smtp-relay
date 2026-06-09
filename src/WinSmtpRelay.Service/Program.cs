@@ -23,13 +23,6 @@ Directory.SetCurrentDirectory(Path.GetDirectoryName(Environment.ProcessPath) ?? 
 
 var builder = WebApplication.CreateBuilder(args);
 
-// The installer writes machine-specific overrides (admin-UI port + bind address) to
-// appsettings.Machine.json next to the binaries. This is environment-independent MACHINE config — not an
-// appsettings.{Environment}.json convention file — so load it explicitly and in every environment. That
-// keeps appsettings.Production.json purely for the Production environment (clean separation), while the
-// operator's chosen port / network-access setting always applies regardless of ASPNETCORE_ENVIRONMENT.
-builder.Configuration.AddJsonFile("appsettings.Machine.json", optional: true, reloadOnChange: true);
-
 builder.Services.AddWindowsService(options =>
 {
     options.ServiceName = "WinSmtpRelay";

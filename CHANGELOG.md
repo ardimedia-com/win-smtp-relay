@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build37] - 2026-06-09
+
+### Changed
+
+- **Configuration now follows standard .NET conventions only** — the non-standard handling introduced in build35/build36 is removed (no invented `appsettings.Machine.json`, no explicit cross-environment file load). The installer writes its admin-UI overrides to `appsettings.Production.json` (its intended purpose) and **installs the service to run in the Production environment** via the standard host switch `--environment Production`. So the override loads through the normal `appsettings.{Environment}.json` convention and applies regardless of any stray `ASPNETCORE_ENVIRONMENT` left on the host. Pinning the service to Production also disables the Development-only detailed Blazor error output.
+
 ## [1.0.0-beta1-build36] - 2026-06-09
 
 ### Changed

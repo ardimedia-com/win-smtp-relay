@@ -15,7 +15,8 @@
                       Type="ownProcess"
                       Start="auto"
                       Account="NT AUTHORITY\NetworkService"
-                      ErrorControl="normal">
+                      ErrorControl="normal"
+                      Arguments="--environment Production">
         <util:ServiceConfig FirstFailureActionType="restart"
                             SecondFailureActionType="restart"
                             ThirdFailureActionType="restart"
