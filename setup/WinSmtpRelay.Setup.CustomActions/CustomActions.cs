@@ -69,6 +69,54 @@ namespace WinSmtpRelay.Setup.CustomActions
         }
 
         /// <summary>
+        /// Immediate CA for maintenance (Change / Repair). Reads the existing appsettings.Production.json so
+        /// the options dialog reflects the current state and the admin port is preserved — CheckPorts does
+        /// not run on maintenance, and the ADMINUIPORT default (8025) would otherwise be wrong if the install
+        /// had chosen another port. Sets ADMINUIPORT to the current port, NETWORKACCESS=1 when the current
+        /// bind is 0.0.0.0 (so the network checkbox is pre-checked), and WSRMAINTUI=1 to mark that the
+        /// maintenance UI ran (gates whether WriteAdminConfig re-applies the config on a repair).
+        /// </summary>
+        [CustomAction]
+        public static ActionResult ReadExistingConfig(Session session)
+        {
+            try
+            {
+                session["WSRMAINTUI"] = "1";
+
+                var dir = session["INSTALLFOLDER"];
+                if (string.IsNullOrEmpty(dir))
+                    return ActionResult.Success;
+
+                var path = Path.Combine(dir, "appsettings.Production.json");
+                if (!File.Exists(path))
+                    return ActionResult.Success;
+
+                var json = File.ReadAllText(path);
+
+                var port = System.Text.RegularExpressions.Regex.Match(json, "\"Port\"\\s*:\\s*(\\d+)");
+                if (port.Success)
+                    session["ADMINUIPORT"] = port.Groups[1].Value;
+
+                // Pre-check the network checkbox only when currently bound to all interfaces. Leave the
+                // property empty for loopback — empty reads as unchecked, whereas "0" would (wrongly) render
+                // the checkbox as checked (an MSI checkbox is "checked" whenever its property is non-empty).
+                var bind = System.Text.RegularExpressions.Regex.Match(json, "\"BindAddress\"\\s*:\\s*\"([^\"]+)\"");
+                if (bind.Success && bind.Groups[1].Value == "0.0.0.0")
+                    session["NETWORKACCESS"] = "1";
+
+                session.Log("WinSmtpRelay ReadExistingConfig: port={0}, bind={1}",
+                    port.Success ? port.Groups[1].Value : "(default)",
+                    bind.Success ? bind.Groups[1].Value : "(none)");
+                return ActionResult.Success;
+            }
+            catch (Exception ex)
+            {
+                session.Log("WinSmtpRelay ReadExistingConfig failed: " + ex);
+                return ActionResult.Success;
+            }
+        }
+
+        /// <summary>
         /// Deferred CA. Writes appsettings.Production.json next to the service binaries with the chosen
         /// admin-UI port and bind address. The service is installed to run in the Production environment
         /// (ServiceInstall Arguments="--environment Production"), so ASP.NET Core layers this file over the

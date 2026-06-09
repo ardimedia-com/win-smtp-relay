@@ -49,11 +49,17 @@
         </Control>
       </Dialog>
 
-      <!-- Flow: InstallDirDlg → NetworkOptionsDlg → VerifyReadyDlg (higher Order overrides the defaults). -->
+      <!-- Options dialog flow. Fresh install / Change: InstallDirDlg → NetworkOptionsDlg → VerifyReadyDlg.
+           Repair: MaintenanceTypeDlg → [Repair] → NetworkOptionsDlg → VerifyReadyDlg, so the operator can set
+           network access + password reset just like a normal install. Back returns to InstallDirDlg on a
+           fresh install / Change and to MaintenanceTypeDlg on a Repair. -->
       <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="NetworkOptionsDlg" Order="10" Condition="WIXUI_INSTALLDIR_VALID=&quot;1&quot;" />
-      <Publish Dialog="NetworkOptionsDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" Order="10" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="NetworkOptionsDlg" Order="10" />
       <Publish Dialog="NetworkOptionsDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="10" />
+      <Publish Dialog="NetworkOptionsDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" Order="10" Condition="NOT (WixUI_InstallMode = &quot;Repair&quot;)" />
+      <Publish Dialog="NetworkOptionsDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="20" Condition="WixUI_InstallMode = &quot;Repair&quot;" />
       <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="NetworkOptionsDlg" Order="10" Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="NetworkOptionsDlg" Order="20" Condition="WixUI_InstallMode = &quot;Repair&quot;" />
     </UI>
 
     <!-- Detect whether the service was running before upgrade (read during AppSearch, before service is stopped) -->
@@ -98,8 +104,13 @@
     <Binary Id="WinSmtpRelayCA"
             SourceFile="$(var.WinSmtpRelay.Setup.CustomActions.TargetDir)WinSmtpRelay.Setup.CustomActions.CA.dll" />
 
-    <Property Id="ADMINUIPORT" Value="8025" />
+    <!-- Secure so the port read by ReadExistingConfig in the (un-elevated) UI sequence flows to the
+         (elevated) execute sequence for WriteAdminConfig, preserving the port on a repair. -->
+    <Property Id="ADMINUIPORT" Value="8025" Secure="yes" />
     <Property Id="ADMINUIURL" Value="https://localhost:8025" />
+    <!-- Set by ReadExistingConfig when the maintenance UI runs; gates whether WriteAdminConfig re-applies the
+         port/bind config on a Repair (a silent repair, where the dialog never ran, then preserves the file). -->
+    <Property Id="WSRMAINTUI" Secure="yes" />
     <!-- Options-dialog checkboxes, both UNCHECKED by default. No Value on purpose: an MSI CheckBox shows
          CHECKED whenever its property is non-empty, so a "0" default would display as ticked — leaving them
          undefined makes them default to unchecked. Secure="yes" passes the value set in the (un-elevated)
@@ -115,11 +126,18 @@
     <CustomAction Id="CheckPorts" BinaryRef="WinSmtpRelayCA" DllEntry="CheckPorts"
                   Execute="immediate" Return="ignore" />
 
-    <!-- Deferred: write appsettings.Production.json (admin Port + BindAddress) into the install dir. -->
+    <!-- Immediate (maintenance only): read the existing appsettings.Production.json so the options dialog
+         reflects the current state and the admin port is preserved. Return="ignore" — optional. -->
+    <CustomAction Id="ReadExistingConfig" BinaryRef="WinSmtpRelayCA" DllEntry="ReadExistingConfig"
+                  Execute="immediate" Return="ignore" />
+
+    <!-- Deferred: write appsettings.Production.json (admin Port + BindAddress) into the install dir. Runs on
+         a fresh install, and on a maintenance run that went through the options dialog (WSRMAINTUI) — but
+         not during uninstall — so a Repair/Change can re-apply the network choice (with the preserved port). -->
     <SetProperty Id="WriteAdminConfig"
                  Value="DIR=[INSTALLFOLDER]|PORT=[ADMINUIPORT]|NET=[NETWORKACCESS]"
                  Before="WriteAdminConfig" Sequence="execute"
-                 Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+                 Condition="(NOT Installed AND NOT WIX_UPGRADE_DETECTED) OR (WSRMAINTUI = &quot;1&quot; AND NOT REMOVE)" />
     <!-- Return="ignore": writing the port/bind override is optional; on failure the service falls back to
          the shipped appsettings.json (port 8025, loopback) — never abort the install. -->
     <CustomAction Id="WriteAdminConfig" BinaryRef="WinSmtpRelayCA" DllEntry="WriteAdminConfig"
@@ -136,6 +154,10 @@
     <InstallUISequence>
       <Custom Action="CheckPorts" After="CostFinalize"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+      <!-- Maintenance (Change/Repair/Remove of the same version): pre-read the config so the options dialog
+           reflects the current state and the port is preserved. Sets WSRMAINTUI=1. -->
+      <Custom Action="ReadExistingConfig" After="CostFinalize"
+              Condition="Installed AND NOT WIX_UPGRADE_DETECTED" />
     </InstallUISequence>
 
     <InstallExecuteSequence>
@@ -144,7 +166,7 @@
       <Custom Action="CleanupLeftoverService" Before="InstallServices"
               Condition="NOT Installed" />
       <Custom Action="WriteAdminConfig" After="InstallFiles"
-              Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+              Condition="(NOT Installed AND NOT WIX_UPGRADE_DETECTED) OR (WSRMAINTUI = &quot;1&quot; AND NOT REMOVE)" />
       <Custom Action="SetResetAdminFlag" After="WriteRegistryValues"
               Condition="RESETADMINPASSWORD = &quot;1&quot;" />
       <Custom Action="StartServiceOnUpgrade"

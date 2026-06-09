@@ -7,7 +7,7 @@
       Increment manually here when starting work on a new version.
     -->
     <Version>1.0.0</Version>
-    <VersionSuffix Condition="'$(VersionSuffix)' == ''">beta1-build43</VersionSuffix>
+    <VersionSuffix Condition="'$(VersionSuffix)' == ''">beta1-build44</VersionSuffix>
 
     <!-- File version: full version for Windows file properties -->
     <FileVersion>$(Version).0</FileVersion>

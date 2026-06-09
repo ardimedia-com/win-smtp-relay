@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build44] - 2026-06-09
+
+### Changed
+
+- The installer's **Repair** flow now shows the full **Options** dialog (network access + admin@local password reset), like a fresh install — previously Repair skipped these questions. It reflects the current state (the network checkbox is pre-checked when the admin UI is already bound to all interfaces) and **preserves the chosen admin port**; toggling network access updates the bind address and the firewall rule, and ticking the reset checkbox regenerates the admin password on the next service start.
+
 ## [1.0.0-beta1-build43] - 2026-06-09
 
 ### Added
