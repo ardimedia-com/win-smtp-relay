@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build40] - 2026-06-09
+
+### Changed
+
+- After successfully adding a new sender domain, the form now returns to the **Accepted Domains (Sender) list** instead of opening the new domain's detail page.
+
 ## [1.0.0-beta1-build39] - 2026-06-09
 
 ### Fixed

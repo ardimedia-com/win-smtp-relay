@@ -190,8 +190,8 @@ else
         }
 
         ConfigCache.Invalidate();
-        // Land on the detail so the operator sees the TXT record to publish.
-        Nav.NavigateTo($"/domains/sender/{created.Id}");
+        // Return to the list after a successful save.
+        Nav.NavigateTo("/domains/sender");
     }
 
     private async Task VerifyAsync()
