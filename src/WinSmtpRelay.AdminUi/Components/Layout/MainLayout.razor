@@ -168,80 +168,81 @@
                 </BbSidebarGroup>
             </AuthorizeView>
 
-            @* Server configuration — host-wide settings (one set for the whole server, not per-tenant).
-               Shown in a tenant scope and only to the HostAdmin role, so a tenant admin/viewer never sees
-               them. They apply server-wide regardless of which tenant is selected; the pages are also
-               HostAdmin-gated at their routes. *@
-            @if (IsTenantScope)
-            {
-                <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin" Context="srvAuth">
-                <BbSidebarGroup>
-                    <BbSidebarGroupLabel>Server</BbSidebarGroupLabel>
-                    <BbSidebarMenu>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="settings">
-                                <LucideIcon Name="settings" />
-                                <span>Settings</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="settings/certificate">
-                                <LucideIcon Name="lock" />
-                                <span>HTTPS Certificate</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="connectors/receive">
-                                <LucideIcon Name="plug" />
-                                <span>Receive Connectors</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="rate-limits">
-                                <LucideIcon Name="gauge" />
-                                <span>Rate Limits</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="startupconfig">
-                                <LucideIcon Name="file-cog" />
-                                <span>Startup Config</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                    </BbSidebarMenu>
-                </BbSidebarGroup>
-                </AuthorizeView>
-            }
+            @* Global administration — host-wide, NOT per-tenant: host operations (Tenants, Signup, Event
+               Log, Update) and server configuration (Settings, cert, listener, rate limits, startup).
+               Shown to host admins in ANY scope and set apart with a tinted background, so global config is
+               visually distinct from the per-tenant groups above. In a single-tenant deployment the host
+               admin is auto-scoped to the sole tenant, so this sits in one merged view with the tenant
+               groups; the pages are also HostAdmin-gated at their routes. *@
+            <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin" Context="globalAuth">
+                <div class="sidebar-global">
+                    <BbSidebarGroup>
+                        <BbSidebarGroupLabel>Host</BbSidebarGroupLabel>
+                        <BbSidebarMenu>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="tenants">
+                                    <LucideIcon Name="building-2" />
+                                    <span>Tenants</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="host/signup">
+                                    <LucideIcon Name="user-plus" />
+                                    <span>Signup</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="logs">
+                                    <LucideIcon Name="file-text" />
+                                    <span>Event Log</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="update">
+                                    <LucideIcon Name="download" />
+                                    <span>Update</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                        </BbSidebarMenu>
+                    </BbSidebarGroup>
 
-            @* Host overview & operations — consolidated across all tenants. Shown only in the "All tenants"
-               (host) scope, which only a host administrator can enter (the tenant switcher is host-only).
-               Selecting a specific tenant switches to that tenant's configuration view instead. *@
-            @if (IsHostScope)
-            {
-                <BbSidebarGroup>
-                    <BbSidebarGroupLabel>Host</BbSidebarGroupLabel>
-                    <BbSidebarMenu>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="tenants">
-                                <LucideIcon Name="building-2" />
-                                <span>Tenants</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="logs">
-                                <LucideIcon Name="file-text" />
-                                <span>Event Log</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="update">
-                                <LucideIcon Name="download" />
-                                <span>Update</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                    </BbSidebarMenu>
-                </BbSidebarGroup>
-            }
+                    <BbSidebarGroup>
+                        <BbSidebarGroupLabel>Server</BbSidebarGroupLabel>
+                        <BbSidebarMenu>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="settings">
+                                    <LucideIcon Name="settings" />
+                                    <span>Settings</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="settings/certificate">
+                                    <LucideIcon Name="lock" />
+                                    <span>HTTPS Certificate</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="connectors/receive">
+                                    <LucideIcon Name="plug" />
+                                    <span>Receive Connectors</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="rate-limits">
+                                    <LucideIcon Name="gauge" />
+                                    <span>Rate Limits</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="startupconfig">
+                                    <LucideIcon Name="file-cog" />
+                                    <span>Startup Config</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                        </BbSidebarMenu>
+                    </BbSidebarGroup>
+                </div>
+            </AuthorizeView>
         </BbSidebarContent>
 
         <BbSidebarFooter>

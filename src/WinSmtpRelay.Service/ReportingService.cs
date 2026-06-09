@@ -83,7 +83,7 @@ public class ReportingService(
             TimeOnly.FromDateTime(DateTime.UtcNow) >= sendAt)
         {
             var body = await BuildDigestAsync(sp, ct);
-            await SendAsync(queue, from, to, $"WIN-SMTP-RELAY daily report — {today:yyyy-MM-dd}", body, ct);
+            await SendAsync(queue, from, to, $"WIN-SMTP-RELAY daily report — {today:yyyy-MM-dd} — {Environment.MachineName}", body, ct);
             await sp.GetRequiredService<IReportingSettingsService>().MarkDigestSentAsync(today, ct);
             logger.LogInformation("Daily report sent to {Recipient}", to);
         }

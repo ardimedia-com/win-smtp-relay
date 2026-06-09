@@ -73,7 +73,7 @@ else
 
 <BbCard>
     <BbCardContent>
-        <BbTabs DefaultValue="minute" @bind-Value="activeTab" @bind-Value:after="OnTabChanged">
+        <BbTabs DefaultValue="day" @bind-Value="activeTab" @bind-Value:after="OnTabChanged">
             <BbTabsList>
                 <BbTabsTrigger Value="minute">Minute</BbTabsTrigger>
                 <BbTabsTrigger Value="hour">Hour</BbTabsTrigger>
@@ -242,7 +242,7 @@ else
     private DateTime processStartTime;
 
     // Chart state
-    private string activeTab = "minute";
+    private string activeTab = "day";
     private object[]? chartData;
     private object[]? minuteChartData;
     private bool _disposed;

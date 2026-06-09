@@ -1,3 +1,5 @@
+using System.Linq;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.Core.Interfaces;
@@ -78,5 +80,91 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
         row.NotAfterUtc = null;
         row.UploadedUtc = null;
         await db.SaveChangesAsync(ct);
+    }
+
+    public IReadOnlyList<StoreCertificateInfo> ListStoreCertificates()
+    {
+        var result = new List<StoreCertificateInfo>();
+        using var store = new X509Store(StoreName.My, StoreLocation.LocalMachine);
+        store.Open(OpenFlags.ReadOnly);
+        foreach (var cert in store.Certificates)
+        {
+            using (cert)
+            {
+                if (cert.HasPrivateKey && HasServerAuthEku(cert))
+                    result.Add(new StoreCertificateInfo(
+                        cert.Thumbprint, cert.Subject, cert.Issuer, cert.NotAfter, IsTrusted(cert)));
+            }
+        }
+        // Newest expiry first so a freshly-renewed certificate is at the top.
+        return result.OrderByDescending(c => c.NotAfterUtc).ToList();
+    }
+
+    public async Task<AdminCertificateSettings> ImportFromStoreAsync(string thumbprint, CancellationToken ct = default)
+    {
+        byte[] pfx;
+        using (var store = new X509Store(StoreName.My, StoreLocation.LocalMachine))
+        {
+            store.Open(OpenFlags.ReadOnly);
+            var matches = store.Certificates.Find(X509FindType.FindByThumbprint, thumbprint, validOnly: false);
+            if (matches.Count == 0)
+                throw new InvalidOperationException("The selected certificate was not found in the LocalMachine\\My store.");
+
+            using var cert = matches[0];
+            if (!cert.HasPrivateKey)
+                throw new InvalidOperationException("The selected certificate has no private key.");
+
+            try
+            {
+                // Export with the private key into a password-less PFX, then store it via the normal import
+                // path so the relay serves its own self-contained copy (MachineKeySet), independent of the
+                // store's private-key ACLs from then on.
+                pfx = cert.Export(X509ContentType.Pfx);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    "Could not export the certificate's private key. The key must be exportable, and the " +
+                    "service account (NetworkService) must have read access to it (certlm.msc → the " +
+                    "certificate → All Tasks → Manage Private Keys).", ex);
+            }
+        }
+
+        return await ImportAsync(pfx, null, ct);
+    }
+
+    private static bool HasServerAuthEku(X509Certificate2 cert)
+    {
+        // A certificate with no EKU is valid for all purposes; one with an EKU must include serverAuth.
+        const string serverAuthOid = "1.3.6.1.5.5.7.3.1";
+        var eku = cert.Extensions.OfType<X509EnhancedKeyUsageExtension>().FirstOrDefault();
+        return eku is null || eku.EnhancedKeyUsages.Cast<Oid>().Any(o => o.Value == serverAuthOid);
+    }
+
+    // True when the certificate chains to a root trusted MACHINE-WIDE (LocalMachine\Root) and is currently
+    // valid — i.e. a browser on this machine would accept it. We pin the trust anchors to LocalMachine\Root
+    // (CustomRootTrust) on purpose: the default Build() also honours the *running account's* per-user root
+    // store (CurrentUser\Root), which is non-deterministic (it differs between a dev run and the
+    // NetworkService account) and would wrongly accept a cert only the current user trusts. A self-signed
+    // cert that is not in the machine root store, or an expired one, returns false — it would still trigger
+    // a browser warning, so it is not worth offering.
+    private static bool IsTrusted(X509Certificate2 cert)
+    {
+        try
+        {
+            using var root = new X509Store(StoreName.Root, StoreLocation.LocalMachine);
+            root.Open(OpenFlags.ReadOnly);
+
+            using var chain = new X509Chain();
+            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+            chain.ChainPolicy.DisableCertificateDownloads = true; // no AIA network fetches
+            chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+            chain.ChainPolicy.CustomTrustStore.AddRange(root.Certificates);
+            return chain.Build(cert);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

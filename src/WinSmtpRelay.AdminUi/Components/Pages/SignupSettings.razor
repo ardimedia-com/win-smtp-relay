@@ -1,0 +1,129 @@
+@page "/host/signup"
+@using WinSmtpRelay.Core.Interfaces
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
+@inject IServiceScopeFactory ScopeFactory
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem>
+            <BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink>
+        </BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem>
+            <BbBreadcrumbPage>Signup</BbBreadcrumbPage>
+        </BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>Self-service signup</h1>
+    <p>Host-level setting — whether anonymous organizations may create their own tenant. Applied immediately — no restart required.</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[160px] w-full" />
+}
+else
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="settings-group">
+                <div class="settings-group-title">Self-service signup</div>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <BbSwitch Checked="signupEnabled" CheckedChanged="OnToggleAsync" id="signup-toggle" AriaLabel="Allow anonymous organizations to sign up" />
+                    <span>Allow anonymous organizations to sign up at <span class="mono">/signup</span></span>
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.75rem;margin-bottom:0;">
+                    When enabled, a "Create an organization" link appears on the sign-in page. A new signup creates a
+                    <strong>disabled</strong> tenant that must be confirmed by email verification or host approval before it can sign in.
+                </p>
+            </div>
+
+            <div class="settings-group">
+                <div class="settings-group-title">Verification email</div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <BbLabel For="from-address">From-address</BbLabel>
+                    <div style="display:flex;gap:0.5rem;align-items:center;">
+                        <BbInput Id="from-address" @bind-Value="signupFromAddress" Placeholder="noreply@yourdomain.tld" />
+                        <BbButton Variant="ButtonVariant.Default" @onclick="SaveFromAddressAsync">
+                            <LucideIcon Name="save" /> Save
+                        </BbButton>
+                    </div>
+                    <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;margin-bottom:0;">
+                        From-address for signup verification and password-reset emails, sent through this relay's own
+                        delivery pipeline. Leave blank to use the <span class="mono">appsettings</span> value. The domain
+                        should be one this relay is configured to send for (accepted sender domain, ideally with DKIM).
+                    </p>
+                </div>
+            </div>
+
+            <div class="settings-group">
+                <div class="settings-group-title">Abuse protection</div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <BbLabel For="signup-attempts-per-ip-per-hour">Signup attempts per IP per hour</BbLabel>
+                    <div style="display:flex;gap:0.5rem;align-items:center;">
+                        <BbInput Id="signup-attempts-per-ip-per-hour" Type="InputType.Number" @bind-Value="signupMaxPerHour" />
+                        <BbButton Variant="ButtonVariant.Default" @onclick="SaveThrottleAsync">
+                            <LucideIcon Name="save" /> Save
+                        </BbButton>
+                    </div>
+                    <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;margin-bottom:0;">
+                        Abuse limit on the anonymous signup page, per client IP. Set to <span class="mono">0</span> to disable the throttle.
+                    </p>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(statusMessage))
+            {
+                <p class="text-muted" style="margin-top:0.5rem;">@statusMessage</p>
+            }
+        </BbCardContent>
+    </BbCard>
+}
+
+@code {
+    private bool signupEnabled;
+    private string? signupFromAddress;
+    private string signupMaxPerHour = "5";
+    private bool isLoading = true;
+    private string? statusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var portal = await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().GetAsync();
+        signupEnabled = portal.SelfServiceSignupEnabled;
+        signupFromAddress = portal.SignupFromAddress;
+        signupMaxPerHour = portal.SignupMaxAttemptsPerIpPerHour.ToString();
+        isLoading = false;
+    }
+
+    private async Task OnToggleAsync(bool value)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSelfServiceSignupEnabledAsync(value);
+        signupEnabled = value;
+        statusMessage = value ? "Self-service signup enabled." : "Self-service signup disabled.";
+    }
+
+    private async Task SaveFromAddressAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSignupFromAddressAsync(signupFromAddress);
+        statusMessage = string.IsNullOrWhiteSpace(signupFromAddress)
+            ? "From-address cleared (using the appsettings value)."
+            : $"From-address set to {signupFromAddress.Trim()}.";
+    }
+
+    private async Task SaveThrottleAsync()
+    {
+        var max = int.TryParse(signupMaxPerHour, out var v) ? Math.Max(0, v) : 0;
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSignupMaxAttemptsPerIpPerHourAsync(max);
+        signupMaxPerHour = max.ToString();
+        statusMessage = max == 0
+            ? "Signup throttle disabled."
+            : $"Signup throttle set to {max}/hour per IP.";
+    }
+}

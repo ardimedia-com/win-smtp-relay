@@ -459,6 +459,16 @@ select option {
     color: var(--popover-foreground);
 }
 
+/* Global (host-wide) nav section — the Host + Server groups, set apart from the per-tenant groups with a
+   tinted background so server/host-wide configuration is visually distinct from tenant-scoped items. */
+.sidebar-global {
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin: 0.5rem 0.5rem 0;
+    padding: 0.25rem 0;
+}
+
 /* Detail/settings forms: span the full content width and flow fields into responsive columns so wide
    screens are used instead of a narrow capped column. Apply to the field container inside a card; a
    field that must stay full-width (e.g. a one-time secret, a textarea) gets .col-span-full. Rows are

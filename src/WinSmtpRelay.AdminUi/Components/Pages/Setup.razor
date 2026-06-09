@@ -343,6 +343,7 @@ else
     private SetupItem? dnsItem;
     // Server-wide admin-UI HTTPS certificate (host admins only); surfaced in Basic so it's discoverable.
     private SetupItem? certItem;
+    private SetupItem? reportingItem;
     private List<DomainDnsSetup> dnsResults = [];
 
     // Records that have an expected value but are not yet correctly published (shown with copy buttons).
@@ -399,6 +400,7 @@ else
         readiness = await svc.GetAsync();
         await LoadOutboundHealthAsync();
         await LoadCertItemAsync(scope.ServiceProvider);
+        await LoadReportingItemAsync(scope.ServiceProvider);
         Recompute();
     }
 
@@ -421,6 +423,31 @@ else
             : new SetupItem("admin-cert", "Admin UI HTTPS certificate", SetupGroup.Required, SetupStatus.Partial,
                 "Using the built-in self-signed certificate — browsers show a warning. Import a trusted certificate to remove it.",
                 "/settings/certificate", "HTTPS Certificate");
+    }
+
+    // Email reporting (daily activity digest + immediate incident alerts) is a host-level best practice,
+    // so the item is shown only to host admins. Done when enabled with a recipient; on but missing a
+    // recipient reads as "In progress"; off is a "To do" best practice.
+    private async Task LoadReportingItemAsync(IServiceProvider sp)
+    {
+        reportingItem = null;
+        if (AuthState is null)
+            return;
+        var user = (await AuthState).User;
+        if (!(await AuthorizationService.AuthorizeAsync(user, AuthorizationPolicies.HostAdmin)).Succeeded)
+            return;
+
+        var r = await sp.GetRequiredService<IReportingSettingsService>().GetAsync();
+        const string url = "/settings?tab=reporting";
+        reportingItem = (r.Enabled, hasRecipient: !string.IsNullOrWhiteSpace(r.RecipientAddress)) switch
+        {
+            (true, true) => new SetupItem("reporting", "Email reporting", SetupGroup.Recommended, SetupStatus.Done,
+                $"Daily digest and incident alerts are on, sent to {r.RecipientAddress}.", url, "Reporting"),
+            (true, false) => new SetupItem("reporting", "Email reporting", SetupGroup.Recommended, SetupStatus.Partial,
+                "Reporting is on but no recipient address is set.", url, "Reporting"),
+            _ => new SetupItem("reporting", "Email reporting", SetupGroup.Recommended, SetupStatus.Todo,
+                "Off — turn on a daily activity digest and immediate incident alerts (blocklist / bounce-rate).", url, "Reporting"),
+        };
     }
 
     // ----- Outbound delivery health (from recent delivery-log outcomes) -----
@@ -576,6 +603,8 @@ else
         recommendedItems = [.. readiness.Recommended];
         if (dnsItem is not null)
             recommendedItems.Add(dnsItem);
+        if (reportingItem is not null)
+            recommendedItems.Add(reportingItem);
         recTotal = recommendedItems.Count;
         recDone = recommendedItems.Count(i => i.Status == SetupStatus.Done);
         // Basic items, with the live sending-identity correctness check folded into the sending-identity

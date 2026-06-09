@@ -108,6 +108,60 @@ else
             </p>
         </BbCardContent>
     </BbCard>
+
+    <BbCard Class="mb-1">
+        <BbCardHeader>
+            <BbCardTitle>Use a certificate installed on this server</BbCardTitle>
+            <BbCardDescription>Certificates in the Windows <span class="mono">LocalMachine\My</span> store that have a private key, a server-authentication purpose, and <strong>chain to a trusted root</strong> (self-signed / untrusted certificates are not listed — they would still cause a browser warning). The chosen one is copied (with its key) into the relay and applied immediately. The private key must be exportable and readable by the service account.</BbCardDescription>
+        </BbCardHeader>
+        <BbCardContent>
+            @{
+                var trusted = storeCerts.Where(c => c.IsTrusted).ToList();
+                var hidden = storeCerts.Count - trusted.Count;
+            }
+            @if (trusted.Count == 0)
+            {
+                <p class="text-muted" style="font-size:0.85rem;margin:0;">
+                    No trusted certificate found in the machine store.
+                    @if (hidden > 0)
+                    {
+                        <text>@hidden self-signed or untrusted certificate(s) are not listed — they would still trigger a browser warning. Use one issued by a CA your clients trust, or import a PFX above.</text>
+                    }
+                    else
+                    {
+                        <text>A certificate needs a private key, a server-authentication purpose, and must chain to a trusted root.</text>
+                    }
+                </p>
+            }
+            else
+            {
+                <table>
+                    <thead>
+                        <tr><th>Subject</th><th>Issuer</th><th>Expires</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in trusted)
+                        {
+                            <tr>
+                                <td><code class="mono">@c.Subject</code></td>
+                                <td class="text-muted">@c.Issuer</td>
+                                <td class="text-muted">@c.NotAfterUtc.ToString("yyyy-MM-dd")</td>
+                                <td style="text-align:right;">
+                                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => UseStoreCertAsync(c.Thumbprint)" Disabled="@busy">
+                                        <LucideIcon Name="check" /> Use
+                                    </BbButton>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (hidden > 0)
+                {
+                    <p class="text-muted" style="font-size:0.78rem;margin-top:0.5rem;margin-bottom:0;">@hidden self-signed or untrusted certificate(s) are not listed — they would still cause a browser warning. To use a self-signed certificate, add it to the machine's Trusted Root store first.</p>
+                }
+            }
+        </BbCardContent>
+    </BbCard>
 }
 
 @code {
@@ -116,6 +170,7 @@ else
     private AdminCertificateSettings info = new();
     private IBrowserFile? selectedFile;
     private string? password;
+    private IReadOnlyList<StoreCertificateInfo> storeCerts = [];
     private string? statusMessage;
     private string? errorMessage;
 
@@ -129,7 +184,9 @@ else
     private async Task LoadAsync()
     {
         using var scope = ScopeFactory.CreateScope();
-        info = await scope.ServiceProvider.GetRequiredService<IAdminCertificateService>().GetAsync();
+        var svc = scope.ServiceProvider.GetRequiredService<IAdminCertificateService>();
+        info = await svc.GetAsync();
+        storeCerts = svc.ListStoreCertificates();
 
         var current = CertProvider.Current;
         CurrentSubject = current?.Subject;
@@ -177,6 +234,39 @@ else
         catch (Exception ex)
         {
             errorMessage = $"Could not import the certificate: {ex.Message}";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task UseStoreCertAsync(string thumbprint)
+    {
+        busy = true;
+        statusMessage = null;
+        errorMessage = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IAdminCertificateService>();
+            await svc.ImportFromStoreAsync(thumbprint);
+
+            // Apply immediately (hot-swap), like a PFX import.
+            var cert = await svc.LoadImportedAsync();
+            if (cert is not null)
+                CertProvider.Set(cert);
+
+            await LoadAsync();
+            statusMessage = "Certificate copied from the store and applied. New connections use it now — reload this page to confirm.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Could not use the certificate: {ex.Message}";
         }
         finally
         {

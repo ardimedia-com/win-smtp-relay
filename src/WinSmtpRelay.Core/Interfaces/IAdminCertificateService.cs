@@ -25,4 +25,18 @@ public interface IAdminCertificateService
 
     /// <summary>Removes the imported certificate, reverting the admin UI to the built-in self-signed cert.</summary>
     Task ClearAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Lists certificates in the Windows <c>LocalMachine\My</c> store that have a private key and a
+    /// server-authentication EKU — candidates the operator can use for the admin-UI HTTPS endpoint.
+    /// </summary>
+    IReadOnlyList<StoreCertificateInfo> ListStoreCertificates();
+
+    /// <summary>
+    /// Loads the <c>LocalMachine\My</c> certificate with the given thumbprint, exports it (with its
+    /// private key) and stores it like an imported PFX, so the relay then serves its own copy. Throws
+    /// when the certificate is missing, has no private key, or the key cannot be exported (it is not
+    /// marked exportable, or the service account lacks read access to it).
+    /// </summary>
+    Task<AdminCertificateSettings> ImportFromStoreAsync(string thumbprint, CancellationToken ct = default);
 }

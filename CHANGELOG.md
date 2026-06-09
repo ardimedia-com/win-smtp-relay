@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build43] - 2026-06-09
+
+### Added
+
+- **Email reporting** is now a Best Practices item on the Setup checklist (host admins): Done when the daily digest + incident alerts are enabled with a recipient, otherwise a "to do" linking to Settings → Reporting.
+- **Use an installed certificate** for the admin UI: the HTTPS Certificate page lists certificates from the Windows `LocalMachine\My` store and can copy a chosen one — with its private key — into the relay, applied immediately (hot-swap). Only certificates that have a private key, a server-auth purpose, and **chain to a machine-wide trusted root** are listed; self-signed / untrusted ones (which would still trigger a browser warning) are hidden, with a count shown. The private key must be exportable and readable by the service account; otherwise a clear error explains how to grant access. (Trust is checked deterministically against `LocalMachine\Root` via `CustomRootTrust`, independent of the running account's per-user root store.)
+
+### Changed
+
+- The Dashboard's Email Volume chart now defaults to the **Day** view when the page opens (was Minute).
+- The daily report email subject now includes the **host computer name** (e.g. `WIN-SMTP-RELAY daily report — 2026-06-09 — WUHARRYHOME`), so reports from multiple relays are distinguishable.
+- **Navigation restructured around a clear global/tenant split.** Host-wide configuration (Settings, HTTPS Certificate, Receive Connectors, Rate Limits, Startup Config) and host operations (Tenants, Event Log, Update) are now consolidated in one **visually distinct (tinted) "global" section** in the sidebar, shown to host admins in any scope — previously this was split between a tenant-scope "Server" group and a host-scope "Host" group, so host-level settings were unreachable from the host overview.
+- **Single-tenant deployments**: the tenant switcher is now hidden and the host admin is auto-scoped to the sole tenant, giving one merged view (the switcher reappears once a second tenant is created). Switcher labels: "All tenants" → **"Global"**, the default tenant shows as **"Default tenant"**.
+- **Self-service signup** moved out of Settings to its own host page (**Host → Signup**, `/host/signup`); it governs tenant onboarding, not SMTP/relay config.
+- In the **Development** environment with a loopback bind, the admin UI now **also** exposes a plain-**HTTP** endpoint on the next port (`Port+1`, 127.0.0.1 only) **alongside** HTTPS, so the browser password manager (autofill/save) works on the HTTP URL while developing. Strictly dev + loopback: the HTTP endpoint is never bound to a network address and never added in Production (the installer pins `--environment Production`), so production and network access remain HTTPS only.
+
 ## [1.0.0-beta1-build42] - 2026-06-09
 
 ### Added

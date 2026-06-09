@@ -59,6 +59,17 @@ builder.Services.AddHostedService<WinSmtpRelay.Service.ServiceStateReporter>();
 // Kestrel for Admin UI + API
 var adminUiConfig = builder.Configuration.GetSection(AdminUiOptions.SectionName).Get<AdminUiOptions>() ?? new();
 
+var bindsToLoopback = System.Net.IPAddress.TryParse(adminUiConfig.BindAddress, out var adminBindIp)
+    && System.Net.IPAddress.IsLoopback(adminBindIp);
+
+// Development convenience: in the Development environment with a loopback bind, ALSO expose a plain-HTTP
+// endpoint on the next port (Port+1, 127.0.0.1 only) alongside HTTPS. Browsers disable the password
+// manager (autofill/save) on the self-signed-HTTPS warning page, so this gives a localhost HTTP URL where
+// it works — without losing HTTPS. Strictly local + dev-only: the HTTP endpoint is hardcoded to loopback
+// and never added in Production (an installed service runs Production via --environment Production), so
+// production and network access stay HTTPS only.
+var devHttpLoopback = builder.Environment.IsDevelopment() && bindsToLoopback;
+
 // Resolve the admin HTTPS certificate up front: a configured PFX if set, otherwise a persistent
 // self-signed certificate generated next to the service binaries. This keeps the admin plane on HTTPS
 // out of the box — a self-signed cert just means a one-time browser warning until a trusted certificate
@@ -101,6 +112,12 @@ if (adminUiConfig.Enabled)
                 // Read the certificate per handshake so an admin-UI import takes effect without a restart.
                 listen.UseHttps(https => https.ServerCertificateSelector = (_, _) => adminCertProvider.Current);
         });
+
+        // Development: an extra plain-HTTP endpoint on loopback (next port) so the browser password manager
+        // works locally, without giving up HTTPS. Loopback-only and dev-only — never on the network or in
+        // Production.
+        if (devHttpLoopback)
+            options.Listen(System.Net.IPAddress.Loopback, adminUiConfig.Port + 1);
     });
 
     // Admin authentication/authorization (cookie + API key) and tenant-aware policies.
@@ -220,9 +237,7 @@ if (adminUiConfig.Enabled)
     {
         // The admin plane carries full-authority cookies/API keys. Plain HTTP is tolerated only on
         // loopback (local/dev); refuse to serve it on any network-reachable address so the credentials
-        // are never interceptable on the wire.
-        var bindsToLoopback = System.Net.IPAddress.TryParse(adminUiConfig.BindAddress, out var bindIp)
-            && System.Net.IPAddress.IsLoopback(bindIp);
+        // are never interceptable on the wire. (bindsToLoopback is computed once near the Kestrel setup.)
         if (!bindsToLoopback)
             throw new InvalidOperationException(
                 $"Admin UI is set to bind to '{adminUiConfig.BindAddress}' without HTTPS. The admin plane " +
@@ -234,6 +249,9 @@ if (adminUiConfig.Enabled)
     }
     app.Logger.LogInformation("Admin UI listening on {Scheme}://{Address}:{Port}",
         adminHttpsActive ? "https" : "http", adminUiConfig.BindAddress, adminUiConfig.Port);
+    if (devHttpLoopback)
+        app.Logger.LogInformation("Admin UI also listening on http://127.0.0.1:{Port} (Development only, loopback — password manager works here)",
+            adminUiConfig.Port + 1);
 }
 
 await app.RunAsync();
