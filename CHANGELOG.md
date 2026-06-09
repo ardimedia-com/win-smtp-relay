@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build36] - 2026-06-09
+
+### Changed
+
+- The installer's admin-UI overrides (port + bind address) are now written to an environment-independent **`appsettings.Machine.json`** instead of `appsettings.Production.json`, and the service loads that machine-config file explicitly. This restores clean environment semantics — `appsettings.Production.json` is again loaded only in the Production environment — while the operator's port / network-access choice still applies regardless of `ASPNETCORE_ENVIRONMENT`. Refines the build35 fix.
+
 ## [1.0.0-beta1-build35] - 2026-06-09
 
 ### Fixed

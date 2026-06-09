@@ -24,11 +24,11 @@ Directory.SetCurrentDirectory(Path.GetDirectoryName(Environment.ProcessPath) ?? 
 var builder = WebApplication.CreateBuilder(args);
 
 // The installer writes machine-specific overrides (admin-UI port + bind address) to
-// appsettings.Production.json next to the binaries. Load it explicitly so it ALWAYS applies — even if a
-// stray ASPNETCORE_ENVIRONMENT (e.g. "Development") is set on the host. Otherwise that environment name
-// would prevent the file from loading by convention, silently reverting the admin UI to the loopback
-// default and ignoring the operator's chosen port / network-access setting.
-builder.Configuration.AddJsonFile("appsettings.Production.json", optional: true, reloadOnChange: true);
+// appsettings.Machine.json next to the binaries. This is environment-independent MACHINE config — not an
+// appsettings.{Environment}.json convention file — so load it explicitly and in every environment. That
+// keeps appsettings.Production.json purely for the Production environment (clean separation), while the
+// operator's chosen port / network-access setting always applies regardless of ASPNETCORE_ENVIRONMENT.
+builder.Configuration.AddJsonFile("appsettings.Machine.json", optional: true, reloadOnChange: true);
 
 builder.Services.AddWindowsService(options =>
 {
