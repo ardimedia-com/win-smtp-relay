@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build38] - 2026-06-09
+
+### Fixed
+
+- **Timestamps could stay in UTC instead of the viewer's local time.** The browser time-zone detection ran only once, on the first interactive render; if that single attempt happened before JS interop was ready it never retried, leaving every timestamp in UTC for the rest of the session. Detection now retries until the time zone resolves. (Verified with a real browser: a release published at `07:58Z` now displays as `09:58` in a UTC+2 browser.)
+
 ## [1.0.0-beta1-build37] - 2026-06-09
 
 ### Changed

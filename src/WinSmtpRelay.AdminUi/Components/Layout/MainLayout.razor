@@ -322,8 +322,11 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Detect the browser time zone once per circuit so UTC timestamps render in local time.
-        if (!firstRender || BrowserTime.IsReady)
+        // Detect the browser time zone (once per circuit) so UTC timestamps render in local time.
+        // Retry on every render until it resolves: a single attempt on the first interactive render can
+        // miss if JS interop isn't ready yet, which would otherwise leave every timestamp stuck in UTC
+        // for the whole session.
+        if (BrowserTime.IsReady)
             return;
         try
         {
@@ -331,6 +334,6 @@
             var offset = await JS.InvokeAsync<int>("winSmtpRelay.getTimeZoneOffsetMinutes");
             BrowserTime.SetTimeZone(iana, offset);
         }
-        catch { /* leave timestamps in UTC if interop is unavailable */ }
+        catch { /* leave timestamps in UTC until interop becomes available on a later render */ }
     }
 }
