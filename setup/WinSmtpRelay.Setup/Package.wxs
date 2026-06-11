@@ -168,6 +168,12 @@
                  Condition="WSR_SAVEDPORT AND NOT WSRUIRAN" />
     <SetProperty Id="NETWORKACCESS" After="AppSearch" Sequence="both" Value="1"
                  Condition="(WSR_SAVEDNET = &quot;#1&quot;) AND NOT WSRUIRAN" />
+    <!-- Maintenance marker: the interactive maintenance UI ran, so WriteAdminConfig may re-apply the
+         port/bind config on Repair/Change. Set via the UI sequence (not inside ReadExistingConfig), so a
+         SILENT repair keeps its "preserve the file" semantics even now that ReadExistingConfig can also
+         run in the execute sequence (legacy upgrade recovery below). -->
+    <SetProperty Id="WSRMAINTUI" After="AppSearch" Sequence="ui" Value="1"
+                 Condition="Installed AND NOT WIX_UPGRADE_DETECTED" />
 
     <!-- Immediate: pick a free admin port (8025 → 8125 …), detect port 25, and set
          ADMINUIPORT / ADMINUIURL / PORT25INUSE plus the dynamic exit-dialog text. -->
@@ -176,8 +182,11 @@
     <CustomAction Id="CheckPorts" BinaryRef="WinSmtpRelayCA" DllEntry="CheckPorts"
                   Execute="immediate" Return="ignore" />
 
-    <!-- Immediate (maintenance only): read the existing appsettings.Production.json so the options dialog
-         reflects the current state and the admin port is preserved. Return="ignore" — optional. -->
+    <!-- Immediate: read the existing appsettings.Production.json so the options dialog reflects the
+         current state and the admin port is preserved. Runs only when the registry has NO saved port
+         (WSR_SAVEDPORT) — i.e. on maintenance/upgrades of a pre-build45 install that never wrote it.
+         From build45 on, the registry is the source of truth (readable un-elevated, unlike the
+         ACL-hardened install dir). Return="ignore" — optional. -->
     <CustomAction Id="ReadExistingConfig" BinaryRef="WinSmtpRelayCA" DllEntry="ReadExistingConfig"
                   Execute="immediate" Return="ignore" />
 
@@ -206,15 +215,22 @@
     <InstallUISequence>
       <Custom Action="CheckPorts" After="CostFinalize"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
-      <!-- Maintenance (Change/Repair/Remove of the same version): pre-read the config so the options dialog
-           reflects the current state and the port is preserved. Sets WSRMAINTUI=1. -->
+      <!-- Legacy recovery (pre-build45 installs only, where no AdminUiPort registry value exists yet):
+           maintenance AND major upgrades pre-read the config file so the options dialog reflects the
+           current port/bind. On build45+ the registry SetPropertys above already pre-filled them. -->
       <Custom Action="ReadExistingConfig" After="CostFinalize"
-              Condition="Installed AND NOT WIX_UPGRADE_DETECTED" />
+              Condition="(Installed OR WIX_UPGRADE_DETECTED) AND NOT WSR_SAVEDPORT" />
     </InstallUISequence>
 
     <InstallExecuteSequence>
       <Custom Action="CheckPorts" After="CostFinalize"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
+      <!-- Legacy recovery for SILENT upgrades from pre-build45 (no saved registry port, no UI ran):
+           without this, a silent upgrade would fall back to port 8025 and rewrite a reassigned port.
+           NOT WSRUIRAN: when the options dialog ran, its (Secure) values must win — re-reading the file
+           here would override e.g. an unchecked network checkbox. -->
+      <Custom Action="ReadExistingConfig" After="CostFinalize"
+              Condition="(Installed OR WIX_UPGRADE_DETECTED) AND (NOT WSR_SAVEDPORT) AND (NOT WSRUIRAN)" />
       <Custom Action="CleanupLeftoverService" Before="InstallServices"
               Condition="NOT Installed" />
       <Custom Action="WriteAdminConfig" After="InstallFiles"

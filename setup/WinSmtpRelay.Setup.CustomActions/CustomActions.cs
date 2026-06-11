@@ -69,22 +69,21 @@ namespace WinSmtpRelay.Setup.CustomActions
         }
 
         /// <summary>
-        /// Immediate CA for maintenance (Change / Repair). Reads the existing appsettings.Production.json so
-        /// the options dialog reflects the current state and the admin port is preserved — CheckPorts does
-        /// not run on maintenance, and the ADMINUIPORT default (8025) would otherwise be wrong if the install
-        /// had chosen another port. Sets ADMINUIPORT/ADMINUIURL to the current port, NETWORKACCESS=1 when the
-        /// current bind is anything but loopback (so the network checkbox is pre-checked), and WSRMAINTUI=1
-        /// to mark that the maintenance UI ran (gates whether WriteAdminConfig re-applies the config).
-        /// Port/BindAddress are read from the "AdminUi" section only — other sections may carry keys with
-        /// the same names.
+        /// Immediate CA, scheduled (UI and execute sequence) only when the registry holds no saved admin
+        /// port — i.e. maintenance or upgrade of a pre-build45 install. Reads the existing
+        /// appsettings.Production.json so the options dialog reflects the current state and the admin port
+        /// is preserved — CheckPorts does not run then, and the ADMINUIPORT default (8025) would otherwise
+        /// be wrong if the install had chosen another port. Sets ADMINUIPORT/ADMINUIURL to the current
+        /// port and NETWORKACCESS=1 when the current bind is anything but loopback (so the network
+        /// checkbox is pre-checked). Port/BindAddress are read from the "AdminUi" section only — other
+        /// sections may carry keys with the same names. (The WSRMAINTUI maintenance marker is set by a
+        /// SetProperty in the UI sequence, not here.)
         /// </summary>
         [CustomAction]
         public static ActionResult ReadExistingConfig(Session session)
         {
             try
             {
-                session["WSRMAINTUI"] = "1";
-
                 var dir = session["INSTALLFOLDER"];
                 if (string.IsNullOrEmpty(dir))
                     return ActionResult.Success;

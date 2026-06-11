@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build46] - 2026-06-11
+
+### Fixed
+
+- **Installer: the first upgrade from a pre-build45 install no longer resets a reassigned admin port to 8025.** Build45's registry-based port recovery only works once build45 itself has written the saved port; upgrading from an older build found no registry value and fell back to the default. Such upgrades (interactive and silent) now read the port and network state from the existing `appsettings.Production.json` instead. From build45 on the registry is the source of truth — it is also readable by the un-elevated maintenance UI, which the ACL-hardened install folder deliberately no longer is.
+
 ## [1.0.0-beta1-build45] - 2026-06-11
 
 ### Changed
