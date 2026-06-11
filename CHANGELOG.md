@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build47] - 2026-06-11
+
+### Changed
+
+- **All system emails are now sent as HTML with a plain-text alternative** (multipart/alternative): signup verification, password reset, the Setup test message, the daily report digest, and the blocklist/bounce-rate alerts. The HTML uses an email-client-safe branded card layout (table markup, inline styles, a "bulletproof" CTA button with a plain-link fallback that renders correctly in Outlook Classic). Both parts are rendered from the same structured content (`SystemEmailContent`), so the text and HTML versions cannot drift apart; the single `SystemEmail` composer keeps header sanitization unchanged.
+- The end-to-end integration test's relay message uses the same HTML layout now, which also verifies that the relay passes multipart MIME through the pipeline unchanged.
+
 ## [1.0.0-beta1-build46] - 2026-06-11
 
 ### Fixed

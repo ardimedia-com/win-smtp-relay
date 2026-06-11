@@ -173,11 +173,24 @@ public class SmtpRelayEndToEndTests
                 message.From.Add(new MailboxAddress("WinSmtpRelay Test", "relay-test@ardimedia.com"));
                 message.To.Add(new MailboxAddress("Harry", "harry@ardimedia.com"));
                 message.Subject = $"WinSmtpRelay E2E Test {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}";
-                message.Body = new TextPart("plain")
+                // multipart/alternative (text + branded HTML, same layout as the system emails) — this
+                // also verifies that the relay passes multipart MIME through the pipeline unchanged.
+                var bodyContent = new WinSmtpRelay.Core.Mail.SystemEmailContent
                 {
-                    Text = "This email was relayed by WinSmtpRelay during an end-to-end integration test.\n\n" +
-                           "If you received this, the SMTP listener, queue, and delivery engine are all working."
+                    Title = "End-to-end test",
+                    Paragraphs =
+                    [
+                        "This email was relayed by WinSmtpRelay during an end-to-end integration test.",
+                        "If you received this, the SMTP listener, queue, and delivery engine are all working.",
+                    ],
                 };
+                var bodyBuilder = new BodyBuilder
+                {
+                    TextBody = "This email was relayed by WinSmtpRelay during an end-to-end integration test.\n\n" +
+                               "If you received this, the SMTP listener, queue, and delivery engine are all working.",
+                    HtmlBody = WinSmtpRelay.Core.Mail.SystemEmailHtml.Render(bodyContent),
+                };
+                message.Body = bodyBuilder.ToMessageBody();
 
                 using var client = new SmtpClient();
                 await client.ConnectAsync("127.0.0.1", TestSmtpPort, MailKit.Security.SecureSocketOptions.None);

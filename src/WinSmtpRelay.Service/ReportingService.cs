@@ -82,8 +82,8 @@ public class ReportingService(
             TimeOnly.TryParse(settings.DailyTimeUtc, out var sendAt) &&
             TimeOnly.FromDateTime(DateTime.UtcNow) >= sendAt)
         {
-            var body = await BuildDigestAsync(sp, ct);
-            await SendAsync(queue, from, to, $"WIN-SMTP-RELAY daily report — {today:yyyy-MM-dd} — {Environment.MachineName}", body, ct);
+            var content = await BuildDigestAsync(sp, ct);
+            await SendAsync(queue, from, to, $"WIN-SMTP-RELAY daily report — {today:yyyy-MM-dd} — {Environment.MachineName}", content, ct);
             await sp.GetRequiredService<IReportingSettingsService>().MarkDigestSentAsync(today, ct);
             logger.LogInformation("Daily report sent to {Recipient}", to);
         }
@@ -108,10 +108,18 @@ public class ReportingService(
 
             await SendAsync(queue, from, to,
                 $"WIN-SMTP-RELAY ALERT: sending IP {ip} is blocklisted",
-                $"The sending IP {ip} appears on a DNS blocklist (DNSBL):\r\n\r\n{result.Explanation}\r\n\r\n" +
-                "Mail from this IP will be rejected or spam-foldered by many providers. Find and stop the cause " +
-                "(spam from a compromised account, misconfiguration), then request delisting at the listing provider. " +
-                "Consider relaying outbound mail through a reputable smart host. See the Health page for details.\r\n",
+                new SystemEmailContent
+                {
+                    Title = $"Sending IP {ip} is blocklisted",
+                    Paragraphs = [$"The sending IP {ip} appears on a DNS blocklist (DNSBL):"],
+                    MonospaceBlock = result.Explanation,
+                    ClosingParagraphs =
+                    [
+                        "Mail from this IP will be rejected or spam-foldered by many providers. Find and stop the cause " +
+                        "(spam from a compromised account, misconfiguration), then request delisting at the listing provider. " +
+                        "Consider relaying outbound mail through a reputable smart host. See the Health page for details.",
+                    ],
+                },
                 ct);
             logger.LogWarning("Reporting: sending IP {Ip} is blocklisted — alert sent", ip);
         }
@@ -136,15 +144,23 @@ public class ReportingService(
 
         await SendAsync(queue, from, to,
             $"WIN-SMTP-RELAY ALERT: bounce rate {rate:F0}% over the last 24h",
-            $"The outbound bounce rate over the last 24 hours is {rate:F1}% ({bounced} bounced of {attempts} attempts), " +
-            $"above the {thresholdPercent}% alert threshold.\r\n\r\nA high bounce rate harms sending reputation and can " +
-            "lead to blocklisting. Check for invalid recipient lists, a misconfigured sender domain (SPF/DKIM), or a " +
-            "compromised account. The suppression list already stops repeat delivery to hard-bounced addresses.\r\n",
+            new SystemEmailContent
+            {
+                Title = $"Bounce rate {rate:F0}% over the last 24 hours",
+                Paragraphs =
+                [
+                    $"The outbound bounce rate over the last 24 hours is {rate:F1}% ({bounced} bounced of {attempts} attempts), " +
+                    $"above the {thresholdPercent}% alert threshold.",
+                    "A high bounce rate harms sending reputation and can lead to blocklisting. Check for invalid " +
+                    "recipient lists, a misconfigured sender domain (SPF/DKIM), or a compromised account. The " +
+                    "suppression list already stops repeat delivery to hard-bounced addresses.",
+                ],
+            },
             ct);
         logger.LogWarning("Reporting: 24h bounce rate {Rate:F1}% exceeds {Threshold}% — alert sent", rate, thresholdPercent);
     }
 
-    private async Task<string> BuildDigestAsync(IServiceProvider sp, CancellationToken ct)
+    private async Task<SystemEmailContent> BuildDigestAsync(IServiceProvider sp, CancellationToken ct)
     {
         var (delivered, bounced, deferred, suppressed) = await CountLast24hAsync(sp, ct);
         var attempts = delivered + bounced + deferred;
@@ -155,8 +171,6 @@ public class ReportingService(
         var suppressionCount = await db.SuppressionEntries.IgnoreQueryFilters().CountAsync(ct);
 
         var sb = new StringBuilder();
-        sb.AppendLine($"WIN-SMTP-RELAY daily report — {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC");
-        sb.AppendLine();
         sb.AppendLine("Last 24 hours (all tenants):");
         sb.AppendLine($"  Delivered:  {delivered}");
         sb.AppendLine($"  Bounced:    {bounced}  (bounce rate {rate:F1}%)");
@@ -189,9 +203,14 @@ public class ReportingService(
                 sb.AppendLine($"  {ip}: {status}");
             }
         }
-        sb.AppendLine();
-        sb.AppendLine("— WIN-SMTP-RELAY");
-        return sb.ToString();
+
+        return new SystemEmailContent
+        {
+            Title = "Daily report",
+            Paragraphs = [$"Activity summary as of {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC, host {Environment.MachineName}."],
+            MonospaceBlock = sb.ToString(),
+            FooterNote = "Sent by WIN-SMTP-RELAY email reporting — configure under Settings → Reporting.",
+        };
     }
 
     /// <summary>Delivery-log counts over the last 24h (host-wide). Suppressed skips are excluded from bounces.</summary>
@@ -221,10 +240,10 @@ public class ReportingService(
         return true;
     }
 
-    // All system mail (digest + alerts) goes through the single RFC822 composer so header
-    // sanitization and the header set stay identical to the account/verification mail.
-    private static Task SendAsync(IMessageQueue queue, string from, string to, string subject, string body, CancellationToken ct)
-        => SystemEmail.EnqueueAsync(queue, from, to, subject, body, TenantDefaults.DefaultTenantId, ct);
+    // All system mail (digest + alerts) goes through the single MIME composer so header
+    // sanitization and the text+HTML rendering stay identical to the account/verification mail.
+    private static Task SendAsync(IMessageQueue queue, string from, string to, string subject, SystemEmailContent content, CancellationToken ct)
+        => SystemEmail.EnqueueAsync(queue, from, to, subject, content, TenantDefaults.DefaultTenantId, ct);
 
     private static List<string> SplitList(string? value) =>
         string.IsNullOrWhiteSpace(value)
