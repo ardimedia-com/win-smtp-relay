@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build48] - 2026-06-11
+
+### Changed
+
+- **Sidebar navigation regrouped.** The Mail group is gone: Queue and Journal now live in the Monitor group (Dashboard, Live Activity, Queue, Journal). Setup and Deliverability moved from Monitor to the top of the Configuration group — they remain visible to read-only viewers, while the write-capable Configuration items stay admin-only. Update moved from the Host group to the end of the Server group.
+
 ## [1.0.0-beta1-build47] - 2026-06-11
 
 ### Changed

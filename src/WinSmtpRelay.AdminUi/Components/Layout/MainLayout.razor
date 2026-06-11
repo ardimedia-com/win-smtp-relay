@@ -38,29 +38,6 @@
                             <span>Live Activity</span>
                         </BbSidebarMenuButton>
                     </BbSidebarMenuItem>
-                    @* Setup and Deliverability are per-tenant — shown only when a specific tenant is in
-                       scope. The "All tenants" overview omits them; select a tenant to see them. *@
-                    @if (IsTenantScope)
-                    {
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="setup">
-                                <LucideIcon Name="list-checks" />
-                                <span>Setup</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="deliverability">
-                                <LucideIcon Name="mail-check" />
-                                <span>Deliverability</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                    }
-                </BbSidebarMenu>
-            </BbSidebarGroup>
-
-            <BbSidebarGroup>
-                <BbSidebarGroupLabel>Mail</BbSidebarGroupLabel>
-                <BbSidebarMenu>
                     <BbSidebarMenuItem>
                         <BbSidebarMenuButton Href="queue">
                             <LucideIcon Name="inbox" />
@@ -78,14 +55,27 @@
 
             @* Per-tenant configuration — only meaningful when a specific tenant is in scope. In the
                "All tenants" (host) view these are hidden; select a tenant in the switcher to manage them. *@
-            @* Per-tenant configuration is write-capable, so it is gated to AdminFull (read-only
-               TenantViewers see the monitoring groups only; the detail pages enforce the same policy). *@
+            @* Setup and Deliverability are viewable read-only (the pages gate their write actions
+               internally); the remaining items are write-capable, so they are gated to AdminFull
+               (the detail pages enforce the same policy). *@
             @if (IsTenantScope)
             {
-                <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="cfgAuth">
                 <BbSidebarGroup>
                     <BbSidebarGroupLabel>Configuration</BbSidebarGroupLabel>
                     <BbSidebarMenu>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="setup">
+                                <LucideIcon Name="list-checks" />
+                                <span>Setup</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        <BbSidebarMenuItem>
+                            <BbSidebarMenuButton Href="deliverability">
+                                <LucideIcon Name="mail-check" />
+                                <span>Deliverability</span>
+                            </BbSidebarMenuButton>
+                        </BbSidebarMenuItem>
+                        <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="cfgAuth">
                         <BbSidebarMenuItem>
                             <BbSidebarMenuButton Href="connectors/send">
                                 <LucideIcon Name="send" />
@@ -137,9 +127,9 @@
                                 <span>Suppression List</span>
                             </BbSidebarMenuButton>
                         </BbSidebarMenuItem>
+                        </AuthorizeView>
                     </BbSidebarMenu>
                 </BbSidebarGroup>
-                </AuthorizeView>
             }
 
             @* Account & access management — full admins only. Admin Users is meaningful in both scopes
@@ -169,7 +159,7 @@
             </AuthorizeView>
 
             @* Global administration — host-wide, NOT per-tenant: host operations (Tenants, Signup, Event
-               Log, Update) and server configuration (Settings, cert, listener, rate limits, startup).
+               Log) and server configuration (Settings, cert, listener, rate limits, startup, Update).
                Shown to host admins in ANY scope and set apart with a tinted background, so global config is
                visually distinct from the per-tenant groups above. In a single-tenant deployment the host
                admin is auto-scoped to the sole tenant, so this sits in one merged view with the tenant
@@ -195,12 +185,6 @@
                                 <BbSidebarMenuButton Href="logs">
                                     <LucideIcon Name="file-text" />
                                     <span>Event Log</span>
-                                </BbSidebarMenuButton>
-                            </BbSidebarMenuItem>
-                            <BbSidebarMenuItem>
-                                <BbSidebarMenuButton Href="update">
-                                    <LucideIcon Name="download" />
-                                    <span>Update</span>
                                 </BbSidebarMenuButton>
                             </BbSidebarMenuItem>
                         </BbSidebarMenu>
@@ -237,6 +221,12 @@
                                 <BbSidebarMenuButton Href="startupconfig">
                                     <LucideIcon Name="file-cog" />
                                     <span>Startup Config</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="update">
+                                    <LucideIcon Name="download" />
+                                    <span>Update</span>
                                 </BbSidebarMenuButton>
                             </BbSidebarMenuItem>
                         </BbSidebarMenu>
@@ -312,7 +302,7 @@
     // Nav visibility is driven by scope (the tenant switcher, which is host-admin-only):
     //   IsHostScope   = the "All tenants" overview — a consolidated, cross-tenant cockpit: monitoring
     //                   (Dashboard, Live Activity, Queue, Journal) plus host operations (Admin Users,
-    //                   Tenants, Event Log, Update). Only a host admin can enter it.
+    //                   Tenants, Event Log). Only a host admin can enter it.
     //   IsTenantScope = a specific tenant is selected (a host admin who picked one, or a tenant
     //                   admin/viewer, who is always scoped to their own tenant). This is the
     //                   "configuration" view: that tenant's Setup/Deliverability/Configuration/API keys,
