@@ -24,14 +24,16 @@ public static class AdminUiCertificate
     private const string SelfSignedPassword = "";
 
     // Key-storage strategies tried in order. The relay's service account (NetworkService) may not be able
-    // to create a persisted machine key container on every host, so we fall back to a non-persisted
-    // machine key set, then the user key set. The first that yields a cert with a usable private key wins.
+    // to create a machine key container on every host, so we fall back to the user key set. The first
+    // strategy that yields a cert with a usable private key wins.
+    // Deliberately WITHOUT PersistKeySet: a persisted container is written to MachineKeys on EVERY load
+    // (every service start, every import) and never deleted — a slow disk leak. A non-persisted container
+    // lives as long as the certificate object, which the cert provider roots for the process lifetime;
+    // that is all SChannel needs, and the container is cleaned up on dispose/finalize.
     // (EphemeralKeySet is intentionally excluded — Windows SChannel/Kestrel can't use ephemeral keys.)
     private static readonly X509KeyStorageFlags[] LoadStrategies =
     [
-        X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet,
         X509KeyStorageFlags.MachineKeySet,
-        X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.PersistKeySet,
         X509KeyStorageFlags.UserKeySet,
     ];
 

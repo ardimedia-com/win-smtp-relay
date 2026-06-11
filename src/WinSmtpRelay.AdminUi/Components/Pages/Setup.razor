@@ -193,7 +193,7 @@ else
             @if (readiness.TenantActive && !readiness.CanSend)
             {
                 <div class="setup-cantsend">
-                    <LucideIcon Name="alert-triangle" Size="16" />
+                    <LucideIcon Name="triangle-alert" Size="16" />
                     <span>
                         This organization can't send mail yet — set up <strong>Submission access</strong>
                         (under <em>Recommended</em>): add an <a href="/smtpusers">SMTP user</a>, or allow a
@@ -235,7 +235,7 @@ else
             @if (dnsLoading)
             {
                 <div class="setup-row">
-                    <span class="setup-row-icon s-blocked"><LucideIcon Name="loader" Size="18" /></span>
+                    <span class="setup-row-icon s-blocked spin" style="display:inline-flex;"><LucideIcon Name="loader-circle" Size="18" /></span>
                     <div class="setup-row-main">
                         <div class="setup-row-title">Publish SPF / DKIM / DMARC <span class="badge-status badge-muted">Checking…</span></div>
                         <div class="setup-row-detail">Looking up your published DNS records…</div>
@@ -491,7 +491,7 @@ else
     {
         OutboundHealth.Healthy => "check",
         OutboundHealth.Failing => "x",
-        OutboundHealth.Degraded => "alert-triangle",
+        OutboundHealth.Degraded => "triangle-alert",
         _ => "circle",
     };
 

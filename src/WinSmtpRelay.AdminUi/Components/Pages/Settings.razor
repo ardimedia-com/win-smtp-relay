@@ -48,32 +48,32 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Inbound checks</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="spfEnabled" CheckedChanged="(bool v) => spfEnabled = v" id="spf-toggle" AriaLabel="Run SPF checks on inbound mail" />
-                    <span>Run SPF checks on inbound mail</span>
+                    <BbSwitch Checked="spfEnabled" CheckedChanged="(bool v) => spfEnabled = v" id="spf-toggle" />
+                    <label for="spf-toggle" style="cursor:pointer;">Run SPF checks on inbound mail</label>
                 </div>
                 <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
-                    <BbSwitch Checked="dmarcEnabled" CheckedChanged="(bool v) => dmarcEnabled = v" id="dmarc-toggle" AriaLabel="Run DMARC checks on inbound mail" />
-                    <span>Run DMARC checks on inbound mail</span>
+                    <BbSwitch Checked="dmarcEnabled" CheckedChanged="(bool v) => dmarcEnabled = v" id="dmarc-toggle" />
+                    <label for="dmarc-toggle" style="cursor:pointer;">Run DMARC checks on inbound mail</label>
                 </div>
                 <div class="form-group" style="margin-top:1rem;">
                     <BbLabel For="enforcement">Enforcement on failure</BbLabel>
-                    <select class="account-input" id="enforcement" @bind="enforcement">
+                    <BbNativeSelect TValue="EnforcementMode" Id="enforcement" @bind-Value="enforcement">
                         <option value="@EnforcementMode.LogOnly">Log only — accept and record the result</option>
                         <option value="@EnforcementMode.Reject">Reject — return 550 on SPF/DMARC failure</option>
                         <option value="@EnforcementMode.Quarantine">Quarantine — accept but flag the message</option>
-                    </select>
+                    </BbNativeSelect>
                 </div>
             </div>
 
             <div class="settings-group">
                 <div class="settings-group-title">Domain ownership</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="requireSenderVerification" CheckedChanged="(bool v) => requireSenderVerification = v" id="require-sender-verify" AriaLabel="Require verified ownership for accepted sender domains" />
-                    <span>Require verified ownership for accepted <strong>sender</strong> domains</span>
+                    <BbSwitch Checked="requireSenderVerification" CheckedChanged="(bool v) => requireSenderVerification = v" id="require-sender-verify" />
+                    <label for="require-sender-verify" style="cursor:pointer;">Require verified ownership for accepted <strong>sender</strong> domains</label>
                 </div>
                 <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
-                    <BbSwitch Checked="requireRecipientVerification" CheckedChanged="(bool v) => requireRecipientVerification = v" id="require-recipient-verify" AriaLabel="Require verified ownership for accepted recipient domains" />
-                    <span>Require verified ownership for accepted <strong>recipient</strong> domains</span>
+                    <BbSwitch Checked="requireRecipientVerification" CheckedChanged="(bool v) => requireRecipientVerification = v" id="require-recipient-verify" />
+                    <label for="require-recipient-verify" style="cursor:pointer;">Require verified ownership for accepted <strong>recipient</strong> domains</label>
                 </div>
                 <p class="text-muted" style="font-size:0.78rem;margin-top:0.35rem;margin-bottom:0;">
                     When on, a configured domain must have its ownership verified (a DNS TXT record, checked on the
@@ -85,12 +85,12 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Tenant binding (unauthenticated submission)</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="bindTenantToAllowIpRule" CheckedChanged="(bool v) => bindTenantToAllowIpRule = v" id="bind-tenant-ip" AriaLabel="Bind the tenant to the matching allow IP rule" />
-                    <span>Bind the tenant to the matching allow IP rule (reject cross-tenant sender domains)</span>
+                    <BbSwitch Checked="bindTenantToAllowIpRule" CheckedChanged="(bool v) => bindTenantToAllowIpRule = v" id="bind-tenant-ip" />
+                    <label for="bind-tenant-ip" style="cursor:pointer;">Bind the tenant to the matching allow IP rule (reject cross-tenant sender domains)</label>
                 </div>
                 <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
-                    <BbSwitch Checked="rejectUnresolvedTenant" CheckedChanged="(bool v) => rejectUnresolvedTenant = v" id="reject-unresolved-tenant" AriaLabel="Reject when no tenant can be determined" />
-                    <span>Reject when no tenant can be determined (instead of using the default tenant)</span>
+                    <BbSwitch Checked="rejectUnresolvedTenant" CheckedChanged="(bool v) => rejectUnresolvedTenant = v" id="reject-unresolved-tenant" />
+                    <label for="reject-unresolved-tenant" style="cursor:pointer;">Reject when no tenant can be determined (instead of using the default tenant)</label>
                 </div>
                 <p class="text-muted" style="font-size:0.78rem;margin-top:0.35rem;margin-bottom:0;">
                     For mail submitted <strong>without SMTP AUTH</strong>: by default the tenant is guessed from the
@@ -123,8 +123,8 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Backup MX</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="bmEnabled" CheckedChanged="(bool v) => bmEnabled = v" id="backupmx-toggle" AriaLabel="Accept and hold mail for backup-MX domains when the primary is unreachable" />
-                    <span>Accept and hold mail for backup-MX domains when the primary is unreachable</span>
+                    <BbSwitch Checked="bmEnabled" CheckedChanged="(bool v) => bmEnabled = v" id="backupmx-toggle" />
+                    <label for="backupmx-toggle" style="cursor:pointer;">Accept and hold mail for backup-MX domains when the primary is unreachable</label>
                 </div>
                 <div class="form-group" style="margin-top:1rem;margin-bottom:0;">
                     <BbLabel For="backup-mx-domains">Backup-MX domains</BbLabel>
@@ -172,13 +172,13 @@ else
                 <div class="settings-group-title">Template</div>
                 <div class="form-group">
                     <BbLabel For="retention-profile">Retention profile</BbLabel>
-                    <select class="account-input" id="retention-profile" value="@CurrentProfileKey" @onchange="OnProfileChanged">
+                    <BbNativeSelect TValue="string" Id="retention-profile" Value="@CurrentProfileKey" ValueChanged="@((string v) => OnProfileChanged(v))">
                         @foreach (var p in RetentionProfiles.All)
                         {
                             <option value="@p.Key">@p.Name</option>
                         }
                         <option value="@RetentionProfiles.Custom">Custom</option>
-                    </select>
+                    </BbNativeSelect>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.35rem;margin-bottom:0;">@ProfileBasis</p>
             </div>
@@ -186,8 +186,8 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Message content &amp; history</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="drStripBody" CheckedChanged="(bool v) => drStripBody = v" id="strip-body" AriaLabel="Strip the message body once delivered" />
-                    <span>Strip the message body once delivered (keep only metadata)</span>
+                    <BbSwitch Checked="drStripBody" CheckedChanged="(bool v) => drStripBody = v" id="strip-body" />
+                    <label for="strip-body" style="cursor:pointer;">Strip the message body once delivered (keep only metadata)</label>
                 </div>
                 <div class="form-group" style="margin-top:0.75rem;">
                     <BbLabel For="msg-days">Keep delivered / bounced / failed messages (days)</BbLabel>
@@ -305,10 +305,10 @@ else
                 </div>
                 <div class="form-group" style="margin-top:0.75rem;">
                     <BbLabel For="spf-all">SPF "all" qualifier</BbLabel>
-                    <select class="account-input" id="spf-all" @bind="dnsSpfAll">
+                    <BbNativeSelect TValue="string" Id="spf-all" @bind-Value="dnsSpfAll">
                         <option value="~all">~all (softfail)</option>
                         <option value="-all">-all (hardfail)</option>
-                    </select>
+                    </BbNativeSelect>
                 </div>
             </div>
             <div class="settings-group">
@@ -319,11 +319,11 @@ else
                 </div>
                 <div class="form-group" style="margin-top:0.75rem;">
                     <BbLabel For="dmarc-policy">DMARC policy</BbLabel>
-                    <select class="account-input" id="dmarc-policy" @bind="dnsDmarcPolicy">
+                    <BbNativeSelect TValue="string" Id="dmarc-policy" @bind-Value="dnsDmarcPolicy">
                         <option value="none">none</option>
                         <option value="quarantine">quarantine</option>
                         <option value="reject">reject</option>
-                    </select>
+                    </BbNativeSelect>
                 </div>
                 <div class="form-group" style="margin-top:0.75rem;">
                     <BbLabel For="dmarc-percentage">DMARC percentage (1-100)</BbLabel>
@@ -350,8 +350,8 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Reports &amp; alerts</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="reportEnabled" CheckedChanged="(bool v) => reportEnabled = v" id="report-toggle" AriaLabel="Send a daily activity digest and immediate incident alerts" />
-                    <span>Send a daily activity digest and immediate incident alerts</span>
+                    <BbSwitch Checked="reportEnabled" CheckedChanged="(bool v) => reportEnabled = v" id="report-toggle" />
+                    <label for="report-toggle" style="cursor:pointer;">Send a daily activity digest and immediate incident alerts</label>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;margin-bottom:0;">
                     Immediate alerts: a sending IP getting blocklisted (DNSBL), or the 24-hour bounce rate exceeding the
@@ -596,9 +596,9 @@ else
         return RetentionProfiles.Custom;
     }
 
-    private void OnProfileChanged(ChangeEventArgs e)
+    private void OnProfileChanged(string key)
     {
-        var p = RetentionProfiles.Find(e.Value?.ToString() ?? "");
+        var p = RetentionProfiles.Find(key);
         if (p is null) return; // "Custom" selected — keep the current field values
 
         drStripBody = p.StripBodyOnDelivery;

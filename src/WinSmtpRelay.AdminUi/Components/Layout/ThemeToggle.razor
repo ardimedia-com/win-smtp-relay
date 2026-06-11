@@ -1,7 +1,7 @@
 <div style="display:flex;align-items:center;gap:0.25rem;margin-left:auto">
     <BbDropdownMenu>
         <BbDropdownMenuTrigger>
-            <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small">
+            <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" AriaLabel="Choose color theme" title="Color theme">
                 <LucideIcon Name="palette" />
             </BbButton>
         </BbDropdownMenuTrigger>
@@ -21,7 +21,7 @@
         </BbDropdownMenuContent>
     </BbDropdownMenu>
 
-    <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="ToggleDarkMode">
+    <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="ToggleDarkMode" AriaLabel="Toggle dark mode" title="Toggle dark mode">
         @if (_isDark)
         {
             <LucideIcon Name="moon" />

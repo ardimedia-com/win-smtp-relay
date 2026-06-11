@@ -179,7 +179,7 @@ else
             @if (recentMessages.Count == 0)
             {
                 <BbTableRow TData="QueuedMessage">
-                    <BbTableCell colspan="5" class="text-muted">No messages in queue</BbTableCell>
+                    <BbTableCell colspan="5" class="text-muted" style="text-align:center;">No messages in queue</BbTableCell>
                 </BbTableRow>
             }
             @foreach (var msg in recentMessages)
@@ -326,8 +326,7 @@ else
     {
         if (_disposed) return;
         // React only to this circuit's scope (a host admin in "All tenants" sees everything).
-        var mine = e.TenantId is null || CurrentTenant.IsHostScope || e.TenantId == CurrentTenant.TenantId;
-        if (!mine) return;
+        if (!CurrentTenant.Owns(e)) return;
 
         switch (e.Kind)
         {

@@ -58,7 +58,7 @@ else
             @if (messages.Count == 0)
             {
                 <BbTableRow TData="QueuedMessage">
-                    <BbTableCell colspan="9" class="text-muted">Queue is empty</BbTableCell>
+                    <BbTableCell colspan="9" class="text-muted" style="text-align:center;">Queue is empty</BbTableCell>
                 </BbTableRow>
             }
             @foreach (var msg in messages)
@@ -179,8 +179,7 @@ else
         // The queue changes when a message is queued, delivered, or removed; refresh on those signals.
         // RefreshAsync re-reads only this circuit's tenant queue, so reacting to a broadcast is harmless.
         if (e.Kind is ActivityKind.QueueChanged
-            || (e.Kind is ActivityKind.MessageReceived
-                && (e.TenantId is null || CurrentTenant.IsHostScope || e.TenantId == CurrentTenant.TenantId)))
+            || (e.Kind is ActivityKind.MessageReceived && CurrentTenant.Owns(e)))
             RefreshInBackground();
     }
 

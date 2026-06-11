@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build45] - 2026-06-11
+
+### Changed
+
+- The **Message Journal** now refreshes automatically as new delivery attempts are recorded (via the in-process activity feed, like Queue and Dashboard). Auto-refresh applies only while viewing the first page — on later pages the list stays still so rows don't shift while reading — and background refreshes keep the table visible instead of flashing the loading skeleton.
+- Pressing **Enter** in the Journal's search box now triggers the search.
+- **Security hardening — install-folder ACL.** The installer now breaks ACL inheritance on the install folder and grants access only to SYSTEM, Administrators, and the service account. Previously the inherited Program Files ACL let **any local user read** the SQLite database (DKIM keys, smart-host password, the imported admin-UI TLS key — DPAPI-LocalMachine is not a boundary between local users) and `initial-admin-password.txt`. The service additionally restricts the ACL on the password file itself when writing it, covering manual (non-MSI) deployments.
+- **Per-tenant pages are now guarded in the global view.** A host admin in the "Global" (all-tenants) scope who navigated directly to a per-tenant configuration URL (send connectors, domains, DKIM, SMTP users, IP rules, filters, suppressions, API keys, setup, deliverability) saw all tenants' rows merged, and creating an entry silently landed in the Default tenant. Those routes now show a "Select an organization" notice in host scope instead.
+- The admin-UI certificate "import → hot-swap" sequence is now a single seam (`AdminCertificateApplier`) used by all three page actions (PFX import, store import, remove), so future entry points (REST API, ACME) cannot forget the hot-swap step.
+- The dropdowns on Settings (enforcement, retention profile, SPF "all", DMARC policy) and the role dropdowns on the Admin-User and API-Key forms now use the standard `BbNativeSelect` component instead of raw `<select>` elements — they were visibly rounder than every input next to them (the raw style hardcoded a border radius the theme doesn't use).
+- Toggle captions on Settings and Signup are now real, clickable labels: clicking the text toggles the switch, and the visible text is the switch's accessible name (previously a separate `AriaLabel` duplicated the caption and could drift).
+
+### Fixed
+
+- **Installer: a major upgrade silently removed the admin-UI firewall rule.** The upgrade never re-evaluated the network-access choice, so the old product's firewall rule was uninstalled and never re-created while the config still bound to the network — remote admin access died on every update until a manual Repair. The chosen port and network access are now persisted in the registry and recovered during upgrades (interactive and silent); the upgrade Options dialog now also shows the real current state instead of stale defaults, and toggling it takes effect.
+- **Installer: Repair no longer wipes operator overrides from `appsettings.Production.json`.** The config writer now merges (only the `AdminUi` Port/BindAddress values are touched); a hand-configured specific bind address (e.g. `192.168.1.5`) is preserved when network access stays enabled, and the network checkbox now pre-checks for any non-loopback bind. The port read-back is anchored to the `AdminUi` section instead of matching the first `"Port"` key anywhere in the file, and a Repair no longer rewrites the Start-menu shortcut with the wrong default port.
+- **Installer: leftover-service cleanup** now waits for the service to stop (`net stop`) before deleting it — `sc.exe stop` is asynchronous, and deleting a still-stopping service caused the exact "marked for deletion" failure the cleanup exists to prevent.
+- **Deleting the second-to-last tenant no longer strands the host admin**: the tenant switcher now also appears in host scope with a single tenant, so the admin can switch into the remaining tenant immediately instead of waiting up to ~30 minutes for the session to refresh.
+- The admin-UI certificate loaders no longer use `PersistKeySet`: every service start and certificate import used to write an RSA key container under `MachineKeys` that was never deleted (a slow disk leak). Key containers now live only as long as the certificate object, which is all SChannel needs.
+- The one-time `initial-admin-password.txt` is now deleted only when **admin@local** changes its password — previously any admin changing their own password removed a freshly regenerated file (installer reset flow) before the operator could read it.
+- The Journal's "About this page" dialog incorrectly claimed entries are "stored permanently and never automatically purged" — delivery-log entries are purged per the **Settings → Data retention** window (with an enforced minimum). The dialog now describes the actual behaviour.
+- The warning icon on the Setup page (the "can't send yet" notice and the Outbound tile's Degraded state) was broken — it used the non-existent Lucide name `alert-triangle` instead of `triangle-alert`.
+- The first-run hint on the sign-in page used hardcoded light colors and appeared as a light box in dark mode; it now follows the theme.
+- The Setup page's "Publish SPF / DKIM / DMARC — Checking…" row showed a frozen loader icon; it now uses the app's spinning loader like other pages.
+- "Verified" (domains) and "Enabled" (default tenant) badges rendered as unstyled text while negative states got a visible chip; they now use the green success badge.
+- Page headers and search bars no longer overflow horizontally on narrow windows (flex-wrap).
+- Accessibility: the tenant switcher, the theme/dark-mode buttons, and the Event Log's clear-search button now have accessible names; the clear-search button no longer submits enclosing forms (`type="button"`).
+- Empty-state rows on the Dashboard and Queue tables are now centered like on all other list pages.
+- README: the admin-access section described only the old first-run flow (password in the Event Log) and the config-file-only certificate setup; it now documents `initial-admin-password.txt`, the installer's network-access option, and certificate replacement via the HTTPS Certificate page.
+
 ## [1.0.0-beta1-build44] - 2026-06-09
 
 ### Changed

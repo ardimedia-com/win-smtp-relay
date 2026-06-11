@@ -13,14 +13,14 @@
 
 @if (showInitialHint)
 {
-    <div role="note" style="border:1px solid #d6d6d6;border-radius:6px;padding:0.6rem 0.8rem;margin-bottom:1rem;font-size:0.82rem;line-height:1.5;background:#f6f6f6;color:#333;">
+    <div role="note" style="border:1px solid var(--border);border-radius:6px;padding:0.6rem 0.8rem;margin-bottom:1rem;font-size:0.82rem;line-height:1.5;background:var(--muted);color:var(--foreground);">
         <strong>First run?</strong> Sign in as <code>admin@local</code>.
         @if (passwordFileExists)
         {
             <text>
                 The initial password is in this file on the server:<br />
                 <a href="@passwordFileUrl"><code>@passwordFilePath</code></a><br />
-                <span style="color:#666;">If your browser blocks opening it, copy that path into Windows Explorer. The file is removed automatically once you change the password.</span>
+                <span style="color:var(--muted-foreground);">If your browser blocks opening it, copy that path into Windows Explorer. The file is removed automatically once you change the password.</span>
             </text>
         }
         else

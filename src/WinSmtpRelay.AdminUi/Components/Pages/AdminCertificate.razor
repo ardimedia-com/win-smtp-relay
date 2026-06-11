@@ -1,14 +1,10 @@
 @page "/settings/certificate"
 @using Microsoft.AspNetCore.Components.Forms
 @using WinSmtpRelay.Core.Interfaces
-@using WinSmtpRelay.Core.Configuration
 @using WinSmtpRelay.Core.Models
-@using Microsoft.Extensions.Options
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
 @inject IAdminCertificateProvider CertProvider
-@inject IOptions<AdminUiOptions> AdminUiOpts
-@inject ILogger<AdminCertificate> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -135,6 +131,7 @@ else
             }
             else
             {
+                <div style="overflow-x:auto;">
                 <table>
                     <thead>
                         <tr><th>Subject</th><th>Issuer</th><th>Expires</th><th></th></tr>
@@ -155,6 +152,7 @@ else
                         }
                     </tbody>
                 </table>
+                </div>
                 @if (hidden > 0)
                 {
                     <p class="text-muted" style="font-size:0.78rem;margin-top:0.5rem;margin-bottom:0;">@hidden self-signed or untrusted certificate(s) are not listed — they would still cause a browser warning. To use a self-signed certificate, add it to the machine's Trusted Root store first.</p>
@@ -213,14 +211,10 @@ else
             using var ms = new MemoryStream();
             await selectedFile.OpenReadStream(maxAllowedSize: 512 * 1024).CopyToAsync(ms);
 
+            // Import + hot-swap in one step (Kestrel reads the provider per handshake).
             using var scope = ScopeFactory.CreateScope();
-            var svc = scope.ServiceProvider.GetRequiredService<IAdminCertificateService>();
-            await svc.ImportAsync(ms.ToArray(), password);
-
-            // Apply immediately (hot-swap): Kestrel reads the provider per handshake.
-            var cert = await svc.LoadImportedAsync();
-            if (cert is not null)
-                CertProvider.Set(cert);
+            await scope.ServiceProvider.GetRequiredService<WinSmtpRelay.Security.AdminCertificateApplier>()
+                .ImportAndApplyAsync(ms.ToArray(), password);
 
             password = null;
             selectedFile = null;
@@ -248,14 +242,10 @@ else
         errorMessage = null;
         try
         {
+            // Copy from the store + hot-swap in one step, like a PFX import.
             using var scope = ScopeFactory.CreateScope();
-            var svc = scope.ServiceProvider.GetRequiredService<IAdminCertificateService>();
-            await svc.ImportFromStoreAsync(thumbprint);
-
-            // Apply immediately (hot-swap), like a PFX import.
-            var cert = await svc.LoadImportedAsync();
-            if (cert is not null)
-                CertProvider.Set(cert);
+            await scope.ServiceProvider.GetRequiredService<WinSmtpRelay.Security.AdminCertificateApplier>()
+                .ImportFromStoreAndApplyAsync(thumbprint);
 
             await LoadAsync();
             statusMessage = "Certificate copied from the store and applied. New connections use it now — reload this page to confirm.";
@@ -281,14 +271,10 @@ else
         errorMessage = null;
         try
         {
+            // Remove + immediately revert the served certificate to the configured/self-signed one.
             using var scope = ScopeFactory.CreateScope();
-            await scope.ServiceProvider.GetRequiredService<IAdminCertificateService>().ClearAsync();
-
-            // Revert the served certificate to the self-signed one immediately.
-            var selfSigned = WinSmtpRelay.Security.AdminUiCertificate.Resolve(
-                AdminUiOpts.Value, AppContext.BaseDirectory, Logger);
-            if (selfSigned is not null)
-                CertProvider.Set(selfSigned);
+            await scope.ServiceProvider.GetRequiredService<WinSmtpRelay.Security.AdminCertificateApplier>()
+                .RemoveAndRevertAsync();
 
             await LoadAsync();
             statusMessage = "Imported certificate removed. The built-in self-signed certificate is in use again.";

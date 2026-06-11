@@ -37,7 +37,7 @@
         <BbInput Placeholder="Search source or message..." Value="@searchText" ValueChanged="OnSearchChanged" />
         @if (!string.IsNullOrEmpty(searchText))
         {
-            <button class="search-clear" @onclick="@(() => OnSearchChanged(""))">
+            <button type="button" class="search-clear" aria-label="Clear search" @onclick="@(() => OnSearchChanged(""))">
                 <LucideIcon Name="x" />
             </button>
         }

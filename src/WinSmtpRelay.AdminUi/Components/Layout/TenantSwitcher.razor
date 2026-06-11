@@ -2,17 +2,20 @@
 @using WinSmtpRelay.Core.Models
 @inject IServiceScopeFactory ScopeFactory
 
-@* Shown only when there is more than one tenant. A single-tenant deployment has no use for the
-   host/tenant scope split (the host admin is auto-scoped to the sole tenant), so the switcher is hidden. *@
+@* Shown when there is more than one tenant. A single-tenant deployment has no use for the host/tenant
+   scope split (the host admin is auto-scoped to the sole tenant), so the switcher is hidden — EXCEPT
+   when the admin is currently in host scope anyway: after deleting the second-to-last tenant the cookie
+   has no ActiveTenant pin until the security-stamp validator regenerates the principal (up to ~30 min),
+   and without the switcher there would be no way to reach tenant scope (Setup, Deliverability, …). *@
 <AuthorizeView Policy="@AuthorizationPolicies.HostAdmin">
     <Authorized>
-        @if (tenants.Count > 1)
+        @if (tenants.Count > 1 || (tenants.Count == 1 && activeTenantId is null))
         {
             <form action="/account/switch-tenant" method="post" style="margin:0;">
                 <AntiforgeryToken />
                 <label class="tenant-switcher">
                     <LucideIcon Name="building-2" Size="14" />
-                    <select name="tenant" onchange="this.form.submit()">
+                    <select name="tenant" aria-label="Tenant scope" onchange="this.form.submit()">
                         <option value="all" selected="@(activeTenantId is null)">Global</option>
                         @foreach (var t in tenants)
                         {

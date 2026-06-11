@@ -166,11 +166,43 @@ public class AdminSeeder(IServiceScopeFactory scopeFactory, ILogger<AdminSeeder>
                 "This file is deleted automatically once the password is changed.\r\n" +
                 "If you do not sign in, delete this file yourself — it contains a valid password.\r\n";
             File.WriteAllText(path, content);
+            TryRestrictToAdminsAndService(path);
             logger.LogWarning("Initial admin password also written to {Path} (delete after first sign-in).", path);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Could not write the initial-admin password file; the password is in the log above.");
+        }
+    }
+
+    // The install dir's inherited Program Files ACL gives BUILTIN\Users read access, which would let any
+    // local user read the valid admin password. Break inheritance on the file and grant only SYSTEM,
+    // Administrators and the service account. Best-effort: the installer also hardens the whole install
+    // dir, this covers manual (non-MSI) deployments.
+    private void TryRestrictToAdminsAndService(string path)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            var file = new FileInfo(path);
+            var security = file.GetAccessControl();
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            foreach (System.Security.AccessControl.FileSystemAccessRule rule in
+                     security.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier)))
+                security.RemoveAccessRule(rule);
+            var fullControl = System.Security.AccessControl.FileSystemRights.FullControl;
+            var allow = System.Security.AccessControl.AccessControlType.Allow;
+            security.AddAccessRule(new(new System.Security.Principal.SecurityIdentifier(
+                System.Security.Principal.WellKnownSidType.LocalSystemSid, null), fullControl, allow));
+            security.AddAccessRule(new(new System.Security.Principal.SecurityIdentifier(
+                System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null), fullControl, allow));
+            security.AddAccessRule(new(new System.Security.Principal.SecurityIdentifier(
+                System.Security.Principal.WellKnownSidType.NetworkServiceSid, null), fullControl, allow));
+            file.SetAccessControl(security);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not restrict the ACL on {Path}.", path);
         }
     }
 

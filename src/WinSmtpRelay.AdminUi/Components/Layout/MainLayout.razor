@@ -258,7 +258,7 @@
                 <TenantSwitcher />
                 <AuthorizeView>
                     <Authorized>
-                        <span style="font-size:0.85rem;color:var(--muted-foreground);">@context.User.Identity?.Name</span>
+                        <span style="font-size:0.85rem;color:var(--muted-foreground);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@context.User.Identity?.Name">@context.User.Identity?.Name</span>
                         <form action="/account/logout" method="post" style="margin:0;">
                             <AntiforgeryToken />
                             <button type="submit" class="logout-button" title="Sign out">
@@ -283,7 +283,21 @@
             </Authorized>
         </AuthorizeView>
         <main style="flex:1;padding:2rem;overflow-y:auto;">
-            @Body
+            @if (IsHostScope && IsTenantOnlyRoute)
+            {
+                @* Direct-URL guard for per-tenant pages in the global view: the EF tenant filter is off
+                   in host scope, so these pages would render all tenants' rows merged, and a create would
+                   silently land in the Default tenant. The nav already hides them; this covers the URL. *@
+                <div class="page-header">
+                    <h1>Select an organization</h1>
+                    <p>This page manages one organization's configuration. You are in the global (all-tenants)
+                       view — pick an organization in the switcher at the top right, then return here.</p>
+                </div>
+            }
+            else
+            {
+                @Body
+            }
         </main>
     </BbSidebarInset>
 </BbSidebarProvider>
@@ -307,6 +321,29 @@
     // HostAdmin-gated by role, so a tenant admin/viewer never sees them even within a tenant scope.
     private bool IsHostScope => CurrentTenant.IsHostScope;
     private bool IsTenantScope => CurrentTenant.TenantId is not null;
+
+    // Routes that only make sense with a tenant in scope — they list/create tenant-owned entities.
+    // Kept next to the nav above: a route hidden from the nav in host scope belongs in this list.
+    private static readonly string[] TenantOnlyRoutePrefixes =
+    [
+        "setup", "deliverability", "health",
+        "connectors/send", "domains", "dkim", "ip-rules", "filters",
+        "smtpusers", "suppressions", "apikeys",
+    ];
+
+    private bool IsTenantOnlyRoute
+    {
+        get
+        {
+            var rel = Nav.ToBaseRelativePath(Nav.Uri);
+            var cut = rel.IndexOfAny(['?', '#']);
+            if (cut >= 0) rel = rel[..cut];
+            rel = rel.TrimEnd('/');
+            return TenantOnlyRoutePrefixes.Any(p =>
+                rel.Equals(p, StringComparison.OrdinalIgnoreCase) ||
+                rel.StartsWith(p + "/", StringComparison.OrdinalIgnoreCase));
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

@@ -1,8 +1,12 @@
 @page "/journal"
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.Extensions.DependencyInjection
+@using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
+@inject IActivityFeed Feed
+@inject ICurrentTenant CurrentTenant
+@implements IDisposable
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -26,13 +30,14 @@
     </BbButton>
 </div>
 
-<div class="search-bar">
+@* A form so Enter in the search box triggers the search (the BbButton stays type="button"). *@
+<form class="search-bar" @onsubmit="LoadLogs" @onsubmit:preventDefault>
     <BbInput Type="InputType.Search" @bind-Value="searchTerm" Placeholder="Search by recipient, message ID, or status..." />
     <BbButton Variant="ButtonVariant.Secondary" @onclick="LoadLogs">
         <LucideIcon Name="search" />
         Search
     </BbButton>
-</div>
+</form>
 
 @if (isLoading)
 {
@@ -122,10 +127,16 @@ else
                 Use the search bar to filter by recipient address, status code, status message, or remote server name.
                 Results are paginated (50 per page).
             </p>
+            <h4 style="margin-top:1rem;">Live updates</h4>
+            <p>
+                While you are on the first page, the journal refreshes automatically as new delivery attempts
+                are recorded. On later pages it stays still so rows don't shift while you read.
+            </p>
             <h4 style="margin-top:1rem;">Retention</h4>
             <p>
-                Journal entries are stored permanently in the SQLite database. They are never automatically purged,
-                giving you a complete audit trail of all delivery activity.
+                Journal entries are kept for the delivery-log retention window configured under
+                <strong>Settings &rarr; Data retention</strong> (an enforced minimum guarantees a baseline
+                audit trail); entries older than that window are purged automatically.
             </p>
         </div>
         <BbDialogFooter>
@@ -171,10 +182,48 @@ else
     private int totalCount = 0;
     private int totalPages => (int)Math.Ceiling((double)totalCount / pageSize);
     private bool isLoading = true;
+    private bool _disposed;
+    private System.Threading.Timer? _refreshDebounceTimer;
 
     protected override async Task OnInitializedAsync()
     {
         await LoadLogs();
+        // Created disarmed, before subscribing, so OnActivity can never see a null timer; re-armed
+        // per event via Change(), which is thread-safe (OnActivity runs on the publisher's thread).
+        _refreshDebounceTimer = new System.Threading.Timer(async _ =>
+        {
+            if (_disposed) return;
+            try
+            {
+                await InvokeAsync(async () =>
+                {
+                    if (_disposed || currentPage != 1) return;
+                    await FetchLogs(showSkeleton: false);
+                    StateHasChanged();
+                });
+            }
+            catch { } // the circuit may be tearing down; a missed background refresh is harmless
+        }, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        Feed.Received += OnActivity;
+    }
+
+    private void OnActivity(ActivityEvent e)
+    {
+        if (_disposed) return;
+        // Each delivery attempt writes one journal row; react only to this circuit's tenant scope.
+        if (e.Kind is not ActivityKind.DeliveryAttempt || !CurrentTenant.Owns(e)) return;
+        // Auto-refresh only the first page so a background update can't shift rows while paging.
+        if (currentPage != 1) return;
+        ScheduleRefresh();
+    }
+
+    /// <summary>
+    /// Debounces the feed-driven refresh so one message to N recipients (N events) causes one query.
+    /// </summary>
+    private void ScheduleRefresh()
+    {
+        try { _refreshDebounceTimer?.Change(TimeSpan.FromMilliseconds(500), Timeout.InfiniteTimeSpan); }
+        catch (ObjectDisposedException) { } // disposed during teardown — a missed refresh is harmless
     }
 
     private async Task LoadLogs()
@@ -207,9 +256,10 @@ else
         }
     }
 
-    private async Task FetchLogs()
+    private async Task FetchLogs(bool showSkeleton = true)
     {
-        isLoading = true;
+        // Background refreshes keep the current table visible instead of flashing the skeleton.
+        if (showSkeleton) isLoading = true;
 
         using var scope = ScopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
@@ -249,4 +299,11 @@ else
 
     private static string Truncate(string text, int maxLen) =>
         text.Length > maxLen ? text[..maxLen] + "..." : text;
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Feed.Received -= OnActivity;
+        _refreshDebounceTimer?.Dispose();
+    }
 }

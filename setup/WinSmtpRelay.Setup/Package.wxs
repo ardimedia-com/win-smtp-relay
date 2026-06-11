@@ -34,7 +34,7 @@
                  Property="NETWORKACCESS" CheckBoxValue="1"
                  Text="Make the admin UI reachable from other computers on the network" />
         <Control Id="Info" Type="Text" X="35" Y="82" Width="315" Height="52" Transparent="yes" NoPrefix="yes"
-                 Text="Off (recommended): the admin UI binds to 127.0.0.1, reachable only from this computer. On: it binds to all interfaces and the admin-port firewall rule is opened. The connection is always HTTPS." />
+                 Text="Off (recommended): the admin UI binds to 127.0.0.1, reachable only from this computer. On: it binds to the network (all interfaces, or a custom bind address if one is configured) and the admin-port firewall rule is opened. The connection is always HTTPS." />
 
         <Control Id="ResetPwCheckbox" Type="CheckBox" X="20" Y="145" Width="330" Height="18"
                  Property="RESETADMINPASSWORD" CheckBoxValue="1"
@@ -55,6 +55,10 @@
            fresh install / Change and to MaintenanceTypeDlg on a Repair. -->
       <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="NetworkOptionsDlg" Order="10" Condition="WIXUI_INSTALLDIR_VALID=&quot;1&quot;" />
       <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="NetworkOptionsDlg" Order="10" />
+      <!-- Mark that the operator confirmed the options dialog in THIS run. The execute sequence uses this
+           to NOT re-derive NETWORKACCESS from the saved registry state: an unchecked checkbox leaves the
+           property empty, which is indistinguishable from "the dialog never ran" without this marker. -->
+      <Publish Dialog="NetworkOptionsDlg" Control="Next" Property="WSRUIRAN" Value="1" Order="5" />
       <Publish Dialog="NetworkOptionsDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="10" />
       <Publish Dialog="NetworkOptionsDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" Order="10" Condition="NOT (WixUI_InstallMode = &quot;Repair&quot;)" />
       <Publish Dialog="NetworkOptionsDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="20" Condition="WixUI_InstallMode = &quot;Repair&quot;" />
@@ -87,11 +91,27 @@
 
     <!-- Defensive cleanup: stop and delete any leftover WinSmtpRelay service before (re)installing it,
          so a previous failed/crashed install doesn't block ServiceInstall with "service could not be
-         installed". Runs as SYSTEM, before InstallServices. (A service already 'marked for deletion' by
-         an open handle can only be cleared by a reboot — no installer can override that.) -->
+         installed". Runs as SYSTEM, before InstallServices. net stop BLOCKS until the service reaches
+         STOPPED (sc.exe stop only requests the stop asynchronously — deleting a still-stopping service
+         marks it for deletion, which is the exact failure this CA exists to prevent). (A service already
+         'marked for deletion' by an open handle can only be cleared by a reboot — no installer can
+         override that.) -->
     <CustomAction Id="CleanupLeftoverService"
                   Directory="SystemFolder"
-                  ExeCommand="cmd.exe /c &quot;sc.exe stop WinSmtpRelay &amp; sc.exe delete WinSmtpRelay&quot;"
+                  ExeCommand="cmd.exe /c &quot;net stop WinSmtpRelay &amp; sc.exe delete WinSmtpRelay&quot;"
+                  Execute="deferred"
+                  Return="ignore"
+                  Impersonate="no" />
+
+    <!-- Security hardening: the install dir holds the SQLite DB (DKIM keys, smart-host password, the
+         imported admin-UI TLS key — DPAPI-LocalMachine protected, which is NOT a boundary between local
+         users) and the one-time initial-admin-password.txt. Under Program Files the inherited ACL gives
+         BUILTIN\Users read access, so any local user could copy them. Break inheritance and grant only
+         SYSTEM, Administrators and the service account (NetworkService) — language-neutral SIDs.
+         "[INSTALLFOLDER]." keeps the trailing backslash from escaping the closing quote. -->
+    <CustomAction Id="HardenInstallDirAcl"
+                  Directory="System64Folder"
+                  ExeCommand="icacls.exe &quot;[INSTALLFOLDER].&quot; /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-20:(OI)(CI)F"
                   Execute="deferred"
                   Return="ignore"
                   Impersonate="no" />
@@ -118,6 +138,36 @@
          actually take effect. The checkboxes set the value to "1" when ticked. -->
     <Property Id="NETWORKACCESS" Secure="yes" />
     <Property Id="RESETADMINPASSWORD" Secure="yes" />
+    <!-- Set by the options dialog's Next button (see the UI section): the operator confirmed the options
+         in THIS run, so the execute sequence must respect the (possibly empty = unchecked) NETWORKACCESS
+         instead of re-deriving it from the saved registry state. -->
+    <Property Id="WSRUIRAN" Secure="yes" />
+
+    <!-- ============================================================
+         Upgrade survival: recover the previous install's admin port and network choice from the
+         registry. CheckPorts and ReadExistingConfig do NOT run on a major upgrade (and AppSearch is the
+         only thing that runs in a silent repair), so without this the new product would see an empty
+         NETWORKACCESS — the AdminUiFirewall component condition would be false, the old product's
+         firewall rule would be removed with it, and a network-enabled install would silently lose
+         remote admin access on EVERY upgrade while the config still binds to the network.
+         "AdminUiPort" is written by the FirewallRules component on every install; "AdminUiFirewall" is
+         the key-path value of the conditional firewall component, so it exists exactly when the rule
+         is installed (raw DWORD search yields "#1").
+         ============================================================ -->
+    <Property Id="WSR_SAVEDPORT" Secure="yes">
+      <RegistrySearch Id="SavedAdminPortSearch" Root="HKLM"
+                      Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" Name="AdminUiPort" Type="raw" />
+    </Property>
+    <Property Id="WSR_SAVEDNET" Secure="yes">
+      <RegistrySearch Id="SavedNetworkAccessSearch" Root="HKLM"
+                      Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" Name="AdminUiFirewall" Type="raw" />
+    </Property>
+    <SetProperty Id="ADMINUIPORT" After="AppSearch" Sequence="both" Value="[WSR_SAVEDPORT]"
+                 Condition="WSR_SAVEDPORT AND NOT WSRUIRAN" />
+    <SetProperty Id="ADMINUIURL" After="AppSearch" Sequence="both" Value="https://localhost:[WSR_SAVEDPORT]"
+                 Condition="WSR_SAVEDPORT AND NOT WSRUIRAN" />
+    <SetProperty Id="NETWORKACCESS" After="AppSearch" Sequence="both" Value="1"
+                 Condition="(WSR_SAVEDNET = &quot;#1&quot;) AND NOT WSRUIRAN" />
 
     <!-- Immediate: pick a free admin port (8025 → 8125 …), detect port 25, and set
          ADMINUIPORT / ADMINUIURL / PORT25INUSE plus the dynamic exit-dialog text. -->
@@ -131,13 +181,15 @@
     <CustomAction Id="ReadExistingConfig" BinaryRef="WinSmtpRelayCA" DllEntry="ReadExistingConfig"
                   Execute="immediate" Return="ignore" />
 
-    <!-- Deferred: write appsettings.Production.json (admin Port + BindAddress) into the install dir. Runs on
-         a fresh install, and on a maintenance run that went through the options dialog (WSRMAINTUI) — but
-         not during uninstall — so a Repair/Change can re-apply the network choice (with the preserved port). -->
+    <!-- Deferred: patch appsettings.Production.json (admin Port + BindAddress) in the install dir. Runs on
+         a fresh install, on a major UPGRADE (with the registry-recovered or dialog-confirmed values, so a
+         toggled checkbox takes effect and a silent upgrade re-applies the previous choice), and on a
+         maintenance run that went through the options dialog (WSRMAINTUI) — but not during uninstall.
+         The CA merges into the existing file (only the AdminUi keys), so operator overrides survive. -->
     <SetProperty Id="WriteAdminConfig"
                  Value="DIR=[INSTALLFOLDER]|PORT=[ADMINUIPORT]|NET=[NETWORKACCESS]"
                  Before="WriteAdminConfig" Sequence="execute"
-                 Condition="(NOT Installed AND NOT WIX_UPGRADE_DETECTED) OR (WSRMAINTUI = &quot;1&quot; AND NOT REMOVE)" />
+                 Condition="(NOT Installed) OR (WSRMAINTUI = &quot;1&quot; AND NOT REMOVE)" />
     <!-- Return="ignore": writing the port/bind override is optional; on failure the service falls back to
          the shipped appsettings.json (port 8025, loopback) — never abort the install. -->
     <CustomAction Id="WriteAdminConfig" BinaryRef="WinSmtpRelayCA" DllEntry="WriteAdminConfig"
@@ -166,7 +218,9 @@
       <Custom Action="CleanupLeftoverService" Before="InstallServices"
               Condition="NOT Installed" />
       <Custom Action="WriteAdminConfig" After="InstallFiles"
-              Condition="(NOT Installed AND NOT WIX_UPGRADE_DETECTED) OR (WSRMAINTUI = &quot;1&quot; AND NOT REMOVE)" />
+              Condition="(NOT Installed) OR (WSRMAINTUI = &quot;1&quot; AND NOT REMOVE)" />
+      <Custom Action="HardenInstallDirAcl" After="WriteAdminConfig"
+              Condition="NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom Action="SetResetAdminFlag" After="WriteRegistryValues"
               Condition="RESETADMINPASSWORD = &quot;1&quot;" />
       <Custom Action="StartServiceOnUpgrade"

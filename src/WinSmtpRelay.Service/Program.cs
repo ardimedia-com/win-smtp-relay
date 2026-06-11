@@ -131,6 +131,8 @@ if (adminUiConfig.Enabled)
     builder.Services.AddScoped<WinSmtpRelay.Core.Interfaces.IDnsSetupService, WinSmtpRelay.Security.DnsSetupService>();
     // Public Suffix List lookup (embedded snapshot, parsed once) for registrable-domain derivation.
     builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IPublicSuffixService, WinSmtpRelay.Security.PublicSuffixService>();
+    // Single seam for "persist a certificate change AND hot-swap the served certificate" (see the class doc).
+    builder.Services.AddScoped<WinSmtpRelay.Security.AdminCertificateApplier>();
 
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();

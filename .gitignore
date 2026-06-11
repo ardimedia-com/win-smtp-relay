@@ -51,6 +51,13 @@ Desktop.ini
 *.db-shm
 *.db-wal
 
+## Key material — never commit certificates or private keys (see code-signing rules)
+*.pfx
+*.p12
+*.snk
+*.pem
+*.key
+
 ## Claude
 .claude/
 *.local.md

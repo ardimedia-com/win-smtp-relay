@@ -72,9 +72,11 @@ namespace WinSmtpRelay.Setup.CustomActions
         /// Immediate CA for maintenance (Change / Repair). Reads the existing appsettings.Production.json so
         /// the options dialog reflects the current state and the admin port is preserved — CheckPorts does
         /// not run on maintenance, and the ADMINUIPORT default (8025) would otherwise be wrong if the install
-        /// had chosen another port. Sets ADMINUIPORT to the current port, NETWORKACCESS=1 when the current
-        /// bind is 0.0.0.0 (so the network checkbox is pre-checked), and WSRMAINTUI=1 to mark that the
-        /// maintenance UI ran (gates whether WriteAdminConfig re-applies the config on a repair).
+        /// had chosen another port. Sets ADMINUIPORT/ADMINUIURL to the current port, NETWORKACCESS=1 when the
+        /// current bind is anything but loopback (so the network checkbox is pre-checked), and WSRMAINTUI=1
+        /// to mark that the maintenance UI ran (gates whether WriteAdminConfig re-applies the config).
+        /// Port/BindAddress are read from the "AdminUi" section only — other sections may carry keys with
+        /// the same names.
         /// </summary>
         [CustomAction]
         public static ActionResult ReadExistingConfig(Session session)
@@ -92,16 +94,25 @@ namespace WinSmtpRelay.Setup.CustomActions
                     return ActionResult.Success;
 
                 var json = File.ReadAllText(path);
+                if (!TryGetAdminUiSection(json, out var sectionStart, out var sectionEnd))
+                    return ActionResult.Success;
+                var section = json.Substring(sectionStart, sectionEnd - sectionStart + 1);
 
-                var port = System.Text.RegularExpressions.Regex.Match(json, "\"Port\"\\s*:\\s*(\\d+)");
+                var port = System.Text.RegularExpressions.Regex.Match(section, "\"Port\"\\s*:\\s*(\\d+)");
                 if (port.Success)
+                {
                     session["ADMINUIPORT"] = port.Groups[1].Value;
+                    // Keep the Start-menu shortcut (and exit text) on the real port — both use ADMINUIURL,
+                    // and a Repair rewrites the shortcut with the current property value.
+                    session["ADMINUIURL"] = "https://localhost:" + port.Groups[1].Value;
+                }
 
-                // Pre-check the network checkbox only when currently bound to all interfaces. Leave the
+                // Pre-check the network checkbox for ANY non-loopback bind (0.0.0.0 or a specific address),
+                // so a Repair doesn't silently revert a hand-configured bind to 127.0.0.1. Leave the
                 // property empty for loopback — empty reads as unchecked, whereas "0" would (wrongly) render
                 // the checkbox as checked (an MSI checkbox is "checked" whenever its property is non-empty).
-                var bind = System.Text.RegularExpressions.Regex.Match(json, "\"BindAddress\"\\s*:\\s*\"([^\"]+)\"");
-                if (bind.Success && bind.Groups[1].Value == "0.0.0.0")
+                var bind = System.Text.RegularExpressions.Regex.Match(section, "\"BindAddress\"\\s*:\\s*\"([^\"]+)\"");
+                if (bind.Success && !IsLoopback(bind.Groups[1].Value))
                     session["NETWORKACCESS"] = "1";
 
                 session.Log("WinSmtpRelay ReadExistingConfig: port={0}, bind={1}",
@@ -117,12 +128,16 @@ namespace WinSmtpRelay.Setup.CustomActions
         }
 
         /// <summary>
-        /// Deferred CA. Writes appsettings.Production.json next to the service binaries with the chosen
+        /// Deferred CA. Patches appsettings.Production.json next to the service binaries with the chosen
         /// admin-UI port and bind address. The service is installed to run in the Production environment
         /// (ServiceInstall Arguments="--environment Production"), so ASP.NET Core layers this file over the
         /// shipped appsettings.json via the standard appsettings.{Environment}.json convention — no custom
         /// loading and no parsing of appsettings.json. Data is passed via CustomActionData as
-        /// "DIR=&lt;installdir&gt;|PORT=&lt;port&gt;|BIND=&lt;address&gt;".
+        /// "DIR=&lt;installdir&gt;|PORT=&lt;port&gt;|NET=&lt;0|1&gt;".
+        /// MERGES into an existing file: only the AdminUi Port/BindAddress values are touched, every other
+        /// operator-added setting in the file survives a Repair or upgrade byte-for-byte. A hand-configured
+        /// specific bind address (e.g. 192.168.1.5) is preserved when network access stays enabled.
+        /// Hand-rolled string patching keeps this net48 CA dependency-free (no JSON library).
         /// </summary>
         [CustomAction]
         public static ActionResult WriteAdminConfig(Session session)
@@ -132,9 +147,8 @@ namespace WinSmtpRelay.Setup.CustomActions
                 var data = ParseCustomActionData(session["CustomActionData"]);
                 string dir = data.TryGetValue("DIR", out var d) ? d : null;
                 string port = data.TryGetValue("PORT", out var p) ? p : "8025";
-                // NET=1 → expose on all interfaces; otherwise loopback only (secure default).
+                // NET=1 → expose on the network; otherwise loopback only (secure default).
                 string net = data.TryGetValue("NET", out var n) ? n : "0";
-                string bind = net == "1" ? "0.0.0.0" : "127.0.0.1";
 
                 if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
                 {
@@ -144,19 +158,58 @@ namespace WinSmtpRelay.Setup.CustomActions
 
                 if (!int.TryParse(port, out var portNum)) portNum = 8025;
 
-                // Minimal override file — only the keys the installer decides. Everything else stays in
-                // the shipped appsettings.json. Hand-written JSON keeps this CA dependency-free.
-                string json =
-                    "{\r\n" +
-                    "  \"AdminUi\": {\r\n" +
-                    "    \"Port\": " + portNum + ",\r\n" +
-                    "    \"BindAddress\": \"" + bind + "\"\r\n" +
-                    "  }\r\n" +
-                    "}\r\n";
-
                 string path = Path.Combine(dir, "appsettings.Production.json");
+                string existing = File.Exists(path) ? File.ReadAllText(path) : null;
+
+                // Network ON keeps a hand-configured specific bind address; only loopback (or no value)
+                // is widened to all interfaces. Network OFF always means loopback.
+                string bind = "127.0.0.1";
+                if (net == "1")
+                {
+                    bind = "0.0.0.0";
+                    if (existing != null && TryGetAdminUiSection(existing, out var s0, out var e0))
+                    {
+                        var current = System.Text.RegularExpressions.Regex.Match(
+                            existing.Substring(s0, e0 - s0 + 1), "\"BindAddress\"\\s*:\\s*\"([^\"]+)\"");
+                        if (current.Success && !IsLoopback(current.Groups[1].Value))
+                            bind = current.Groups[1].Value;
+                    }
+                }
+
+                string json;
+                if (existing != null && TryGetAdminUiSection(existing, out var sectionStart, out var sectionEnd))
+                {
+                    var section = existing.Substring(sectionStart, sectionEnd - sectionStart + 1);
+                    section = SetJsonValueInSection(section, "Port", portNum.ToString());
+                    section = SetJsonValueInSection(section, "BindAddress", "\"" + bind + "\"");
+                    json = existing.Substring(0, sectionStart) + section + existing.Substring(sectionEnd + 1);
+                }
+                else if (existing != null && existing.IndexOf('{') >= 0)
+                {
+                    // File exists but has no AdminUi section — insert one, keep the rest untouched.
+                    int root = existing.IndexOf('{');
+                    bool empty = existing.Substring(root + 1).TrimStart().StartsWith("}");
+                    json = existing.Substring(0, root + 1) +
+                           "\r\n  \"AdminUi\": {\r\n" +
+                           "    \"Port\": " + portNum + ",\r\n" +
+                           "    \"BindAddress\": \"" + bind + "\"\r\n" +
+                           "  }" + (empty ? "\r\n" : ",") + existing.Substring(root + 1);
+                }
+                else
+                {
+                    // No (usable) file yet — write the minimal override.
+                    json =
+                        "{\r\n" +
+                        "  \"AdminUi\": {\r\n" +
+                        "    \"Port\": " + portNum + ",\r\n" +
+                        "    \"BindAddress\": \"" + bind + "\"\r\n" +
+                        "  }\r\n" +
+                        "}\r\n";
+                }
+
                 File.WriteAllText(path, json);
-                session.Log("WinSmtpRelay WriteAdminConfig: wrote {0} (Port={1}, BindAddress={2})", path, portNum, bind);
+                session.Log("WinSmtpRelay WriteAdminConfig: wrote {0} (Port={1}, BindAddress={2}, merged={3})",
+                    path, portNum, bind, existing != null);
                 return ActionResult.Success;
             }
             catch (Exception ex)
@@ -166,6 +219,62 @@ namespace WinSmtpRelay.Setup.CustomActions
                 return ActionResult.Success;
             }
         }
+
+        /// <summary>
+        /// Locates the object value of the top-level "AdminUi" property: start/end are the indexes of its
+        /// opening and closing braces. Brace counting skips string literals, so values containing braces
+        /// can't derail it. Returns false when the section (or the file's JSON shape) is absent.
+        /// </summary>
+        private static bool TryGetAdminUiSection(string json, out int braceStart, out int braceEnd)
+        {
+            braceStart = braceEnd = -1;
+            var m = System.Text.RegularExpressions.Regex.Match(json, "\"AdminUi\"\\s*:\\s*\\{");
+            if (!m.Success) return false;
+
+            braceStart = m.Index + m.Length - 1;
+            int depth = 0;
+            bool inString = false;
+            for (int i = braceStart; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (inString)
+                {
+                    if (c == '\\') i++;        // skip the escaped character
+                    else if (c == '"') inString = false;
+                    continue;
+                }
+                if (c == '"') inString = true;
+                else if (c == '{') depth++;
+                else if (c == '}' && --depth == 0)
+                {
+                    braceEnd = i;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Replaces the value of <paramref name="key"/> inside a JSON object snippet ("{...}"), or inserts
+        /// the key after the opening brace when absent. <paramref name="rawValue"/> is written verbatim
+        /// (pass quoted strings pre-quoted).
+        /// </summary>
+        private static string SetJsonValueInSection(string section, string key, string rawValue)
+        {
+            var rx = new System.Text.RegularExpressions.Regex(
+                "(\"" + key + "\"\\s*:\\s*)(\"(?:[^\"\\\\]|\\\\.)*\"|[^,\\}\\s]+)");
+            if (rx.IsMatch(section))
+                return rx.Replace(section, mm => mm.Groups[1].Value + rawValue, 1);
+
+            int brace = section.IndexOf('{');
+            bool empty = section.Substring(brace + 1).TrimStart().StartsWith("}");
+            return section.Substring(0, brace + 1) +
+                   "\r\n    \"" + key + "\": " + rawValue + (empty ? "\r\n  " : ",") +
+                   section.Substring(brace + 1);
+        }
+
+        private static bool IsLoopback(string bindAddress) =>
+            bindAddress == "127.0.0.1" || bindAddress == "localhost" || bindAddress == "::1";
 
         private static HashSet<int> GetUsedTcpPorts()
         {

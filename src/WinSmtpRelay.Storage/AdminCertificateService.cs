@@ -9,9 +9,11 @@ namespace WinSmtpRelay.Storage;
 
 public class AdminCertificateService(RelayDbContext db) : IAdminCertificateService
 {
-    // Round-trip through a machine key set so SChannel/Kestrel can use the private key.
-    private const X509KeyStorageFlags LoadFlags =
-        X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet;
+    // Round-trip through a machine key set so SChannel/Kestrel can use the private key. WITHOUT
+    // PersistKeySet: the key container then lives only as long as the certificate object (which the cert
+    // provider roots for the process lifetime — sufficient for SChannel) instead of accumulating a new
+    // orphaned container under MachineKeys on every service start and import.
+    private const X509KeyStorageFlags LoadFlags = X509KeyStorageFlags.MachineKeySet;
 
     public async Task<AdminCertificateSettings> GetAsync(CancellationToken ct = default)
         => await db.AdminCertificateSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new AdminCertificateSettings();
@@ -32,7 +34,7 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
         try
         {
             cert = X509CertificateLoader.LoadPkcs12(pfxBytes, password,
-                X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable);
+                LoadFlags | X509KeyStorageFlags.Exportable);
         }
         catch (Exception ex)
         {

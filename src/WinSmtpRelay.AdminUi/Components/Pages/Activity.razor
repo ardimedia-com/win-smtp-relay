@@ -91,7 +91,7 @@
 
     private void OnActivity(ActivityEvent e)
     {
-        if (_disposed || !IsForMe(e))
+        if (_disposed || !CurrentTenant.Owns(e))
             return;
 
         var (icon, text, css) = e.Kind switch
@@ -119,10 +119,6 @@
             StateHasChanged();
         });
     }
-
-    /// <summary>Show an event when it isn't tenant-scoped, or it matches this circuit's scope.</summary>
-    private bool IsForMe(ActivityEvent e)
-        => e.TenantId is null || CurrentTenant.IsHostScope || e.TenantId == CurrentTenant.TenantId;
 
     private void ClearFeed() => events.Clear();
 

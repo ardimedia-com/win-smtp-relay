@@ -52,6 +52,9 @@
     <Component Id="FirewallRules" Directory="INSTALLFOLDER" Guid="a1e7c3f9-2d4b-4e8a-9f6c-5b3d1a0e7f2c">
       <RegistryKey Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" ForceCreateOnInstall="yes">
         <RegistryValue Name="FirewallConfigured" Type="integer" Value="1" KeyPath="yes" />
+        <!-- Persist the chosen admin port so a major upgrade (where CheckPorts/ReadExistingConfig don't
+             run) can recover it via the WSR_SAVEDPORT RegistrySearch in Package.wxs. -->
+        <RegistryValue Name="AdminUiPort" Type="string" Value="[ADMINUIPORT]" />
         <!-- Grant NetworkService write access so the service can write the ServiceRunning flag -->
         <util:PermissionEx User="NT AUTHORITY\NetworkService" GenericAll="yes" />
       </RegistryKey>
