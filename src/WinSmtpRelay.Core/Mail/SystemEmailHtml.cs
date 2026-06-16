@@ -19,7 +19,7 @@ public static class SystemEmailHtml
 
         html.Append("<!DOCTYPE html><html><body style=\"margin:0;padding:0;background-color:#f4f4f5;\">");
         html.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#f4f4f5;padding:32px 0;\"><tr><td align=\"center\">");
-        html.Append("<table role=\"presentation\" width=\"560\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;width:100%;background-color:#ffffff;border:1px solid #e4e4e7;border-radius:8px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;\">");
+        html.Append("<table role=\"presentation\" width=\"640\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:640px;width:100%;background-color:#ffffff;border:1px solid #e4e4e7;border-radius:8px;font-family:Aptos,'Segoe UI',Arial,sans-serif;\">");
 
         // Branding header
         html.Append("<tr><td style=\"padding:20px 32px;border-bottom:1px solid #e4e4e7;\">");

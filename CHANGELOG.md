@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **System email card widened to 640px and switched to the Aptos font stack** (`Aptos,'Segoe UI',Arial,sans-serif`), matching the shared Ardimedia email layout used across the other apps. The card layout, content model, and the plain-text alternative are unchanged.
+
 ## [1.0.0-beta1-build48] - 2026-06-11
 
 ### Changed
