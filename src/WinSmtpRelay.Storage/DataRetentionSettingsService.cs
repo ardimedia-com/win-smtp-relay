@@ -7,11 +7,11 @@ namespace WinSmtpRelay.Storage;
 public class DataRetentionSettingsService(RelayDbContext db) : IDataRetentionSettingsService
 {
     public async Task<DataRetentionSettings> GetAsync(CancellationToken ct = default)
-        => await db.DataRetentionSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new DataRetentionSettings();
+        => await db.DataRetentionSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct) ?? new DataRetentionSettings();
 
     public async Task UpdateAsync(DataRetentionSettings input, CancellationToken ct = default)
     {
-        var settings = await db.DataRetentionSettings.FirstOrDefaultAsync(ct);
+        var settings = await db.DataRetentionSettings.FindAsync([1], ct);
         if (settings is null)
         {
             settings = new DataRetentionSettings { Id = 1 };

@@ -7,7 +7,7 @@ namespace WinSmtpRelay.Storage;
 public class ReportingSettingsService(RelayDbContext db) : IReportingSettingsService
 {
     public async Task<ReportingSettings> GetAsync(CancellationToken ct = default)
-        => await db.ReportingSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new ReportingSettings();
+        => await db.ReportingSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct) ?? new ReportingSettings();
 
     public async Task UpdateAsync(bool enabled, string? recipientAddress, string? fromAddress, string dailyTimeUtc,
         int bounceRateAlertPercent, CancellationToken ct = default)
@@ -31,7 +31,7 @@ public class ReportingSettingsService(RelayDbContext db) : IReportingSettingsSer
 
     private async Task<ReportingSettings> Row(CancellationToken ct)
     {
-        var settings = await db.ReportingSettings.FirstOrDefaultAsync(ct);
+        var settings = await db.ReportingSettings.FindAsync([1], ct);
         if (settings is null)
         {
             settings = new ReportingSettings { Id = 1 };

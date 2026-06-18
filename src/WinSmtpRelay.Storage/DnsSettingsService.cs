@@ -7,11 +7,11 @@ namespace WinSmtpRelay.Storage;
 public class DnsSettingsService(RelayDbContext db) : IDnsSettingsService
 {
     public async Task<DnsSettings> GetAsync(CancellationToken ct = default)
-        => await db.DnsSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new DnsSettings();
+        => await db.DnsSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct) ?? new DnsSettings();
 
     public async Task UpdateAsync(DnsSettings settings, CancellationToken ct = default)
     {
-        var existing = await db.DnsSettings.FirstOrDefaultAsync(ct);
+        var existing = await db.DnsSettings.FindAsync([1], ct);
         if (existing is null)
         {
             existing = new DnsSettings { Id = 1 };

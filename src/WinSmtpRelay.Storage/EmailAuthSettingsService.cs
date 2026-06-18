@@ -8,7 +8,7 @@ namespace WinSmtpRelay.Storage;
 public class EmailAuthSettingsService(RelayDbContext db, IRuntimeConfigCache cache) : IEmailAuthSettingsService
 {
     public async Task<EmailAuthSettings> GetAsync(CancellationToken ct = default)
-        => await db.EmailAuthSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new EmailAuthSettings();
+        => await db.EmailAuthSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct) ?? new EmailAuthSettings();
 
     public async Task UpdateAsync(
         bool spfEnabled,
@@ -20,7 +20,7 @@ public class EmailAuthSettingsService(RelayDbContext db, IRuntimeConfigCache cac
         bool rejectUnresolvedTenant,
         CancellationToken ct = default)
     {
-        var settings = await db.EmailAuthSettings.FirstOrDefaultAsync(ct);
+        var settings = await db.EmailAuthSettings.FindAsync([1], ct);
         if (settings is null)
         {
             settings = new EmailAuthSettings { Id = 1 };

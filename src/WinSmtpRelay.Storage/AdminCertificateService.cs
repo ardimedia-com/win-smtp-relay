@@ -16,11 +16,11 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
     private const X509KeyStorageFlags LoadFlags = X509KeyStorageFlags.MachineKeySet;
 
     public async Task<AdminCertificateSettings> GetAsync(CancellationToken ct = default)
-        => await db.AdminCertificateSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new AdminCertificateSettings();
+        => await db.AdminCertificateSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct) ?? new AdminCertificateSettings();
 
     public async Task<X509Certificate2?> LoadImportedAsync(CancellationToken ct = default)
     {
-        var row = await db.AdminCertificateSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        var row = await db.AdminCertificateSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct);
         if (row is null || string.IsNullOrEmpty(row.PfxBase64))
             return null;
 
@@ -52,7 +52,7 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
             // (which is itself DPAPI-encrypted at rest via the value converter).
             var passwordless = cert.Export(X509ContentType.Pfx);
 
-            var row = await db.AdminCertificateSettings.FirstOrDefaultAsync(ct);
+            var row = await db.AdminCertificateSettings.FindAsync([1], ct);
             if (row is null)
             {
                 row = new AdminCertificateSettings { Id = 1 };
@@ -72,7 +72,7 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
 
     public async Task ClearAsync(CancellationToken ct = default)
     {
-        var row = await db.AdminCertificateSettings.FirstOrDefaultAsync(ct);
+        var row = await db.AdminCertificateSettings.FindAsync([1], ct);
         if (row is null)
             return;
 

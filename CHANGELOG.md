@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **No more EF Core warning 10103 in the Windows Application event log.** The single-row settings tables (rate-limit, e-mail-auth, backup-MX, DNS, portal, reporting, data- and statistics-retention, admin certificate) were read with `FirstOrDefault()` without an `OrderBy` or filter, so every read — including the nightly maintenance pass — logged `RowLimitingOperationWithoutOrderByWarning` ("The query uses the 'First'/'FirstOrDefault' operator without 'OrderBy'…"). These rows are singletons keyed `Id = 1`, so reads now fetch them by that key (`FindAsync([1])` for the update path, an `Id == 1` filter for the read-only path), matching the existing convention in the configuration seeder. No behaviour change — only the spurious warning is gone.
+
 ### Changed
 
 - **System email card widened to 640px and switched to the Aptos font stack** (`Aptos,'Segoe UI',Arial,sans-serif`), matching the shared Ardimedia email layout used across the other apps. The card layout, content model, and the plain-text alternative are unchanged.

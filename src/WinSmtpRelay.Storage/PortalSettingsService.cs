@@ -7,11 +7,11 @@ namespace WinSmtpRelay.Storage;
 public class PortalSettingsService(RelayDbContext db) : IPortalSettingsService
 {
     public async Task<PortalSettings> GetAsync(CancellationToken ct = default)
-        => await db.PortalSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new PortalSettings();
+        => await db.PortalSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct) ?? new PortalSettings();
 
     public async Task SetSelfServiceSignupEnabledAsync(bool enabled, CancellationToken ct = default)
     {
-        var settings = await db.PortalSettings.FirstOrDefaultAsync(ct);
+        var settings = await db.PortalSettings.FindAsync([1], ct);
         if (settings is null)
         {
             settings = new PortalSettings { Id = 1 };
@@ -27,7 +27,7 @@ public class PortalSettingsService(RelayDbContext db) : IPortalSettingsService
 
     public async Task SetSignupFromAddressAsync(string? fromAddress, CancellationToken ct = default)
     {
-        var settings = await db.PortalSettings.FirstOrDefaultAsync(ct);
+        var settings = await db.PortalSettings.FindAsync([1], ct);
         if (settings is null)
         {
             settings = new PortalSettings { Id = 1 };
@@ -41,7 +41,7 @@ public class PortalSettingsService(RelayDbContext db) : IPortalSettingsService
 
     public async Task SetSignupMaxAttemptsPerIpPerHourAsync(int maxPerHour, CancellationToken ct = default)
     {
-        var settings = await db.PortalSettings.FirstOrDefaultAsync(ct);
+        var settings = await db.PortalSettings.FindAsync([1], ct);
         if (settings is null)
         {
             settings = new PortalSettings { Id = 1 };

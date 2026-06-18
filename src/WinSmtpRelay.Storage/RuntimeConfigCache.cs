@@ -269,7 +269,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
 
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
-            var settings = await db.RateLimitSettings.AsNoTracking().FirstOrDefaultAsync(ct)
+            var settings = await db.RateLimitSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct)
                 ?? new RateLimitSettings();
 
             _rateLimitSettings = settings;
@@ -295,7 +295,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
 
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
-            var settings = await db.EmailAuthSettings.AsNoTracking().FirstOrDefaultAsync(ct)
+            var settings = await db.EmailAuthSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct)
                 ?? new EmailAuthSettings();
 
             _emailAuthSettings = settings;
@@ -321,7 +321,7 @@ public class RuntimeConfigCache : IRuntimeConfigCache
 
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
-            var settings = await db.BackupMxSettings.AsNoTracking().FirstOrDefaultAsync(ct)
+            var settings = await db.BackupMxSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct)
                 ?? new BackupMxSettings();
 
             _backupMxSettings = settings;

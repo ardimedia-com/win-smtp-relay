@@ -7,11 +7,11 @@ namespace WinSmtpRelay.Storage;
 public class BackupMxSettingsService(RelayDbContext db, IRuntimeConfigCache cache) : IBackupMxSettingsService
 {
     public async Task<BackupMxSettings> GetAsync(CancellationToken ct = default)
-        => await db.BackupMxSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new BackupMxSettings();
+        => await db.BackupMxSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct) ?? new BackupMxSettings();
 
     public async Task UpdateAsync(bool enabled, string? domains, int retryIntervalMinutes, int maxHoldHours, CancellationToken ct = default)
     {
-        var settings = await db.BackupMxSettings.FirstOrDefaultAsync(ct);
+        var settings = await db.BackupMxSettings.FindAsync([1], ct);
         if (settings is null)
         {
             settings = new BackupMxSettings { Id = 1 };
