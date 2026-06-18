@@ -47,9 +47,13 @@ public static class SystemEmailHtml
 
         if (!string.IsNullOrWhiteSpace(content.MonospaceBlock))
         {
-            html.Append("<p style=\"margin:4px 0 12px;font-size:13px;line-height:1.6;font-family:Consolas,'Courier New',monospace;background-color:#f4f4f5;border:1px solid #e4e4e7;border-radius:6px;padding:14px 20px;color:#18181b;\">");
+            // Drawn as a single-cell table so the padding sits on the <td>: Outlook Classic's Word engine
+            // does not honour top/bottom padding on a <p>, which made the first line hug the top border
+            // while the bottom kept its spacing. Cell padding renders symmetrically in every client.
+            html.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:4px 0 12px;\"><tr>");
+            html.Append("<td style=\"background-color:#f4f4f5;border:1px solid #e4e4e7;border-radius:6px;padding:16px 20px;font-size:13px;line-height:1.6;font-family:Consolas,'Courier New',monospace;color:#18181b;\">");
             html.Append(EncodePreformatted(content.MonospaceBlock));
-            html.Append("</p>");
+            html.Append("</td></tr></table>");
         }
 
         foreach (var paragraph in content.ClosingParagraphs)

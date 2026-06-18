@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **System email card widened to 640px and switched to the Aptos font stack** (`Aptos,'Segoe UI',Arial,sans-serif`), matching the shared Ardimedia email layout used across the other apps. The card layout, content model, and the plain-text alternative are unchanged.
+- **Monospace block in system emails (e.g. the daily report) now has even top/bottom padding.** It was rendered as a `<p>` with padding, but Outlook Classic's Word engine ignores top/bottom padding on `<p>`, so the first line hugged the box's top border while the bottom kept its spacing. The block is now drawn as a single-cell table with the padding on the `<td>` — the same technique already used for the CTA button — so it renders symmetrically in every client.
 
 ## [1.0.0-beta1-build48] - 2026-06-11
 
