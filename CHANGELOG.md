@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **DMARC alignment outcome per sender domain.** The Deliverability page now shows a synthesised "DMARC outcome" banner for each sender domain — *Passes (DKIM-aligned)*, *Conditional (SPF only)*, or *Will fail* — answering the question the three per-record checks (SPF/DKIM/DMARC) don't answer on their own: will mail from this domain, sent through this relay, actually reach DMARC pass? A green SPF record alone is not enough; the banner explains that DKIM (which the relay signs with `d=` equal to the From domain) makes alignment robust, whereas an SPF-only setup passes DMARC only when the sending app's envelope-from (Return-Path) is on the From domain.
+- **Local outbound authentication self-test (no send).** A new "Verify auth (no send)" action on the Setup page builds the exact message the relay would send for a From address, DKIM-signs it through the real signing path, then verifies the produced signature against the relay's own key and combines that with the published DNS — reporting whether the message will pass DMARC, without sending anything or depending on an external verifier.
+- **Inbound DKIM verification feeds DMARC.** When DMARC checking is enabled, received messages now have their DKIM signatures verified (public keys fetched from DNS), so DMARC can pass via the DKIM-alignment path — not only via SPF alignment as before. A `dkim=` result is added to the `Authentication-Results` header. This fixes legitimate mail that authenticates solely through DKIM (e.g. forwarded/relayed mail with a non-aligned envelope-from) being marked as a DMARC failure.
+
+### Changed
+
+- **Envelope-from (Return-Path) alignment is now surfaced on delivery.** When an outbound message's envelope-from domain does not align with the From header domain — which makes SPF fail DMARC alignment despite a valid SPF record — the relay logs a warning explaining the gap (and notes when a DKIM signature already covers it). A new opt-in `Delivery:AlignReturnPath` setting (off by default) rewrites the transmitted MAIL FROM onto the From domain so SPF aligns; the stored message is never modified. Off by default because rewriting changes where bounces are routed.
+- **DMARC organizational-domain alignment now uses the Public Suffix List** instead of a naive "last two labels" heuristic, so multi-label public suffixes (e.g. `co.uk`) are handled correctly when comparing the envelope/DKIM domain against the From domain.
+- **Dependencies brought current.** All .NET 10 framework/EF packages now float to `10.*` and resolve uniformly to 10.0.9 — this also fixes a version-resolution drift where some packages pinned to 10.0.3/10.0.8 while EF resolved to 10.0.9, producing CS1705 errors in the test projects. `BlazorBlueprint.Components` 3.4.0 → 3.12.1, `Nager.EmailAuthentication` 4.0.5 → 4.1.0, `MSTest` 4.1.0 → 4.2.3. (`WixToolset.*.wixext` is intentionally held at 5.0.x — the 7.0 upgrade is a separate installer migration.)
+
+### Security
+
+- **Tracking CVE-2025-6965 (SQLite < 3.50.2)** via the transitive `SQLitePCLRaw.lib.e_sqlite3` 2.1.11 (HIGH). There is no fixed package yet (2.1.11 is the latest; a build bundling SQLite ≥ 3.50.2 has not shipped), so it cannot be remediated by a version bump. Practical exposure here is low: the relay uses SQLite only as its internal store-and-forward queue with parameterized EF Core queries and never executes attacker-supplied SQL, which the vulnerability requires. To be updated as soon as a patched SQLitePCLRaw is published.
+
 ### Fixed
 
 - **No more EF Core warning 10103 in the Windows Application event log.** The single-row settings tables (rate-limit, e-mail-auth, backup-MX, DNS, portal, reporting, data- and statistics-retention, admin certificate) were read with `FirstOrDefault()` without an `OrderBy` or filter, so every read — including the nightly maintenance pass — logged `RowLimitingOperationWithoutOrderByWarning` ("The query uses the 'First'/'FirstOrDefault' operator without 'OrderBy'…"). These rows are singletons keyed `Id = 1`, so reads now fetch them by that key (`FindAsync([1])` for the update path, an `Id == 1` filter for the read-only path), matching the existing convention in the configuration seeder. No behaviour change — only the spurious warning is gone.

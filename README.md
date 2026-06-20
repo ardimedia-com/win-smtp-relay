@@ -13,9 +13,10 @@ Open-source SMTP relay server for Windows. Built with .NET 10, designed as a mod
 - Store-and-forward message queue (SQLite)
 - STARTTLS (port 587) and implicit TLS (port 465)
 - SMTP AUTH with per-user SendAs control and rate limits
-- DKIM signing (per tenant), SPF/DMARC verification
-- Setup page (`/setup`): live per-organization readiness checklist (can-send + deliverability) with the DNS records to publish and a test-message sender
-- Health page (`/health`): live deliverability checks per sender domain and sending IP — SPF, DKIM, DMARC, MX, reverse DNS (PTR/FCrDNS), public-hostname A/AAAA, SPF coverage and 10-lookup-limit warnings, and DNSBL (Spamhaus ZEN / SpamCop), with copy-ready records
+- DKIM signing (per tenant), inbound SPF/DKIM/DMARC verification (DMARC passes via SPF *or* DKIM alignment)
+- Setup page (`/setup`): live per-organization readiness checklist (can-send + deliverability) with the DNS records to publish, a test-message sender, and a local authentication self-test ("Verify auth, no send") that builds, signs and verifies a message against the relay's own key to confirm it will pass DMARC
+- Health page (`/health`): live deliverability checks per sender domain and sending IP — a synthesised **DMARC alignment outcome** per domain (passes via DKIM / conditional via SPF / will fail), plus SPF, DKIM, DMARC, MX, reverse DNS (PTR/FCrDNS), public-hostname A/AAAA, SPF coverage and 10-lookup-limit warnings, and DNSBL (Spamhaus ZEN / SpamCop), with copy-ready records
+- Optional envelope-from (Return-Path) realignment on delivery (`Delivery:AlignReturnPath`) so SPF aligns for DMARC; off by default, with a warning logged when an unaligned envelope-from is detected
 - Domain ownership verification (DNS TXT) for accepted sender and recipient domains, with optional enforcement on the SMTP path
 - IP-based relay restrictions, with optional strict IP-to-tenant binding for unauthenticated submission (blocks cross-tenant sender-domain spoofing)
 - Pickup folder for .eml files

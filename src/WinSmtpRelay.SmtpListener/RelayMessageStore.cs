@@ -62,12 +62,25 @@ public class RelayMessageStore : MessageStore
             ? domObj as string ?? GetDomainFromAddress(sender)
             : GetDomainFromAddress(sender);
 
-        // Run full authentication check (DMARC needs the RFC5322.From header domain)
+        // Run full authentication check (DMARC needs the RFC5322.From header domain). Parse the message so
+        // DKIM signatures can be verified for the DMARC DKIM-alignment path; best-effort — a parse failure
+        // just leaves DKIM unchecked (DMARC then evaluates via SPF alignment only).
         var headerFromDomain = ExtractFromDomain(rawMessage) ?? envelopeFromDomain;
+        MimeKit.MimeMessage? parsed = null;
+        try
+        {
+            parsed = await MimeKit.MimeMessage.LoadAsync(new MemoryStream(rawMessage), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Could not parse message {MessageId} for DKIM verification", messageId);
+        }
+
         var authResults = await _emailAuth.CheckAllAsync(
             remoteEndPoint?.Address ?? IPAddress.Loopback,
             envelopeFromDomain,
             headerFromDomain,
+            parsed,
             cancellationToken);
 
         // Enforce DMARC/SPF policy
@@ -113,7 +126,9 @@ public class RelayMessageStore : MessageStore
 
     private static byte[] PrependAuthenticationResultsHeader(byte[] rawMessage, AuthenticationResults results)
     {
-        if (results.Spf.Verdict == SpfVerdict.None && results.Dmarc.Verdict == DmarcVerdict.None)
+        if (results.Spf.Verdict == SpfVerdict.None
+            && results.Dmarc.Verdict == DmarcVerdict.None
+            && (results.Dkim is null || results.Dkim.Verdict == DkimVerdict.None))
             return rawMessage;
 
         var headerValue = results.ToHeaderValue("winsmtprelay");

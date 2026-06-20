@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
+using MimeKit;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Security.Models;
@@ -10,17 +11,20 @@ public class EmailAuthenticationService
 {
     private readonly SpfValidator _spf;
     private readonly DmarcValidator _dmarc;
+    private readonly InboundDkimVerifier _dkim;
     private readonly IRuntimeConfigCache _configCache;
     private readonly ILogger<EmailAuthenticationService> _logger;
 
     public EmailAuthenticationService(
         SpfValidator spf,
         DmarcValidator dmarc,
+        InboundDkimVerifier dkim,
         IRuntimeConfigCache configCache,
         ILogger<EmailAuthenticationService> logger)
     {
         _spf = spf;
         _dmarc = dmarc;
+        _dkim = dkim;
         _configCache = configCache;
         _logger = logger;
     }
@@ -46,13 +50,20 @@ public class EmailAuthenticationService
         IPAddress senderIp,
         string envelopeFromDomain,
         string headerFromDomain,
+        MimeMessage? message = null,
         CancellationToken cancellationToken = default)
     {
         var settings = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);
         var spfResult = await CheckSpfAsync(senderIp, envelopeFromDomain, cancellationToken);
 
+        // DKIM is verified only as part of DMARC evaluation (it feeds the DKIM-alignment pass path) and
+        // only when the raw message is available. Without it, DMARC can pass solely via SPF alignment.
+        var dkimResult = settings.DmarcEnabled && message is not null
+            ? await _dkim.VerifyAsync(message, cancellationToken)
+            : null;
+
         var dmarcResult = settings.DmarcEnabled
-            ? await _dmarc.CheckAsync(headerFromDomain, envelopeFromDomain, spfResult, cancellationToken)
+            ? await _dmarc.CheckAsync(headerFromDomain, envelopeFromDomain, spfResult, dkimResult, cancellationToken)
             : new DmarcCheckResult(DmarcVerdict.None, DmarcPolicy.None, "DMARC checking disabled");
 
         if (dmarcResult.Verdict != DmarcVerdict.None)
@@ -61,7 +72,7 @@ public class EmailAuthenticationService
                 headerFromDomain, dmarcResult.Verdict, dmarcResult.Policy, dmarcResult.Explanation);
         }
 
-        return new AuthenticationResults(spfResult, dmarcResult);
+        return new AuthenticationResults(spfResult, dmarcResult, dkimResult);
     }
 
     public async Task<bool> ShouldRejectAsync(AuthenticationResults results, CancellationToken cancellationToken = default)

@@ -30,4 +30,12 @@ public record DnsRecordResult(
     string? Suggested = null);
 
 /// <summary>The full DNS-setup picture for one sender domain.</summary>
-public record DomainDnsSetup(string Domain, DnsRecordResult Spf, DnsRecordResult Dkim, DnsRecordResult Dmarc);
+public record DomainDnsSetup(string Domain, DnsRecordResult Spf, DnsRecordResult Dkim, DnsRecordResult Dmarc)
+{
+    /// <summary>
+    /// The synthesised DMARC-alignment outcome for this domain — the answer to "will mail from this domain,
+    /// sent through this relay, actually reach DMARC pass?". Derived purely from the three record checks
+    /// above (it is the missing synthesis the per-leg checks don't give on their own).
+    /// </summary>
+    public DmarcAlignment Alignment => DmarcAlignment.Evaluate(Spf, Dkim, Dmarc);
+}

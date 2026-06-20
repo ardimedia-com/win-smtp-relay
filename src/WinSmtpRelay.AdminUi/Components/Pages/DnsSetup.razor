@@ -57,6 +57,16 @@ else
                 @if (!string.IsNullOrEmpty(g.Subtitle)) { <BbCardDescription>@g.Subtitle</BbCardDescription> }
             </BbCardHeader>
             <BbCardContent>
+                @if (g.Alignment is { } al)
+                {
+                    <div class="dns-record" style="border-left:3px solid @AlignmentColor(al.Verdict);padding-left:0.75rem;">
+                        <div class="dns-record-head">
+                            <strong>DMARC outcome</strong>
+                            <span class="badge-status @AlignmentBadge(al.Verdict)">@AlignmentText(al.Verdict)</span>
+                        </div>
+                        <div class="text-muted" style="font-size:0.8rem;">@al.Summary</div>
+                    </div>
+                }
                 @foreach (var rec in g.Records)
                 {
                     <div class="dns-record">
@@ -274,7 +284,7 @@ else
 </BbDialog>
 
 @code {
-    private record CheckGroup(string Title, string? Subtitle, List<DnsRecordResult> Records, string? ActionHref = null, string? ActionLabel = null);
+    private record CheckGroup(string Title, string? Subtitle, List<DnsRecordResult> Records, string? ActionHref = null, string? ActionLabel = null, DmarcAlignment? Alignment = null);
     private record DomainCandidate(string Domain, string Source);
 
     // Deep-linkable tab, e.g. /health?tab=dns.
@@ -412,7 +422,7 @@ else
 
             // ----- Phase 3: assemble the display groups from the completed results -----
             senderGroups = [.. senderTasks.Select(t => t.Result)
-                .Select(s => new CheckGroup(s.Domain, "Sending identity — you send mail as this domain", [s.Spf, s.Dkim, s.Dmarc]))];
+                .Select(s => new CheckGroup(s.Domain, "Sending identity — you send mail as this domain", [s.Spf, s.Dkim, s.Dmarc], Alignment: s.Alignment))];
 
             inboundGroups = [];
             for (var i = 0; i < mxDomains.Count; i++)
@@ -553,7 +563,7 @@ else
         var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
         var setup = await dns.CheckDomainAsync(domain, _cts.Token);
         adHocGroups.RemoveAll(g => g.Title == domain);
-        adHocGroups.Insert(0, new CheckGroup(domain, subtitle, [setup.Spf, setup.Dkim, setup.Dmarc]));
+        adHocGroups.Insert(0, new CheckGroup(domain, subtitle, [setup.Spf, setup.Dkim, setup.Dmarc], Alignment: setup.Alignment));
         activeTab = "dns";
     }
 
@@ -601,6 +611,27 @@ else
         try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); }
         catch { /* best-effort copy */ }
     }
+
+    private static string AlignmentBadge(DmarcAlignmentVerdict v) => v switch
+    {
+        DmarcAlignmentVerdict.DkimAligned => "badge-success",
+        DmarcAlignmentVerdict.SpfConditional => "badge-warning",
+        _ => "badge-error"
+    };
+
+    private static string AlignmentText(DmarcAlignmentVerdict v) => v switch
+    {
+        DmarcAlignmentVerdict.DkimAligned => "Passes (DKIM-aligned)",
+        DmarcAlignmentVerdict.SpfConditional => "Conditional (SPF only)",
+        _ => "Will fail"
+    };
+
+    private static string AlignmentColor(DmarcAlignmentVerdict v) => v switch
+    {
+        DmarcAlignmentVerdict.DkimAligned => "var(--primary)",
+        DmarcAlignmentVerdict.SpfConditional => "#d97706",
+        _ => "#dc2626"
+    };
 
     private static string BadgeClass(DnsRecordStatus status) => status switch
     {

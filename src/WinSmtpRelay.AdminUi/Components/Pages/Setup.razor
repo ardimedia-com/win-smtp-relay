@@ -168,7 +168,10 @@ else
                         <BbInput Id="to" @bind-Value="testTo" Placeholder="you@example.com" />
                     </div>
                     <div class="test-send-action">
-                        <BbButton Variant="ButtonVariant.Default" @onclick="SendTestAsync" Disabled="@testSending">
+                        <BbButton Variant="ButtonVariant.Outline" @onclick="VerifyAuthAsync" Disabled="@(authChecking || testSending)">
+                            <LucideIcon Name="shield-check" /> @(authChecking ? "Checking…" : "Verify auth (no send)")
+                        </BbButton>
+                        <BbButton Variant="ButtonVariant.Default" @onclick="SendTestAsync" Disabled="@(testSending || authChecking)">
                             <LucideIcon Name="send" /> @(testSending ? "Sending…" : "Send test")
                         </BbButton>
                     </div>
@@ -180,6 +183,28 @@ else
                 @if (!string.IsNullOrEmpty(testResult))
                 {
                     <p style="font-size:0.8rem;color:var(--primary);margin:0.5rem 0 0;">@testResult</p>
+                }
+                @if (authError is not null)
+                {
+                    <p class="text-danger" style="font-size:0.8rem;margin:0.5rem 0 0;">@authError</p>
+                }
+                @if (authCheck is not null)
+                {
+                    <div class="dns-record" style="margin-top:0.75rem;border-left:3px solid @AuthColor(authCheck);padding-left:0.75rem;">
+                        <div class="dns-record-head">
+                            <strong>Authentication for @authCheck.Domain</strong>
+                            <span class="badge-status @AuthBadge(authCheck)">@AuthText(authCheck)</span>
+                        </div>
+                        <ul style="margin:0.4rem 0 0;padding-left:1.1rem;font-size:0.8rem;line-height:1.5;">
+                            @foreach (var note in authCheck.Notes)
+                            {
+                                <li>@note</li>
+                            }
+                        </ul>
+                        <p class="text-muted" style="font-size:0.75rem;margin:0.5rem 0 0;">
+                            Local check — builds and signs the message and verifies it against the relay's own key, without sending. It does not test the recipient-side path (PTR, greylisting).
+                        </p>
+                    </div>
                 }
             </BbCardContent>
         </BbCard>
@@ -664,6 +689,62 @@ else
     private bool testSending;
     private string? testResult;
     private string? testError;
+
+    // ----- Local authentication self-test (no send) -----
+    private OutboundAuthCheck? authCheck;
+    private bool authChecking;
+    private string? authError;
+
+    private async Task VerifyAuthAsync()
+    {
+        authError = null;
+        authCheck = null;
+        var from = testFrom.Trim();
+        if (ValidateEmail(from, "From") is { } err) { authError = err; return; }
+        if (readiness?.TenantId is not { } tenantId) { authError = "No tenant in scope."; return; }
+
+        // Mirror the server-side policy check used by the send action — the AuthorizeView only hides UI.
+        if (AuthState is not null)
+        {
+            var user = (await AuthState).User;
+            if (!(await AuthorizationService.AuthorizeAsync(user, AuthorizationPolicies.AdminFull)).Succeeded)
+            {
+                authError = "You don't have permission to run this check.";
+                return;
+            }
+        }
+
+        authChecking = true;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IOutboundAuthCheckService>();
+            authCheck = await svc.CheckAsync(tenantId, from);
+        }
+        catch (Exception ex)
+        {
+            authError = $"Could not run the check: {ex.Message}";
+        }
+        finally
+        {
+            authChecking = false;
+        }
+    }
+
+    private static string AuthBadge(OutboundAuthCheck c) =>
+        c.WillPassDmarc ? "badge-success"
+        : c.Alignment.SpfAuthorized ? "badge-warning"
+        : "badge-error";
+
+    private static string AuthText(OutboundAuthCheck c) =>
+        c.WillPassDmarc ? "DMARC passes (DKIM-aligned)"
+        : c.Alignment.SpfAuthorized ? "Conditional (SPF only)"
+        : "Will fail";
+
+    private static string AuthColor(OutboundAuthCheck c) =>
+        c.WillPassDmarc ? "var(--primary)"
+        : c.Alignment.SpfAuthorized ? "#d97706"
+        : "#dc2626";
 
     /// <summary>Prefills the From field with the tenant's first sender domain (best-effort).</summary>
     private async Task PrefillTestFromAsync()

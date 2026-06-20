@@ -129,6 +129,8 @@ if (adminUiConfig.Enabled)
     // the DNSBL check stays on the host's own ILookupClient (Spamhaus refuses public resolvers).
     builder.Services.AddSingleton<WinSmtpRelay.Security.PublicDnsLookupClient>();
     builder.Services.AddScoped<WinSmtpRelay.Core.Interfaces.IDnsSetupService, WinSmtpRelay.Security.DnsSetupService>();
+    // Local outbound authentication self-test (build + sign + verify a message against our own key, no send).
+    builder.Services.AddScoped<WinSmtpRelay.Core.Interfaces.IOutboundAuthCheckService, WinSmtpRelay.Security.OutboundAuthCheckService>();
     // Public Suffix List lookup (embedded snapshot, parsed once) for registrable-domain derivation.
     builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IPublicSuffixService, WinSmtpRelay.Security.PublicSuffixService>();
     // Single seam for "persist a certificate change AND hot-swap the served certificate" (see the class doc).

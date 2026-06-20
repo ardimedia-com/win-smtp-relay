@@ -26,6 +26,7 @@ public class DomainRoutingTests
             cache,
             dkimSigner,
             new StubDkimDomainService(),
+            new PublicSuffixService(),
             NullLogger<SmtpDeliveryService>.Instance);
     }
 

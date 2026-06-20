@@ -21,6 +21,15 @@ public class DeliveryOptions
     /// Per-domain routing: domain pattern to upstream relay config.
     /// Checked before global SmartHost. Supports wildcard prefix (e.g. "*.example.com").
     public List<DomainRouteOptions> DomainRoutes { get; set; } = [];
+
+    /// <summary>
+    /// When true, and a message's envelope-from (MAIL FROM / Return-Path) domain does NOT align with the
+    /// From header domain, the transmitted MAIL FROM is rewritten onto the From domain so SPF aligns for
+    /// DMARC. Off by default: rewriting changes where bounces are routed (to the From domain's MX), so it
+    /// is an explicit operator choice. DKIM alignment (when a key is configured) makes this unnecessary.
+    /// The stored message is never modified — only the envelope sender used on the wire.
+    /// </summary>
+    public bool AlignReturnPath { get; set; } = false;
 }
 
 public class DomainRouteOptions

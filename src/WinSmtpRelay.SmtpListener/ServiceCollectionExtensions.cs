@@ -18,7 +18,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IUserAuthenticator, RelayUserAuthenticator>();
         services.AddSingleton<SpfValidator>();
         services.AddSingleton<DmarcValidator>();
+        services.AddSingleton<InboundDkimVerifier>();
         services.AddSingleton<EmailAuthenticationService>();
+        // DmarcValidator needs registrable-domain (Public Suffix List) lookup for alignment. The Service host
+        // also registers this; TryAdd keeps a single instance and lets test/alternate hosts resolve it too.
+        services.TryAddSingleton<IPublicSuffixService, PublicSuffixService>();
         services.AddSingleton<RateLimiter>();
         services.AddSingleton<WebhookService>();
         services.AddHttpClient("Webhook");

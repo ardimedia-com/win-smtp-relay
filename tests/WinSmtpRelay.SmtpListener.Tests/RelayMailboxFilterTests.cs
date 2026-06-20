@@ -31,8 +31,9 @@ public class RelayMailboxFilterTests
     {
         var dns = Substitute.For<ILookupClient>();
         var spf = new SpfValidator(dns, NullLogger<SpfValidator>.Instance);
-        var dmarc = new DmarcValidator(dns, NullLogger<DmarcValidator>.Instance);
-        var emailAuth = new EmailAuthenticationService(spf, dmarc, cache, NullLogger<EmailAuthenticationService>.Instance);
+        var dmarc = new DmarcValidator(dns, new PublicSuffixService(), NullLogger<DmarcValidator>.Instance);
+        var dkim = new InboundDkimVerifier(dns, NullLogger<InboundDkimVerifier>.Instance);
+        var emailAuth = new EmailAuthenticationService(spf, dmarc, dkim, cache, NullLogger<EmailAuthenticationService>.Instance);
         var rateLimiter = new RateLimiter(cache, NullLogger<RateLimiter>.Instance);
         // CanDeliverToAsync never resolves a scope (only the SendAs path in CanAcceptFromAsync does),
         // so an unconfigured substitute is sufficient.

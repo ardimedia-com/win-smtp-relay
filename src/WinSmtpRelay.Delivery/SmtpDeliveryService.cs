@@ -18,6 +18,7 @@ public class SmtpDeliveryService : IDeliveryService
     private readonly IRuntimeConfigCache _configCache;
     private readonly DkimSigningService _dkimSigner;
     private readonly IDkimDomainService _dkimDomains;
+    private readonly IPublicSuffixService _psl;
     private readonly ILogger<SmtpDeliveryService> _logger;
 
     public SmtpDeliveryService(
@@ -26,6 +27,7 @@ public class SmtpDeliveryService : IDeliveryService
         IRuntimeConfigCache configCache,
         DkimSigningService dkimSigner,
         IDkimDomainService dkimDomains,
+        IPublicSuffixService psl,
         ILogger<SmtpDeliveryService> logger)
     {
         _mxResolver = mxResolver;
@@ -33,6 +35,7 @@ public class SmtpDeliveryService : IDeliveryService
         _configCache = configCache;
         _dkimSigner = dkimSigner;
         _dkimDomains = dkimDomains;
+        _psl = psl;
         _logger = logger;
     }
 
@@ -47,6 +50,12 @@ public class SmtpDeliveryService : IDeliveryService
             ? null
             : await _dkimDomains.GetForSigningAsync(message.TenantId, senderDomain, cancellationToken);
         _dkimSigner.Sign(mimeMessage, message.TenantId, tenantDkim);
+
+        // Envelope-from (Return-Path) vs. From-header alignment. SPF authenticates the envelope-from domain,
+        // but DMARC requires it to ALIGN with the From domain — a green SPF record on a different bounce
+        // domain still fails DMARC unless DKIM covers it. Surface the gap, and optionally realign the
+        // transmitted MAIL FROM (opt-in; the stored message is never changed).
+        var envelopeSender = ResolveEnvelopeSender(message.Sender, senderDomain, tenantDkim is not null);
 
         // Optional per-tenant outbound source IP (null = OS default).
         var egressEndPoint = ParseEgressEndPoint(await _configCache.GetTenantEgressIpAsync(message.TenantId, cancellationToken));
@@ -73,7 +82,7 @@ public class SmtpDeliveryService : IDeliveryService
             var domain = domainGroup.Key;
             var domainRecipients = domainGroup.ToList();
 
-            var domainResults = await DeliverToDomainAsync(mimeMessage, message.Sender, domainRecipients, domain, message.TenantId, egressEndPoint, cancellationToken);
+            var domainResults = await DeliverToDomainAsync(mimeMessage, envelopeSender, domainRecipients, domain, message.TenantId, egressEndPoint, cancellationToken);
             results.AddRange(domainResults);
         }
 
@@ -193,6 +202,45 @@ public class SmtpDeliveryService : IDeliveryService
             StatusMessage = $"All MX hosts exhausted for domain {domain}: {errorMessage}",
             RemoteServer = mxHosts.FirstOrDefault()
         }).ToList();
+    }
+
+    /// <summary>
+    /// Returns the envelope sender (MAIL FROM) to transmit. When the stored envelope-from is not aligned with
+    /// the From domain it logs the SPF-alignment gap, and — only when <see cref="DeliveryOptions.AlignReturnPath"/>
+    /// is enabled — rewrites the domain onto the From domain so SPF aligns for DMARC. An empty return path
+    /// (a bounce/DSN, MAIL FROM &lt;&gt;) is never rewritten. The stored message is untouched.
+    /// </summary>
+    private string ResolveEnvelopeSender(string storedSender, string? headerFromDomain, bool dkimAligned)
+    {
+        var envelopeDomain = EnvelopeAlignment.DomainOf(storedSender);
+
+        // No From domain, no envelope sender (null return path), or already aligned → nothing to do.
+        if (string.IsNullOrWhiteSpace(headerFromDomain) || envelopeDomain is null)
+            return storedSender;
+        if (EnvelopeAlignment.IsAligned(envelopeDomain, headerFromDomain, _psl))
+            return storedSender;
+
+        if (_config.AlignReturnPath && MailboxAddress.TryParse(storedSender, out var mailbox))
+        {
+            var addr = mailbox.Address;
+            var at = addr.LastIndexOf('@');
+            var localPart = at > 0 ? addr[..at] : addr;
+            if (!string.IsNullOrWhiteSpace(localPart))
+            {
+                var realigned = $"{localPart}@{headerFromDomain}";
+                _logger.LogInformation(
+                    "Return-Path realigned from {Old} to {New} for SPF/DMARC alignment (Delivery:AlignReturnPath)",
+                    storedSender, realigned);
+                return realigned;
+            }
+        }
+
+        _logger.LogWarning(
+            "Envelope-from {Envelope} is not aligned with From domain {From}; SPF will not align for DMARC.{DkimNote} "
+                + "Set up DKIM for {From}, or enable Delivery:AlignReturnPath.",
+            envelopeDomain, headerFromDomain,
+            dkimAligned ? " A DKIM signature aligns, so DMARC still passes." : "");
+        return storedSender;
     }
 
     /// <summary>Parses a configured egress IP into a bindable local endpoint (port 0), or null if unset/invalid.</summary>

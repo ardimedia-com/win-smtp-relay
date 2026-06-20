@@ -14,7 +14,7 @@ public class DmarcValidatorTests
     public async Task CheckAsync_NoDomain_ReturnsNone()
     {
         var dns = new LookupClient();
-        var validator = new DmarcValidator(dns, NullLogger<DmarcValidator>.Instance);
+        var validator = new DmarcValidator(dns, new PublicSuffixService(), NullLogger<DmarcValidator>.Instance);
 
         var spf = new SpfCheckResult(SpfVerdict.Pass, "test");
         var result = await validator.CheckAsync("", "example.com", spf);
@@ -26,7 +26,7 @@ public class DmarcValidatorTests
     public async Task CheckAsync_GoogleDomain_ReturnsResult()
     {
         var dns = new LookupClient();
-        var validator = new DmarcValidator(dns, NullLogger<DmarcValidator>.Instance);
+        var validator = new DmarcValidator(dns, new PublicSuffixService(), NullLogger<DmarcValidator>.Instance);
 
         var spf = new SpfCheckResult(SpfVerdict.Pass, "test");
         var result = await validator.CheckAsync("google.com", "google.com", spf);
@@ -39,7 +39,7 @@ public class DmarcValidatorTests
     public async Task CheckAsync_NonExistentDomain_ReturnsNone()
     {
         var dns = new LookupClient();
-        var validator = new DmarcValidator(dns, NullLogger<DmarcValidator>.Instance);
+        var validator = new DmarcValidator(dns, new PublicSuffixService(), NullLogger<DmarcValidator>.Instance);
 
         var spf = new SpfCheckResult(SpfVerdict.Pass, "test");
         var result = await validator.CheckAsync("nonexistent-domain-12345.invalid", "nonexistent-domain-12345.invalid", spf);
