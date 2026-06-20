@@ -12,7 +12,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.*" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.*" />
     <PackageReference Include="MimeKit" Version="4.*" />
-    <PackageReference Include="Nager.EmailAuthentication" Version="4.0.5" />
+    <PackageReference Include="Nager.EmailAuthentication" Version="4.1.0" />
   </ItemGroup>
 
   <ItemGroup>

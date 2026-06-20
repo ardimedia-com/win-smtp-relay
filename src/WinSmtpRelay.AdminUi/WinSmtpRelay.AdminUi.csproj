@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="BlazorBlueprint.Components" Version="3.4.0" />
+    <PackageReference Include="BlazorBlueprint.Components" Version="3.12.1" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.*" />
   </ItemGroup>
 
