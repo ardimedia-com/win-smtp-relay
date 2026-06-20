@@ -136,6 +136,10 @@ if (adminUiConfig.Enabled)
     // IAdminCertificateProvider registered above), so it stays here rather than in the security engine.
     builder.Services.AddScoped<AdminCertificateApplier>();
 
+    // OpenAPI document for the REST API (served at /openapi/v1.json by MapOpenApi below). Lets external
+    // clients/tools discover the AdminApi surface; the endpoints themselves still require an API key.
+    builder.Services.AddOpenApi();
+
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();
 
@@ -205,6 +209,10 @@ if (adminUiConfig.Enabled)
 
     // Admin REST API (authorized inside MapAdminApi; /api/health is anonymous)
     app.MapAdminApi();
+
+    // Machine-readable OpenAPI document for the REST API at /openapi/v1.json (the API shape only — the
+    // endpoints still enforce API-key authentication). Point Scalar/Swagger or a client generator at it.
+    app.MapOpenApi();
 
     // SignalR hub for live activity — authenticated admins only
     app.MapHub<ActivityHub>("/hubs/activity").RequireAuthorization();

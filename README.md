@@ -6,6 +6,11 @@ Open-source SMTP relay server for Windows. Built with .NET 10, designed as a mod
 
 **Relay only** — no mailboxes, no IMAP, no POP3. Accepts mail from internal apps/devices and forwards it via MX lookup or smart host.
 
+## Documentation
+
+Full component API reference and guides: **https://ardimedia-com.github.io/win-smtp-relay/** (generated from
+the source with DocFX). See also [Using the components](#using-the-components-embedding-the-engine-in-your-own-host) below.
+
 ## Features
 
 - Multiple receive connectors (different port/IP/TLS/auth per connector)
@@ -154,7 +159,8 @@ host concern, not part of the engine).
 ### Out-of-process
 
 For a UI in a separate process or language, consume the REST API (`WinSmtpRelay.AdminApi`) over HTTP with an
-`X-Api-Key` (or `Authorization: Bearer`) header — see [Admin access](#admin-access).
+`X-Api-Key` (or `Authorization: Bearer`) header — see [Admin access](#admin-access). The running host serves a
+machine-readable OpenAPI document at `/openapi/v1.json` (point Scalar/Swagger or a client generator at it).
 
 ## Configuration
 

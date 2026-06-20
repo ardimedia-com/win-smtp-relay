@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/docfx/main/schemas/docfx.schema.json",
+  "metadata": [
+    {
+      "src": [
+        {
+          "src": "../src",
+          "files": [
+            "WinSmtpRelay.Core/WinSmtpRelay.Core.csproj",
+            "WinSmtpRelay.Security/WinSmtpRelay.Security.csproj",
+            "WinSmtpRelay.Delivery/WinSmtpRelay.Delivery.csproj",
+            "WinSmtpRelay.SmtpListener/WinSmtpRelay.SmtpListener.csproj",
+            "WinSmtpRelay.Storage/WinSmtpRelay.Storage.csproj",
+            "WinSmtpRelay.AdminApi/WinSmtpRelay.AdminApi.csproj"
+          ]
+        }
+      ],
+      "dest": "api",
+      "properties": {
+        "TargetFramework": "net10.0",
+        "NuGetAudit": "false"
+      }
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": ["**/*.{md,yml}"],
+        "exclude": ["_site/**", "obj/**"]
+      }
+    ],
+    "output": "_site",
+    "template": ["default", "modern"],
+    "globalMetadata": {
+      "_appName": "WIN-SMTP-RELAY",
+      "_appTitle": "WIN-SMTP-RELAY",
+      "_description": "Open-source SMTP relay for Windows (.NET 10) — component API reference and guides.",
+      "_enableSearch": true,
+      "_appFooter": "WIN-SMTP-RELAY — MIT licensed",
+      "_gitContribute": {
+        "repo": "https://github.com/ardimedia-com/win-smtp-relay",
+        "branch": "main"
+      }
+    }
+  }
+}

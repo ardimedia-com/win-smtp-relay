@@ -22,6 +22,10 @@ obj/
 ## Rider
 .idea/
 
+## DocFX (generated API metadata + rendered site)
+docs/api/
+docs/_site/
+
 ## Build results
 [Dd]ebug/
 [Rr]elease/
