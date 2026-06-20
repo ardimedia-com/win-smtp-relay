@@ -13,6 +13,7 @@ using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Delivery;
+using WinSmtpRelay.Security;
 using WinSmtpRelay.SmtpListener;
 using WinSmtpRelay.Storage;
 using WinSmtpRelay.Storage.Identity;
@@ -46,6 +47,11 @@ builder.Services.Configure<DnsOptions>(builder.Configuration.GetSection(DnsOptio
 // Storage
 var connectionString = builder.Configuration.GetConnectionString("RelayDb") ?? "Data Source=winsmtprelay.db";
 builder.Services.AddRelayStorage(connectionString);
+
+// Security engine: SPF/DKIM/DMARC, deliverability DNS checks, DKIM signing, the local auth self-test,
+// and the public-suffix/DNS resolvers. The SMTP listener and delivery engine also pull this in, but it
+// is composed explicitly here so the engine layering is visible and host-independent.
+builder.Services.AddRelaySecurity();
 
 // SMTP Listener
 builder.Services.AddSmtpListener();
@@ -124,17 +130,11 @@ if (adminUiConfig.Enabled)
     builder.Services.AddRelayAdminAuth();
     builder.Services.AddRelayAdminUiAuth();
 
-    // DNS setup / domain-authentication checks. Public-record checks (hostname A/AAAA, MX, PTR,
-    // SPF/DKIM/DMARC TXT) go through a public resolver (8.8.8.8/1.1.1.1) to avoid split-horizon answers;
-    // the DNSBL check stays on the host's own ILookupClient (Spamhaus refuses public resolvers).
-    builder.Services.AddSingleton<WinSmtpRelay.Security.PublicDnsLookupClient>();
-    builder.Services.AddScoped<WinSmtpRelay.Core.Interfaces.IDnsSetupService, WinSmtpRelay.Security.DnsSetupService>();
-    // Local outbound authentication self-test (build + sign + verify a message against our own key, no send).
-    builder.Services.AddScoped<WinSmtpRelay.Core.Interfaces.IOutboundAuthCheckService, WinSmtpRelay.Security.OutboundAuthCheckService>();
-    // Public Suffix List lookup (embedded snapshot, parsed once) for registrable-domain derivation.
-    builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IPublicSuffixService, WinSmtpRelay.Security.PublicSuffixService>();
-    // Single seam for "persist a certificate change AND hot-swap the served certificate" (see the class doc).
-    builder.Services.AddScoped<WinSmtpRelay.Security.AdminCertificateApplier>();
+    // (Deliverability DNS checks, the local auth self-test, public-suffix lookup, and the public DNS
+    // resolver are registered by AddRelaySecurity above — engine services, not UI-gated.)
+    // The admin-UI certificate applier is a host concern (it depends on the host-provided
+    // IAdminCertificateProvider registered above), so it stays here rather than in the security engine.
+    builder.Services.AddScoped<AdminCertificateApplier>();
 
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();

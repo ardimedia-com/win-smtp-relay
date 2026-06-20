@@ -1,6 +1,4 @@
-using DnsClient;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Delivery.Filters;
 using WinSmtpRelay.Security;
@@ -11,12 +9,11 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddDeliveryEngine(this IServiceCollection services)
     {
-        services.AddSingleton<ILookupClient>(new LookupClient());
+        // DKIM signing, the DNS resolver (ILookupClient), and the public-suffix lookup used for
+        // envelope-from alignment all come from the security engine.
+        services.AddRelaySecurity();
+
         services.AddSingleton<IMxResolver, MxResolver>();
-        services.AddSingleton<DkimSigningService>();
-        // Registrable-domain (Public Suffix List) lookup for envelope-from alignment. TryAdd so it
-        // coexists with the Service host's registration and lets alternate hosts resolve it too.
-        services.TryAddSingleton<IPublicSuffixService, PublicSuffixService>();
         services.AddScoped<IDeliveryService, SmtpDeliveryService>();
         services.AddHostedService<DeliveryWorker>();
 
