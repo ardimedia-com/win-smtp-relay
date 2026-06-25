@@ -10,8 +10,9 @@ namespace WinSmtpRelay.AdminApi.Auth;
 
 /// <summary>
 /// Authenticates programmatic callers via a hashed API key (X-Api-Key header or
-/// Authorization: Bearer). Emits the same claims (role, tenant_id, is_host_admin)
-/// as cookie login so authorization is uniform.
+/// Authorization: Bearer). Emits the same membership claims as cookie login so authorization
+/// (<see cref="RelayAccess"/>) and tenant scoping are uniform: a host-role key emits a host
+/// membership; a tenant key emits a tenant membership scoped to its tenant.
 /// </summary>
 public class ApiKeyAuthenticationHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -34,12 +35,18 @@ public class ApiKeyAuthenticationHandler(
         {
             new(ClaimTypes.NameIdentifier, $"apikey:{key.Id}"),
             new(ClaimTypes.Name, string.IsNullOrEmpty(key.Name) ? $"apikey:{key.Id}" : key.Name),
-            new(ClaimTypes.Role, key.Role),
         };
-        if (key.TenantId is not null)
-            claims.Add(new Claim(RelayClaimTypes.TenantId, key.TenantId.Value.ToString()));
         if (key.Role == RelayRoles.HostAdmin)
+        {
+            // A host-role key is host-scoped (no active tenant) — host-level administration.
             claims.Add(new Claim(RelayClaimTypes.IsHostAdmin, "true"));
+        }
+        else if (key.TenantId is int tenantId)
+        {
+            // A tenant key carries a tenant membership and is pinned to its tenant scope.
+            claims.Add(new Claim(RelayClaimTypes.TenantMembership, $"{tenantId}:{key.Role}"));
+            claims.Add(new Claim(RelayClaimTypes.ActiveTenant, tenantId.ToString()));
+        }
 
         var identity = new ClaimsIdentity(claims, Scheme.Name, ClaimTypes.Name, ClaimTypes.Role);
         var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name);

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Admin access is now a membership model — an admin can manage several tenants.** Instead of one tenant per account, access is held as memberships: a *host* membership (host-level administration) and/or memberships in individual tenants, each with its own role. New pages: **Host Admins** (Host → Host Admins) and **Tenant Admins** (per selected tenant). The Tenant Admins page can **add an existing account by email** to delegate access to that tenant, or create a new one — this is the delegation the single-tenant-per-user model couldn't express.
+- **Consent-based host access with audited break-glass.** A host administrator no longer has automatic access to a tenant's configuration or mail — tenant access is granted explicitly by a tenant admin. For recovery (e.g. a tenant left with no admins), a host admin can **break-glass** into a tenant from its detail page: a self-granted, reason-tagged, audited tenant membership. The one exception is the first administrator (first-run setup), which gets both a host membership and a tenant-admin membership for the default tenant.
+- **Admin/security audit trail.** Account and membership lifecycle events — create/disable/delete, role grant/revoke, break-glass, first-run setup — are recorded in an append-only audit log. (An in-UI audit viewer is planned.)
+- **Last-host-admin guard.** The last enabled host administrator can no longer be disabled or deleted, preventing a total lock-out.
+
+### Changed
+
+- **Authorization is now membership- and scope-aware instead of global roles.** The three policies (host / full / view) are evaluated from the signed-in principal's memberships against the active tenant scope, uniformly for cookie and API-key callers — a host membership alone never grants access inside a tenant. The "Accounts" navigation group is now **Users & Access** and shows per-tenant items only within a tenant scope; **Queue, Journal and Live Activity now require a tenant scope**, so the host/all-tenants view never lists another tenant's message content.
+- **Existing admin accounts are migrated to memberships on upgrade, preserving their current access** — every host admin gets a host membership; every tenant-bound admin gets a tenant membership carrying its previous role.
+
+### Security
+
+- **A host admin can no longer read a tenant's mail or change its configuration without an explicit, audited grant** (least privilege / consent). Note: a relay processes tenants' plaintext mail by nature and the operator controls the host, so this is an in-app least-privilege + audit control, not cryptographic isolation from the machine operator.
+
 ## [1.0.0-beta1-build52] - 2026-06-25
 
 ### Added

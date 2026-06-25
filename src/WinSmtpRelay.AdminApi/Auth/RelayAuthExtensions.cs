@@ -98,10 +98,15 @@ public static class RelayAuthExtensions
             };
         });
 
+        // Authorization is membership/scope-aware (consent model), evaluated by RelayAccessHandler from
+        // the principal's membership claims — not global Identity roles. The three policies map to the
+        // three access levels; every gated page/endpoint already uses one of them, so the new rule
+        // applies everywhere without touching individual pages.
+        services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, RelayAccessHandler>();
         services.AddAuthorizationBuilder()
-            .AddPolicy(AuthorizationPolicies.HostAdmin, p => p.RequireRole(RelayRoles.HostAdmin))
-            .AddPolicy(AuthorizationPolicies.AdminFull, p => p.RequireRole(RelayRoles.HostAdmin, RelayRoles.TenantAdmin))
-            .AddPolicy(AuthorizationPolicies.AdminView, p => p.RequireRole(RelayRoles.HostAdmin, RelayRoles.TenantAdmin, RelayRoles.TenantViewer));
+            .AddPolicy(AuthorizationPolicies.HostAdmin, p => p.AddRequirements(new RelayAccessRequirement(RelayAccessLevel.Host)))
+            .AddPolicy(AuthorizationPolicies.AdminFull, p => p.AddRequirements(new RelayAccessRequirement(RelayAccessLevel.Full)))
+            .AddPolicy(AuthorizationPolicies.AdminView, p => p.AddRequirements(new RelayAccessRequirement(RelayAccessLevel.View)));
 
         return services;
     }

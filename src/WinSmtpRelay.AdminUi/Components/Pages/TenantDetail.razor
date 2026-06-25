@@ -123,12 +123,41 @@ else
             </div>
         </BbCardFooter>
     </BbCard>
+
+    @if (!IsNew && !alreadyMember)
+    {
+        <form method="post" action="/account/break-glass" style="margin-top:1rem;">
+            <AntiforgeryToken />
+            <input type="hidden" name="tenantId" value="@Id" />
+            <BbCard>
+                <BbCardHeader><BbCardTitle>Break-glass access</BbCardTitle></BbCardHeader>
+                <BbCardContent>
+                    <p class="text-muted" style="font-size:0.82rem;line-height:1.5;margin:0;">
+                        You are not a member of this tenant, so you have no access to its configuration or mail.
+                        Break-glass grants you temporary tenant-admin access and is recorded in the audit log.
+                    </p>
+                    <div class="form-group" style="margin-top:0.6rem;">
+                        <BbLabel For="bg-reason">Reason</BbLabel>
+                        <input id="bg-reason" name="reason" class="account-input" placeholder="Why you need access" />
+                    </div>
+                </BbCardContent>
+                <BbCardFooter>
+                    <button type="submit" class="account-button account-button-secondary" style="width:auto;padding-inline:1rem;">
+                        Enter tenant (break-glass)
+                    </button>
+                </BbCardFooter>
+            </BbCard>
+        </form>
+    }
 }
 
 @code {
     [Parameter] public int? Id { get; set; }
     private bool IsNew => Id is null;
     private bool IsDefault => Id == TenantDefaults.DefaultTenantId;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private bool alreadyMember;
 
     private bool isLoading = true;
     private bool notFound;
@@ -191,6 +220,10 @@ else
         wasEnabled = t.IsEnabled;
         egress = t.EgressIpAddress ?? "";
         createdUtc = t.CreatedUtc;
+
+        if (AuthState is not null)
+            alreadyMember = RelayAccess.TenantMemberships((await AuthState).User).ContainsKey(Id!.Value);
+
         isLoading = false;
     }
 

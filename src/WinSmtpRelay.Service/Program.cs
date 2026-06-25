@@ -224,17 +224,61 @@ if (adminUiConfig.Enabled)
         return Results.LocalRedirect("/account/login");
     });
 
-    // Host-admin tenant switcher: re-issues the cookie with an updated active_tenant claim.
-    app.MapPost("/account/switch-tenant", async (HttpContext ctx, [FromForm] string tenant, ITenantService tenants) =>
+    // Tenant switcher: re-issues the cookie with an updated active_tenant claim. The target is validated
+    // against the principal's memberships (consent model) — a host admin selects "Global" or a tenant they
+    // are a member of; a tenant user switches only among their tenant memberships. To reach a tenant they
+    // are not a member of, a host admin must break-glass (which first creates the membership).
+    app.MapPost("/account/switch-tenant", async (HttpContext ctx, [FromForm] string tenant) =>
     {
+        var user = ctx.User;
         var identity = new ClaimsIdentity(
-            ctx.User.Claims.Where(c => c.Type != RelayClaimTypes.ActiveTenant),
-            ctx.User.Identity!.AuthenticationType);
+            user.Claims.Where(c => c.Type != RelayClaimTypes.ActiveTenant),
+            user.Identity!.AuthenticationType);
 
-        if (tenant != "all" && int.TryParse(tenant, out var tenantId) && await tenants.GetByIdAsync(tenantId) is not null)
+        if (tenant == "all")
+        {
+            // Global / host scope — only a host admin has it; leave ActiveTenant unset.
+            if (!RelayAccess.HasHostMembership(user))
+                return Results.LocalRedirect("/");
+        }
+        else if (int.TryParse(tenant, out var tenantId) && RelayAccess.TenantMemberships(user).ContainsKey(tenantId))
+        {
             identity.AddClaim(new Claim(RelayClaimTypes.ActiveTenant, tenantId.ToString()));
+        }
+        else
+        {
+            // Not a member of the requested tenant — ignore the switch.
+            return Results.LocalRedirect("/");
+        }
 
         await ctx.SignInAsync(IdentityConstants.ApplicationScheme, new ClaimsPrincipal(identity));
+        return Results.LocalRedirect("/");
+    }).RequireAuthorization();
+
+    // Break-glass: a host admin self-grants tenant-admin access to a tenant they are NOT a member of.
+    // It is the recovery path for an orphaned tenant (no admins). The grant is flagged IsBreakGlass and
+    // written to the audit log, then the cookie is re-issued (refreshed membership claims) scoped into
+    // the tenant so the host admin lands inside it.
+    app.MapPost("/account/break-glass", async (HttpContext ctx, [FromForm] int tenantId, [FromForm] string? reason,
+        UserManager<AdminUser> users, IAdminMembershipService memberships, IAdminAuditService audit,
+        IUserClaimsPrincipalFactory<AdminUser> claimsFactory, ITenantService tenants) =>
+    {
+        var user = await users.GetUserAsync(ctx.User);
+        if (user is null || await tenants.GetByIdAsync(tenantId) is null)
+            return Results.LocalRedirect("/");
+
+        await memberships.GrantAsync(user.Id, tenantId, RelayRoles.TenantAdmin, user.Id, breakGlass: true);
+        await audit.WriteAsync(AdminAuditActions.BreakGlassEntered, user.Id, user.Email,
+            targetUserId: user.Id, tenantId: tenantId, detail: reason);
+
+        var principal = await claimsFactory.CreateAsync(user);
+        if (principal.Identity is ClaimsIdentity id)
+        {
+            foreach (var c in id.FindAll(RelayClaimTypes.ActiveTenant).ToList())
+                id.RemoveClaim(c);
+            id.AddClaim(new Claim(RelayClaimTypes.ActiveTenant, tenantId.ToString()));
+        }
+        await ctx.SignInAsync(IdentityConstants.ApplicationScheme, principal);
         return Results.LocalRedirect("/");
     }).RequireAuthorization(AuthorizationPolicies.HostAdmin);
 

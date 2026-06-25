@@ -39,7 +39,9 @@ public class TenantContextResolverTests
     public void TenantPrincipal_IsScopedToItsTenant()
     {
         var current = new CurrentTenant();
-        TenantContextResolver.Apply(Authenticated(new Claim(RelayClaimTypes.TenantId, "3")), current);
+        // A tenant principal carries a tenant_membership claim ("{tenantId}:{role}"); with a single
+        // membership and no active-tenant selection it is auto-scoped to that tenant.
+        TenantContextResolver.Apply(Authenticated(new Claim(RelayClaimTypes.TenantMembership, "3:TenantAdmin")), current);
 
         Assert.IsTrue(current.FilterEnabled);
         Assert.AreEqual(3, current.FilterTenantId);

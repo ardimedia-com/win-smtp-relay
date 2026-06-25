@@ -20,6 +20,8 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     // Multi-tenancy + admin auth
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+    public DbSet<AdminMembership> AdminMemberships => Set<AdminMembership>();
+    public DbSet<AdminAuditEvent> AdminAuditEvents => Set<AdminAuditEvent>();
 
     // Configuration entities (runtime-editable via Admin UI)
     public DbSet<ReceiveConnector> ReceiveConnectors => Set<ReceiveConnector>();
@@ -97,6 +99,37 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
         modelBuilder.Entity<Identity.AdminUser>(entity =>
         {
             entity.Property(e => e.DisplayName).HasMaxLength(200);
+        });
+
+        // Admin memberships: the single source of truth for admin access (host or per-tenant role).
+        // NOT ITenantOwned (a host membership has a null TenantId, and the table is queried explicitly),
+        // so it is deliberately excluded from the tenant query filter.
+        modelBuilder.Entity<AdminMembership>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Role).HasMaxLength(50);
+            entity.HasIndex(e => new { e.UserId, e.TenantId }).IsUnique();
+            entity.HasIndex(e => e.TenantId);
+            entity.HasOne<Identity.AdminUser>()
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Deleting a tenant removes its memberships; host memberships (null TenantId) are unaffected.
+            entity.HasOne<Tenant>()
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AdminAuditEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.OccurredUtc);
+            entity.HasIndex(e => e.TenantId);
+            entity.HasIndex(e => e.ActorUserId);
+            entity.Property(e => e.Action).HasMaxLength(64);
+            entity.Property(e => e.ActorEmail).HasMaxLength(320);
+            entity.Property(e => e.Detail).HasMaxLength(1024);
         });
 
         modelBuilder.Entity<QueuedMessage>(entity =>

@@ -4,6 +4,7 @@
 @attribute [ExcludeFromInteractiveRouting]
 @inject SignInManager<AdminUser> SignInManager
 @inject WinSmtpRelay.Core.Interfaces.IRuntimeConfigCache ConfigCache
+@inject WinSmtpRelay.Core.Interfaces.IAdminMembershipService Memberships
 @inject NavigationManager Nav
 @inject ILogger<MagicLink> Logger
 
@@ -64,10 +65,10 @@ else
             return;
         }
 
-        if (user.TenantId is int tenantId && !await ConfigCache.IsTenantEnabledAsync(tenantId))
+        if (!await AccountAccess.HasUsableScopeAsync(Memberships, ConfigCache, user.Id))
         {
-            Logger.LogWarning("Magic-link sign-in blocked for {Email}: tenant {TenantId} is disabled", user.Email, tenantId);
-            errorMessage = "Your organization's account is disabled. Contact an administrator.";
+            Logger.LogWarning("Magic-link sign-in blocked for {Email}: no usable scope", user.Email);
+            errorMessage = "Your account has no active access. Contact an administrator.";
             return;
         }
 

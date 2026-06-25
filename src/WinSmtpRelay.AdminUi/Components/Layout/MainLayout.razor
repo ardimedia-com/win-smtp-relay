@@ -134,31 +134,30 @@
                 </BbSidebarGroup>
             }
 
-            @* Account & access management — full admins only. Admin Users is meaningful in both scopes
-               (host administrators in the "All tenants" overview; the selected tenant's admins in a tenant
-               scope). API keys are per-tenant, so they appear only when a specific tenant is selected. *@
-            <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="acctAuth">
-                <BbSidebarGroup>
-                    <BbSidebarGroupLabel>Users & Access</BbSidebarGroupLabel>
-                    <BbSidebarMenu>
-                        <BbSidebarMenuItem>
-                            <BbSidebarMenuButton Href="adminusers">
-                                <LucideIcon Name="user-cog" />
-                                <span>Admin Users</span>
-                            </BbSidebarMenuButton>
-                        </BbSidebarMenuItem>
-                        @if (IsTenantScope)
-                        {
+            @* Per-tenant access management. Both items act on the selected tenant, so the group only
+               shows in a tenant scope; host-level admins live under Host → Host Admins. *@
+            @if (IsTenantScope)
+            {
+                <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="acctAuth">
+                    <BbSidebarGroup>
+                        <BbSidebarGroupLabel>Users & Access</BbSidebarGroupLabel>
+                        <BbSidebarMenu>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="tenant-admins">
+                                    <LucideIcon Name="user-cog" />
+                                    <span>Tenant Admins</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
                             <BbSidebarMenuItem>
                                 <BbSidebarMenuButton Href="apikeys">
                                     <LucideIcon Name="key-round" />
                                     <span>API Keys</span>
                                 </BbSidebarMenuButton>
                             </BbSidebarMenuItem>
-                        }
-                    </BbSidebarMenu>
-                </BbSidebarGroup>
-            </AuthorizeView>
+                        </BbSidebarMenu>
+                    </BbSidebarGroup>
+                </AuthorizeView>
+            }
 
             @* Global administration — host-wide, NOT per-tenant: host operations (Tenants, Signup, Event
                Log) and server configuration (Settings, cert, listener, rate limits, startup, Update).
@@ -171,6 +170,12 @@
                     <BbSidebarGroup>
                         <BbSidebarGroupLabel>Host</BbSidebarGroupLabel>
                         <BbSidebarMenu>
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="host/admins">
+                                    <LucideIcon Name="user-cog" />
+                                    <span>Host Admins</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
                             <BbSidebarMenuItem>
                                 <BbSidebarMenuButton Href="tenants">
                                     <LucideIcon Name="building-2" />
@@ -328,7 +333,10 @@
     [
         "setup", "deliverability", "health",
         "connectors/send", "domains", "dkim", "ip-rules", "filters",
-        "smtpusers", "suppressions", "apikeys",
+        "smtpusers", "suppressions", "apikeys", "tenant-admins",
+        // Per-tenant message content: keep it out of the host/all-tenants scope so a host admin
+        // without a tenant membership never sees another tenant's mail. Require a tenant selection.
+        "queue", "journal", "activity",
     ];
 
     private bool IsTenantOnlyRoute

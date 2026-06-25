@@ -3,7 +3,11 @@
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
 @using Microsoft.EntityFrameworkCore
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
 @inject SignInManager<AdminUser> SignInManager
+@inject IAdminMembershipService Memberships
+@inject IAdminAuditService Audit
 @inject NavigationManager Nav
 @inject ILogger<InitialSetup> Logger
 
@@ -92,8 +96,6 @@ else
             UserName = Input.Email,
             Email = Input.Email,
             EmailConfirmed = true,
-            IsHostAdmin = true,
-            TenantId = null,
             DisplayName = string.IsNullOrWhiteSpace(Input.DisplayName) ? "Administrator" : Input.DisplayName.Trim(),
             MustChangePassword = false,
             CreatedUtc = DateTimeOffset.UtcNow
@@ -106,7 +108,14 @@ else
             return;
         }
 
-        await SignInManager.UserManager.AddToRoleAsync(user, RelayRoles.HostAdmin);
+        // The first administrator gets a host membership (full host administration) AND a tenant-admin
+        // membership for the default tenant — the bootstrap exception, so the initial tenant has an admin
+        // without another admin having to grant it. (Everywhere else, tenant access is consent-based.)
+        await Memberships.GrantAsync(user.Id, null, RelayRoles.HostAdmin, grantedByUserId: user.Id);
+        await Memberships.GrantAsync(user.Id, TenantDefaults.DefaultTenantId, RelayRoles.TenantAdmin, grantedByUserId: user.Id);
+        await Audit.WriteAsync(AdminAuditActions.AdminCreated, user.Id, user.Email, targetUserId: user.Id,
+            detail: "first-run host administrator (host + default-tenant membership)");
+
         await SignInManager.SignInAsync(user, isPersistent: false);
         Logger.LogWarning("First-run setup created the initial host administrator {Email}", Input.Email);
         Nav.NavigateTo("/");

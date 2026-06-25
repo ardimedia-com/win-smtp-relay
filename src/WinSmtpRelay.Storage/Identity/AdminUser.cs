@@ -7,11 +7,9 @@ namespace WinSmtpRelay.Storage.Identity;
 /// </summary>
 public class AdminUser : IdentityUser<int>
 {
-    /// <summary>The tenant this admin manages. Null for host-level administrators.</summary>
-    public int? TenantId { get; set; }
-
-    /// <summary>True for host-level administrators (manage tenants + infrastructure).</summary>
-    public bool IsHostAdmin { get; set; }
+    // Access (host vs tenant, and role) is no longer stored on the user — it lives in AdminMembership
+    // (one row per scope), the single source of truth. A user may hold a host membership and/or
+    // memberships in several tenants. See Core.Models.AdminMembership / IAdminMembershipService.
 
     public string? DisplayName { get; set; }
 

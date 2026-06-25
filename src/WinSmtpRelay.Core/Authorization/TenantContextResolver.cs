@@ -4,10 +4,12 @@ using WinSmtpRelay.Core.Interfaces;
 namespace WinSmtpRelay.Core.Authorization;
 
 /// <summary>
-/// Maps an authenticated principal's claims onto the ambient <see cref="ICurrentTenant"/>:
-/// host admins default to all-tenants but honor their <see cref="RelayClaimTypes.ActiveTenant"/>
-/// switcher selection; tenant principals are scoped to their tenant; an authenticated principal
-/// with neither claim is scoped to a non-existent tenant (sees nothing).
+/// Maps an authenticated principal's membership claims onto the ambient <see cref="ICurrentTenant"/>
+/// (the EF tenant filter). A host admin with no active tenant is host scope (all tenants); otherwise
+/// the principal is scoped to the active/sole tenant. An authenticated principal with no usable scope
+/// is scoped to a non-existent tenant (sees nothing). Note: the EF scope only governs which data is
+/// visible — access to a tenant's pages is gated separately by <see cref="RelayAccess"/>, which a host
+/// membership alone does not satisfy.
 /// </summary>
 public static class TenantContextResolver
 {
@@ -16,20 +18,12 @@ public static class TenantContextResolver
         if (user.Identity?.IsAuthenticated != true)
             return;
 
-        if (user.HasClaim(RelayClaimTypes.IsHostAdmin, "true"))
-        {
-            if (int.TryParse(user.FindFirst(RelayClaimTypes.ActiveTenant)?.Value, out var activeTenant))
-                current.SetTenant(activeTenant);
-            else
-                current.SetHostScope();
-        }
-        else if (int.TryParse(user.FindFirst(RelayClaimTypes.TenantId)?.Value, out var tenantId))
-        {
+        var scopeTenant = RelayAccess.CurrentScopeTenant(user);
+        if (scopeTenant is int tenantId)
             current.SetTenant(tenantId);
-        }
+        else if (RelayAccess.HasHostMembership(user))
+            current.SetHostScope();
         else
-        {
             current.SetTenant(-1);
-        }
     }
 }

@@ -117,7 +117,6 @@ public class AdminBootstrapTests
             UserName = email,
             Email = email,
             EmailConfirmed = true,
-            IsHostAdmin = true,
             DisplayName = "Test",
             CreatedUtc = DateTimeOffset.UtcNow
         };

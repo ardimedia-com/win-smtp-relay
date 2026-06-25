@@ -24,7 +24,7 @@ public interface ITenantSignupService
     Task ApproveTenantAsync(int tenantId, CancellationToken ct = default);
 }
 
-public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userManager, IRuntimeConfigCache cache) : ITenantSignupService
+public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userManager, IRuntimeConfigCache cache, IAdminMembershipService memberships) : ITenantSignupService
 {
     public async Task<SignupResult> SignUpAsync(string tenantName, string tenantSlug, string adminEmail, string password, CancellationToken ct = default)
     {
@@ -54,8 +54,6 @@ public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userM
             UserName = adminEmail,
             Email = adminEmail,
             EmailConfirmed = false,
-            TenantId = tenant.Id,
-            IsHostAdmin = false,
             MustChangePassword = false,
             LockoutEnabled = true,
             CreatedUtc = DateTimeOffset.UtcNow
@@ -69,7 +67,8 @@ public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userM
             return new SignupResult(false, string.Join(" ", create.Errors.Select(e => e.Description)));
         }
 
-        await userManager.AddToRoleAsync(user, RelayRoles.TenantAdmin);
+        // Tenant admin of the new (disabled) tenant — access is granted via a membership (the source of truth).
+        await memberships.GrantAsync(user.Id, tenant.Id, RelayRoles.TenantAdmin, grantedByUserId: null, ct: ct);
         // Locked until verified/approved — a locked account cannot sign in.
         await userManager.SetLockoutEndDateAsync(user, DateTimeOffset.MaxValue);
 
@@ -80,7 +79,12 @@ public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userM
     public async Task<bool> ConfirmAsync(int userId, string token, CancellationToken ct = default)
     {
         var user = await userManager.FindByIdAsync(userId.ToString());
-        if (user is null || user.TenantId is null)
+        if (user is null)
+            return false;
+
+        // A signup admin has exactly one tenant membership — the tenant being activated.
+        var tenantMembership = (await memberships.GetForUserAsync(user.Id, ct)).FirstOrDefault(m => m.TenantId is not null);
+        if (tenantMembership is null)
             return false;
 
         var result = await userManager.ConfirmEmailAsync(user, token);
@@ -88,7 +92,7 @@ public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userM
             return false;
 
         await userManager.SetLockoutEndDateAsync(user, null);
-        await EnableTenantAsync(user.TenantId.Value, ct);
+        await EnableTenantAsync(tenantMembership.TenantId!.Value, ct);
         return true;
     }
 
@@ -96,7 +100,8 @@ public class TenantSignupService(RelayDbContext db, UserManager<AdminUser> userM
     {
         await EnableTenantAsync(tenantId, ct);
 
-        var admins = await userManager.Users.Where(u => u.TenantId == tenantId).ToListAsync(ct);
+        var memberUserIds = (await memberships.GetForTenantAsync(tenantId, ct)).Select(m => m.UserId).Distinct().ToList();
+        var admins = await userManager.Users.Where(u => memberUserIds.Contains(u.Id)).ToListAsync(ct);
         foreach (var admin in admins)
         {
             if (!admin.EmailConfirmed)

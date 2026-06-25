@@ -1,0 +1,283 @@
+@page "/host/admins"
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
+@inject IServiceScopeFactory ScopeFactory
+@inject IJSRuntime JS
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>Host Admins</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header page-header-row">
+    <div>
+        <h1>Host Admins</h1>
+        <p>Host-level administrators — full host administration (tenants, server config). A host admin has
+           no tenant access by default; tenant access is granted per tenant (see Tenant Admins).</p>
+    </div>
+    <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="StartCreate" Disabled="@creating">
+        <LucideIcon Name="user-plus" /> New host admin
+    </BbButton>
+</div>
+
+@if (errorMessage is not null)
+{
+    <div class="account-error" role="alert">@errorMessage</div>
+}
+
+@if (createdPassword is not null)
+{
+    <BbCard>
+        <BbCardHeader><BbCardTitle>Host admin created</BbCardTitle></BbCardHeader>
+        <BbCardContent>
+            <div class="badge-status badge-warning" style="display:block;padding:0.75rem;line-height:1.5;margin-bottom:1rem;">
+                <strong>Share this one-time password securely with @createdEmail. They must change it on first sign-in.</strong>
+            </div>
+            <div class="form-group">
+                <BbLabel For="otp">One-time password</BbLabel>
+                <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <BbInput Id="otp" Value="@createdPassword" ReadOnly="true" Class="mono" />
+                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="CopyAsync"><LucideIcon Name="copy" /> Copy</BbButton>
+                </div>
+            </div>
+        </BbCardContent>
+        <BbCardFooter><BbButton @onclick="@(() => { createdPassword = null; })">Done</BbButton></BbCardFooter>
+    </BbCard>
+}
+else if (creating)
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel For="email">Email</BbLabel>
+                <BbInput Id="email" @bind-Value="newEmail" Placeholder="admin@yourdomain.tld" />
+            </div>
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                <BbButton @onclick="CreateAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(newEmail))"><LucideIcon Name="user-plus" /> Create</BbButton>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="@(() => { creating = false; errorMessage = null; })">Cancel</BbButton>
+            </div>
+        </BbCardFooter>
+    </BbCard>
+}
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[200px] w-full" />
+}
+else
+{
+    <BbTable Data="@rows">
+        <BbTableHeader>
+            <BbTableRow TData="Row">
+                <BbTableHeaderCell TData="Row">Email</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Status</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row"></BbTableHeaderCell>
+            </BbTableRow>
+        </BbTableHeader>
+        <BbTableBody>
+            @if (rows.Count == 0)
+            {
+                <BbTableRow TData="Row"><BbTableCell colspan="3" style="text-align:center;">No host admins</BbTableCell></BbTableRow>
+            }
+            @foreach (var r in rows)
+            {
+                <BbTableRow Item="@r">
+                    <BbTableCell>@r.Email</BbTableCell>
+                    <BbTableCell><span class="badge-status @(r.Enabled ? "" : "badge-muted")">@(r.Enabled ? "Enabled" : "Disabled")</span></BbTableCell>
+                    <BbTableCell>
+                        <div class="list-row-actions">
+                            @if (r.IsSelf)
+                            {
+                                <span class="text-muted" style="font-size:0.75rem;">you</span>
+                            }
+                            else
+                            {
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Reset password" @onclick="() => ResetAsync(r.Id)"><LucideIcon Name="key-round" /></BbButton>
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="@(r.Enabled ? "Disable" : "Enable")" @onclick="() => ToggleAsync(r.Id)"><LucideIcon Name="@(r.Enabled ? "pause" : "play")" /></BbButton>
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete" @onclick="() => { deleteId = r.Id; showDelete = true; }"><LucideIcon Name="trash-2" /></BbButton>
+                            }
+                        </div>
+                    </BbTableCell>
+                </BbTableRow>
+            }
+        </BbTableBody>
+    </BbTable>
+}
+
+<BbAlertDialog @bind-Open="showDelete">
+    <BbAlertDialogContent>
+        <BbAlertDialogHeader>
+            <BbAlertDialogTitle>Delete host admin</BbAlertDialogTitle>
+            <BbAlertDialogDescription>This permanently removes the login account and its memberships.</BbAlertDialogDescription>
+        </BbAlertDialogHeader>
+        <BbAlertDialogFooter>
+            <BbAlertDialogCancel><BbButton Variant="ButtonVariant.Outline">Cancel</BbButton></BbAlertDialogCancel>
+            <BbAlertDialogAction><BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteAsync">Delete</BbButton></BbAlertDialogAction>
+        </BbAlertDialogFooter>
+    </BbAlertDialogContent>
+</BbAlertDialog>
+
+@code {
+    private sealed record Row(int Id, string Email, bool Enabled, bool IsSelf);
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private List<Row> rows = [];
+    private bool isLoading = true;
+    private bool creating;
+    private bool busy;
+    private string newEmail = "";
+    private string? createdPassword;
+    private string? createdEmail;
+    private string? errorMessage;
+    private bool showDelete;
+    private int deleteId;
+    private int currentUserId;
+    private string? currentEmail;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is not null)
+        {
+            var user = (await AuthState).User;
+            int.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out currentUserId);
+            currentEmail = user.Identity?.Name;
+        }
+        await RefreshAsync();
+    }
+
+    private void StartCreate() { creating = true; createdPassword = null; errorMessage = null; newEmail = ""; }
+
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        using var scope = ScopeFactory.CreateScope();
+        var sp = scope.ServiceProvider;
+        var um = sp.GetRequiredService<UserManager<AdminUser>>();
+        var memberships = sp.GetRequiredService<IAdminMembershipService>();
+
+        var hostUserIds = (await memberships.GetHostAsync()).Select(m => m.UserId).Distinct().ToList();
+        var users = await um.Users.Where(u => hostUserIds.Contains(u.Id)).OrderBy(u => u.Email).ToListAsync();
+        var now = DateTimeOffset.UtcNow;
+        rows = users.Select(u => new Row(u.Id, u.Email ?? u.UserName ?? "",
+            u.LockoutEnd is null || u.LockoutEnd <= now, u.Id == currentUserId)).ToList();
+        isLoading = false;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (busy) return;
+        busy = true;
+        try
+        {
+            var email = newEmail.Trim();
+            using var scope = ScopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var um = sp.GetRequiredService<UserManager<AdminUser>>();
+            var memberships = sp.GetRequiredService<IAdminMembershipService>();
+            var audit = sp.GetRequiredService<IAdminAuditService>();
+
+            if (await um.FindByEmailAsync(email) is not null)
+            {
+                errorMessage = "An account with that email already exists.";
+                return;
+            }
+
+            var user = new AdminUser { UserName = email, Email = email, EmailConfirmed = true, MustChangePassword = true, CreatedUtc = DateTimeOffset.UtcNow };
+            var password = TempPassword.Generate();
+            var result = await um.CreateAsync(user, password);
+            if (!result.Succeeded)
+            {
+                errorMessage = string.Join(" ", result.Errors.Select(e => e.Description));
+                return;
+            }
+
+            await memberships.GrantAsync(user.Id, null, RelayRoles.HostAdmin, currentUserId);
+            await audit.WriteAsync(AdminAuditActions.AdminCreated, currentUserId, currentEmail, targetUserId: user.Id, detail: "host admin");
+
+            createdPassword = password;
+            createdEmail = email;
+            creating = false;
+            await RefreshAsync();
+        }
+        finally { busy = false; }
+    }
+
+    private async Task ResetAsync(int id)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var sp = scope.ServiceProvider;
+        var um = sp.GetRequiredService<UserManager<AdminUser>>();
+        var audit = sp.GetRequiredService<IAdminAuditService>();
+        var user = await um.FindByIdAsync(id.ToString());
+        if (user is null || user.Id == currentUserId) return;
+
+        var password = TempPassword.Generate();
+        var token = await um.GeneratePasswordResetTokenAsync(user);
+        var result = await um.ResetPasswordAsync(user, token, password);
+        if (!result.Succeeded) { errorMessage = string.Join(" ", result.Errors.Select(e => e.Description)); return; }
+        user.MustChangePassword = true;
+        await um.UpdateAsync(user);
+        await audit.WriteAsync(AdminAuditActions.AdminPasswordReset, currentUserId, currentEmail, targetUserId: user.Id);
+        createdPassword = password;
+        createdEmail = user.Email;
+    }
+
+    private async Task ToggleAsync(int id)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var sp = scope.ServiceProvider;
+        var um = sp.GetRequiredService<UserManager<AdminUser>>();
+        var memberships = sp.GetRequiredService<IAdminMembershipService>();
+        var audit = sp.GetRequiredService<IAdminAuditService>();
+        var user = await um.FindByIdAsync(id.ToString());
+        if (user is null || user.Id == currentUserId) return;
+
+        var isEnabled = user.LockoutEnd is null || user.LockoutEnd <= DateTimeOffset.UtcNow;
+        if (isEnabled && await memberships.CountHostAdminsAsync() <= 1)
+        {
+            errorMessage = "You can't disable the last enabled host admin.";
+            return;
+        }
+        await um.SetLockoutEnabledAsync(user, true);
+        await um.SetLockoutEndDateAsync(user, isEnabled ? DateTimeOffset.MaxValue : null);
+        await audit.WriteAsync(isEnabled ? AdminAuditActions.AdminDisabled : AdminAuditActions.AdminEnabled, currentUserId, currentEmail, targetUserId: user.Id);
+        await RefreshAsync();
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        showDelete = false;
+        using var scope = ScopeFactory.CreateScope();
+        var sp = scope.ServiceProvider;
+        var um = sp.GetRequiredService<UserManager<AdminUser>>();
+        var memberships = sp.GetRequiredService<IAdminMembershipService>();
+        var audit = sp.GetRequiredService<IAdminAuditService>();
+        var user = await um.FindByIdAsync(deleteId.ToString());
+        if (user is null || user.Id == currentUserId) return;
+
+        if (await memberships.CountHostAdminsAsync() <= 1)
+        {
+            errorMessage = "You can't delete the last host admin.";
+            return;
+        }
+        var email = user.Email;
+        await um.DeleteAsync(user); // cascades memberships + Identity rows
+        await audit.WriteAsync(AdminAuditActions.AdminDeleted, currentUserId, currentEmail, targetUserId: deleteId, detail: email);
+        await RefreshAsync();
+    }
+
+    private async Task CopyAsync()
+    {
+        if (createdPassword is not null)
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", createdPassword);
+    }
+}

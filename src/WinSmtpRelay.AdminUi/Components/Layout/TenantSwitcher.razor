@@ -1,39 +1,34 @@
+@using WinSmtpRelay.Core.Authorization
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @inject IServiceScopeFactory ScopeFactory
 
-@* Shown when there is more than one tenant. A single-tenant deployment has no use for the host/tenant
-   scope split (the host admin is auto-scoped to the sole tenant), so the switcher is hidden — EXCEPT
-   when the admin is currently in host scope anyway: after deleting the second-to-last tenant the cookie
-   has no ActiveTenant pin until the security-stamp validator regenerates the principal (up to ~30 min),
-   and without the switcher there would be no way to reach tenant scope (Setup, Deliverability, …). *@
-<AuthorizeView Policy="@AuthorizationPolicies.HostAdmin">
-    <Authorized>
-        @if (tenants.Count > 1 || (tenants.Count == 1 && activeTenantId is null))
-        {
-            <form action="/account/switch-tenant" method="post" style="margin:0;">
-                <AntiforgeryToken />
-                <label class="tenant-switcher">
-                    <LucideIcon Name="building-2" Size="14" />
-                    <select name="tenant" aria-label="Tenant scope" onchange="this.form.submit()">
-                        <option value="all" selected="@(activeTenantId is null)">Global</option>
-                        @foreach (var t in tenants)
-                        {
-                            <option value="@t.Id" selected="@(activeTenantId == t.Id)">@(t.Name == "Default" ? "Default tenant" : t.Name)</option>
-                        }
-                    </select>
-                </label>
-            </form>
-        }
-    </Authorized>
-</AuthorizeView>
+@* Shown when the principal can be in more than one scope. A host admin sees "Global" plus the tenants
+   they are a member of; a tenant user sees the tenants they are a member of. To reach a tenant they are
+   not a member of, a host admin uses break-glass (Host → Tenants), which creates the membership. *@
+@if (options.Count > 1)
+{
+    <form action="/account/switch-tenant" method="post" style="margin:0;">
+        <AntiforgeryToken />
+        <label class="tenant-switcher">
+            <LucideIcon Name="building-2" Size="14" />
+            <select name="tenant" aria-label="Tenant scope" onchange="this.form.submit()">
+                @foreach (var o in options)
+                {
+                    <option value="@o.Value" selected="@o.Selected">@o.Label</option>
+                }
+            </select>
+        </label>
+    </form>
+}
 
 @code {
     [CascadingParameter]
     private Task<AuthenticationState>? AuthState { get; set; }
 
-    private IReadOnlyList<Tenant> tenants = [];
-    private int? activeTenantId;
+    private sealed record Option(string Value, string Label, bool Selected);
+
+    private List<Option> options = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -41,14 +36,21 @@
             return;
 
         var user = (await AuthState).User;
-        if (!user.HasClaim(RelayClaimTypes.IsHostAdmin, "true"))
+        if (user.Identity?.IsAuthenticated != true)
             return;
 
-        if (int.TryParse(user.FindFirst(RelayClaimTypes.ActiveTenant)?.Value, out var id))
-            activeTenantId = id;
+        var hasHost = RelayAccess.HasHostMembership(user);
+        var memberIds = RelayAccess.TenantMemberships(user).Keys.ToHashSet();
+        var active = RelayAccess.ActiveTenant(user);
 
         using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
-        tenants = await svc.GetAllAsync();
+        var tenants = await scope.ServiceProvider.GetRequiredService<ITenantService>().GetAllAsync();
+
+        var opts = new List<Option>();
+        if (hasHost)
+            opts.Add(new Option("all", "Global", active is null));
+        foreach (var t in tenants.Where(t => memberIds.Contains(t.Id)))
+            opts.Add(new Option(t.Id.ToString(), t.Name == "Default" ? "Default tenant" : t.Name, active == t.Id));
+        options = opts;
     }
 }

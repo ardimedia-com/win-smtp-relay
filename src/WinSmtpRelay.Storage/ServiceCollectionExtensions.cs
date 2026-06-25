@@ -20,6 +20,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IStatisticsService, StatisticsService>();
         services.AddScoped<IApiKeyService, ApiKeyService>();
         services.AddScoped<ITenantService, TenantService>();
+        services.AddScoped<IAdminMembershipService, AdminMembershipService>();
+        services.AddScoped<IAdminAuditService, AdminAuditService>();
 
         // Configuration services
         services.AddScoped<IReceiveConnectorService, ReceiveConnectorService>();

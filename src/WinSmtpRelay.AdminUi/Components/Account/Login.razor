@@ -14,6 +14,7 @@
 @inject WinSmtpRelay.Core.Interfaces.IPortalSettingsService PortalSettings
 @inject IMessageQueue Queue
 @inject IOptions<AdminUiOptions> UiOptions
+@inject IAdminMembershipService Memberships
 
 <h1 class="account-title">Sign in</h1>
 <p class="account-subtitle">Enter your administrator credentials.</p>
@@ -115,10 +116,10 @@ else if (errorMessage is not null)
             var check = await SignInManager.CheckPasswordSignInAsync(user, Input.Password, lockoutOnFailure: true);
             if (check.Succeeded)
             {
-                if (user.TenantId is int tenantId && !await ConfigCache.IsTenantEnabledAsync(tenantId))
+                if (!await AccountAccess.HasUsableScopeAsync(Memberships, ConfigCache, user.Id))
                 {
-                    errorMessage = "Your organization's account is disabled. Contact an administrator.";
-                    Logger.LogWarning("Sign-in blocked for {Email}: tenant {TenantId} is disabled", Input.Email, tenantId);
+                    errorMessage = "Your account has no active access. Contact an administrator.";
+                    Logger.LogWarning("Sign-in blocked for {Email}: no usable scope (no host membership, all tenants disabled)", Input.Email);
                     return;
                 }
 
@@ -173,7 +174,7 @@ else if (errorMessage is not null)
                 try
                 {
                     await AccountEmail.EnqueueAsync(Queue, from, email, "Your WIN-SMTP-RELAY sign-in link", content,
-                        user.TenantId ?? TenantDefaults.DefaultTenantId);
+                        TenantDefaults.DefaultTenantId);
                 }
                 catch (Exception ex)
                 {

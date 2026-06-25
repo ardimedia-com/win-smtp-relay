@@ -108,12 +108,21 @@ public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITena
         await db.QueuedMessages.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
         await db.DailyStatistics.IgnoreQueryFilters().Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
 
-        // Tenant-bound but not ITenantOwned (nullable TenantId, no FK): clean up to avoid orphans.
-        // Deleting admin users cascades to their Identity role/claim rows at the database level.
+        // API keys are tenant-bound but not ITenantOwned (nullable TenantId, no FK) — remove explicitly.
         await db.ApiKeys.Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
-        await db.Users.Where(x => x.TenantId == id).ExecuteDeleteAsync(cancellationToken);
 
+        // The tenant's admin memberships cascade-delete with the tenant row (FK ON DELETE CASCADE).
         await db.Tenants.Where(t => t.Id == id).ExecuteDeleteAsync(cancellationToken);
+
+        // Remove admin accounts left with no memberships (a user that only administered this tenant).
+        // Accounts holding a host membership or memberships in other tenants are kept. Deleting a user
+        // cascades to its Identity role/claim rows at the database level.
+        var orphanIds = await db.Users
+            .Where(u => !db.AdminMemberships.Any(m => m.UserId == u.Id))
+            .Select(u => u.Id)
+            .ToListAsync(cancellationToken);
+        if (orphanIds.Count > 0)
+            await db.Users.Where(u => orphanIds.Contains(u.Id)).ExecuteDeleteAsync(cancellationToken);
 
         await tx.CommitAsync(cancellationToken);
         cache.Invalidate();

@@ -1,0 +1,288 @@
+@page "/tenant-admins"
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
+@inject IServiceScopeFactory ScopeFactory
+@inject ICurrentTenant CurrentTenant
+@inject IJSRuntime JS
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>Tenant Admins</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header page-header-row">
+    <div>
+        <h1>Tenant Admins</h1>
+        <p>Administrators of tenant <strong>#@tenantId</strong>. Add an existing account by email to delegate
+           access, or create a new one. (Host admins are managed separately under Host → Host Admins.)</p>
+    </div>
+    <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="StartAdd" Disabled="@adding">
+        <LucideIcon Name="user-plus" /> Add admin
+    </BbButton>
+</div>
+
+@if (errorMessage is not null)
+{
+    <div class="account-error" role="alert">@errorMessage</div>
+}
+
+@if (createdPassword is not null)
+{
+    <BbCard>
+        <BbCardHeader><BbCardTitle>Account created</BbCardTitle></BbCardHeader>
+        <BbCardContent>
+            <div class="badge-status badge-warning" style="display:block;padding:0.75rem;line-height:1.5;margin-bottom:1rem;">
+                <strong>Share this one-time password securely with @createdEmail. They must change it on first sign-in.</strong>
+            </div>
+            <div class="form-group">
+                <BbLabel For="otp">One-time password</BbLabel>
+                <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <BbInput Id="otp" Value="@createdPassword" ReadOnly="true" Class="mono" />
+                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="CopyAsync"><LucideIcon Name="copy" /> Copy</BbButton>
+                </div>
+            </div>
+        </BbCardContent>
+        <BbCardFooter><BbButton @onclick="@(() => { createdPassword = null; })">Done</BbButton></BbCardFooter>
+    </BbCard>
+}
+else if (adding)
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="form-group">
+                <BbLabel For="email">Email</BbLabel>
+                <BbInput Id="email" @bind-Value="addEmail" Placeholder="admin@tenant.example" />
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;">If an account with this email already exists, it is added to this tenant; otherwise a new account is created.</p>
+            </div>
+            <div class="form-group">
+                <BbLabel For="role">Role</BbLabel>
+                <BbNativeSelect TValue="string" Id="role" @bind-Value="addRole">
+                    <option value="@RelayRoles.TenantAdmin">Tenant Admin (read/write)</option>
+                    <option value="@RelayRoles.TenantViewer">Tenant Viewer (read-only)</option>
+                </BbNativeSelect>
+            </div>
+        </BbCardContent>
+        <BbCardFooter>
+            <div class="flex gap-1 items-center">
+                <BbButton @onclick="AddAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(addEmail))"><LucideIcon Name="user-plus" /> Add</BbButton>
+                <BbButton Variant="ButtonVariant.Outline" @onclick="@(() => { adding = false; errorMessage = null; })">Cancel</BbButton>
+            </div>
+        </BbCardFooter>
+    </BbCard>
+}
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[200px] w-full" />
+}
+else
+{
+    <BbTable Data="@rows">
+        <BbTableHeader>
+            <BbTableRow TData="Row">
+                <BbTableHeaderCell TData="Row">Email</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Role</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Status</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row"></BbTableHeaderCell>
+            </BbTableRow>
+        </BbTableHeader>
+        <BbTableBody>
+            @if (rows.Count == 0)
+            {
+                <BbTableRow TData="Row"><BbTableCell colspan="4" style="text-align:center;">No tenant admins</BbTableCell></BbTableRow>
+            }
+            @foreach (var r in rows)
+            {
+                <BbTableRow Item="@r">
+                    <BbTableCell>@r.Email @(r.IsBreakGlass ? "(break-glass)" : "")</BbTableCell>
+                    <BbTableCell>
+                        @if (r.IsSelf)
+                        {
+                            @r.Role
+                        }
+                        else
+                        {
+                            <BbNativeSelect TValue="string" Value="r.Role" ValueChanged="v => ChangeRoleAsync(r.UserId, v)" ValueExpression="() => r.Role">
+                                <option value="@RelayRoles.TenantAdmin">Tenant Admin</option>
+                                <option value="@RelayRoles.TenantViewer">Tenant Viewer</option>
+                            </BbNativeSelect>
+                        }
+                    </BbTableCell>
+                    <BbTableCell><span class="badge-status @(r.Enabled ? "" : "badge-muted")">@(r.Enabled ? "Enabled" : "Disabled")</span></BbTableCell>
+                    <BbTableCell>
+                        <div class="list-row-actions">
+                            @if (r.IsSelf)
+                            {
+                                <span class="text-muted" style="font-size:0.75rem;">you</span>
+                            }
+                            else
+                            {
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Remove from tenant" @onclick="() => { removeId = r.MembershipId; removeUserId = r.UserId; showRemove = true; }"><LucideIcon Name="user-minus" /></BbButton>
+                            }
+                        </div>
+                    </BbTableCell>
+                </BbTableRow>
+            }
+        </BbTableBody>
+    </BbTable>
+}
+
+<BbAlertDialog @bind-Open="showRemove">
+    <BbAlertDialogContent>
+        <BbAlertDialogHeader>
+            <BbAlertDialogTitle>Remove from tenant</BbAlertDialogTitle>
+            <BbAlertDialogDescription>Revokes this account's access to this tenant. If the account has no other access left, it is deleted.</BbAlertDialogDescription>
+        </BbAlertDialogHeader>
+        <BbAlertDialogFooter>
+            <BbAlertDialogCancel><BbButton Variant="ButtonVariant.Outline">Cancel</BbButton></BbAlertDialogCancel>
+            <BbAlertDialogAction><BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmRemoveAsync">Remove</BbButton></BbAlertDialogAction>
+        </BbAlertDialogFooter>
+    </BbAlertDialogContent>
+</BbAlertDialog>
+
+@code {
+    private sealed record Row(int MembershipId, int UserId, string Email, string Role, bool Enabled, bool IsSelf, bool IsBreakGlass);
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private int tenantId;
+    private List<Row> rows = [];
+    private bool isLoading = true;
+    private bool adding;
+    private bool busy;
+    private string addEmail = "";
+    private string addRole = RelayRoles.TenantAdmin;
+    private string? createdPassword;
+    private string? createdEmail;
+    private string? errorMessage;
+    private bool showRemove;
+    private int removeId;
+    private int removeUserId;
+    private int currentUserId;
+    private string? currentEmail;
+
+    protected override async Task OnInitializedAsync()
+    {
+        tenantId = CurrentTenant.FilterTenantId;
+        if (AuthState is not null)
+        {
+            var user = (await AuthState).User;
+            int.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out currentUserId);
+            currentEmail = user.Identity?.Name;
+        }
+        await RefreshAsync();
+    }
+
+    private void StartAdd() { adding = true; createdPassword = null; errorMessage = null; addEmail = ""; addRole = RelayRoles.TenantAdmin; }
+
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        using var scope = ScopeFactory.CreateScope();
+        var sp = scope.ServiceProvider;
+        var um = sp.GetRequiredService<UserManager<AdminUser>>();
+        var memberships = sp.GetRequiredService<IAdminMembershipService>();
+
+        var tenantMemberships = await memberships.GetForTenantAsync(tenantId);
+        var userIds = tenantMemberships.Select(m => m.UserId).Distinct().ToList();
+        var users = (await um.Users.Where(u => userIds.Contains(u.Id)).ToListAsync()).ToDictionary(u => u.Id);
+        var now = DateTimeOffset.UtcNow;
+        rows = tenantMemberships
+            .Where(m => users.ContainsKey(m.UserId))
+            .Select(m =>
+            {
+                var u = users[m.UserId];
+                return new Row(m.Id, m.UserId, u.Email ?? u.UserName ?? "", m.Role,
+                    u.LockoutEnd is null || u.LockoutEnd <= now, m.UserId == currentUserId, m.IsBreakGlass);
+            })
+            .OrderBy(r => r.Email).ToList();
+        isLoading = false;
+    }
+
+    private async Task AddAsync()
+    {
+        if (busy) return;
+        busy = true;
+        try
+        {
+            var email = addEmail.Trim();
+            var role = addRole is RelayRoles.TenantViewer ? RelayRoles.TenantViewer : RelayRoles.TenantAdmin;
+            using var scope = ScopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var um = sp.GetRequiredService<UserManager<AdminUser>>();
+            var memberships = sp.GetRequiredService<IAdminMembershipService>();
+            var audit = sp.GetRequiredService<IAdminAuditService>();
+
+            var existing = await um.FindByEmailAsync(email);
+            if (existing is not null)
+            {
+                await memberships.GrantAsync(existing.Id, tenantId, role, currentUserId);
+                await audit.WriteAsync(AdminAuditActions.MembershipGranted, currentUserId, currentEmail, targetUserId: existing.Id, tenantId: tenantId, detail: role);
+            }
+            else
+            {
+                var user = new AdminUser { UserName = email, Email = email, EmailConfirmed = true, MustChangePassword = true, CreatedUtc = DateTimeOffset.UtcNow };
+                var password = TempPassword.Generate();
+                var result = await um.CreateAsync(user, password);
+                if (!result.Succeeded) { errorMessage = string.Join(" ", result.Errors.Select(e => e.Description)); return; }
+                await memberships.GrantAsync(user.Id, tenantId, role, currentUserId);
+                await audit.WriteAsync(AdminAuditActions.AdminCreated, currentUserId, currentEmail, targetUserId: user.Id, tenantId: tenantId, detail: role);
+                createdPassword = password;
+                createdEmail = email;
+            }
+            adding = false;
+            await RefreshAsync();
+        }
+        finally { busy = false; }
+    }
+
+    private async Task ChangeRoleAsync(int userId, string role)
+    {
+        if (role is not (RelayRoles.TenantAdmin or RelayRoles.TenantViewer) || userId == currentUserId) return;
+        using var scope = ScopeFactory.CreateScope();
+        var sp = scope.ServiceProvider;
+        var memberships = sp.GetRequiredService<IAdminMembershipService>();
+        var audit = sp.GetRequiredService<IAdminAuditService>();
+        await memberships.GrantAsync(userId, tenantId, role, currentUserId);
+        await audit.WriteAsync(AdminAuditActions.MembershipGranted, currentUserId, currentEmail, targetUserId: userId, tenantId: tenantId, detail: $"role={role}");
+        await RefreshAsync();
+    }
+
+    private async Task ConfirmRemoveAsync()
+    {
+        showRemove = false;
+        if (removeUserId == currentUserId) return;
+        using var scope = ScopeFactory.CreateScope();
+        var sp = scope.ServiceProvider;
+        var um = sp.GetRequiredService<UserManager<AdminUser>>();
+        var memberships = sp.GetRequiredService<IAdminMembershipService>();
+        var audit = sp.GetRequiredService<IAdminAuditService>();
+
+        await memberships.RevokeAsync(removeId);
+        await audit.WriteAsync(AdminAuditActions.MembershipRevoked, currentUserId, currentEmail, targetUserId: removeUserId, tenantId: tenantId);
+
+        // Delete the account if it now has no memberships anywhere (was a tenant-only admin of this tenant).
+        if ((await memberships.GetForUserAsync(removeUserId)).Count == 0)
+        {
+            var user = await um.FindByIdAsync(removeUserId.ToString());
+            if (user is not null)
+            {
+                await um.DeleteAsync(user);
+                await audit.WriteAsync(AdminAuditActions.AdminDeleted, currentUserId, currentEmail, targetUserId: removeUserId, detail: "no remaining memberships");
+            }
+        }
+        await RefreshAsync();
+    }
+
+    private async Task CopyAsync()
+    {
+        if (createdPassword is not null)
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", createdPassword);
+    }
+}

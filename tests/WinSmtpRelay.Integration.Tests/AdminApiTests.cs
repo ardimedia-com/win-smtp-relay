@@ -618,7 +618,11 @@ public class AdminApiTests
             var db = sp.GetRequiredService<RelayDbContext>();
             // A delivery log makes the tenant FK-Restrict block a plain delete.
             db.DeliveryLogs.Add(new DeliveryLog { TenantId = tid, Recipient = "r@doomed", StatusCode = "250", StatusMessage = "ok" });
-            db.Users.Add(new AdminUser { UserName = "owner@doomed", Email = "owner@doomed", TenantId = tid });
+            // A tenant-only admin: access is a membership in this tenant (the source of truth).
+            var owner = new AdminUser { UserName = "owner@doomed", Email = "owner@doomed" };
+            db.Users.Add(owner);
+            await db.SaveChangesAsync();
+            db.AdminMemberships.Add(new AdminMembership { UserId = owner.Id, TenantId = tid, Role = RelayRoles.TenantAdmin });
             await db.SaveChangesAsync();
 
             await sp.GetRequiredService<IApiKeyService>().CreateAsync(tid, "k", RelayRoles.TenantAdmin, null, default);
@@ -633,7 +637,8 @@ public class AdminApiTests
             Assert.IsFalse(await db.Tenants.AnyAsync(t => t.Id == tid), "tenant should be gone");
             Assert.IsFalse(await db.DeliveryLogs.IgnoreQueryFilters().AnyAsync(l => l.TenantId == tid), "delivery logs should be purged");
             Assert.IsFalse(await db.ApiKeys.AnyAsync(k => k.TenantId == tid), "api keys should be purged");
-            Assert.IsFalse(await db.Users.AnyAsync(u => u.TenantId == tid), "admin users should be purged");
+            Assert.IsFalse(await db.AdminMemberships.AnyAsync(m => m.TenantId == tid), "tenant memberships should be purged");
+            Assert.IsFalse(await db.Users.AnyAsync(u => u.Email == "owner@doomed"), "the tenant-only admin account should be purged");
         }
     }
 
