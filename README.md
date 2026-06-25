@@ -26,7 +26,7 @@ the source with DocFX). See also [Using the components](#using-the-components-em
 - IP-based relay restrictions, with optional strict IP-to-tenant binding for unauthenticated submission (blocks cross-tenant sender-domain spoofing)
 - Pickup folder for .eml files
 - Blazor admin UI (HTTPS, loopback by default), sign-in required
-- Authenticated admin access: cookie login + API keys, role-based authorization (host / tenant admin / viewer)
+- Authenticated admin access: cookie login + API keys, role-based authorization (host / tenant admin / viewer); optional passwordless sign-in link (short-lived, single-use, emailed via the relay)
 - Multi-tenant: isolated per-tenant configuration and data, a host-admin tenant switcher, per-tenant egress (source) IP, and optional self-service tenant signup
 - REST API for management and monitoring
 - Windows Service with Event Log integration

@@ -1,0 +1,85 @@
+@page "/account/magic-link"
+@layout AccountLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@inject SignInManager<AdminUser> SignInManager
+@inject WinSmtpRelay.Core.Interfaces.IRuntimeConfigCache ConfigCache
+@inject NavigationManager Nav
+@inject ILogger<MagicLink> Logger
+
+<h1 class="account-title">Sign in</h1>
+
+@if (errorMessage is not null)
+{
+    <div class="account-error" role="alert">@errorMessage</div>
+    <a class="account-button" href="/account/login">Back to sign in</a>
+}
+else
+{
+    <p class="account-subtitle">Signing you in&hellip;</p>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "userId")]
+    private int UserId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "token")]
+    private string? Token { get; set; }
+
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        const string invalid = "This sign-in link is invalid or has expired. Request a new one from the sign-in page.";
+
+        if (UserId <= 0 || string.IsNullOrEmpty(Token))
+        {
+            errorMessage = invalid;
+            return;
+        }
+
+        var user = await SignInManager.UserManager.FindByIdAsync(UserId.ToString());
+        if (user is null)
+        {
+            errorMessage = invalid;
+            return;
+        }
+
+        if (!await SignInManager.UserManager.VerifyUserTokenAsync(
+                user, MagicLinkDefaults.ProviderName, MagicLinkDefaults.Purpose, Token))
+        {
+            Logger.LogWarning("Invalid magic-link sign-in token for user {UserId}", UserId);
+            errorMessage = invalid;
+            return;
+        }
+
+        // Same gates as the password sign-in (Login.razor): a locked account must not be able to sign in
+        // via a link either. Self-service signups are created LOCKED until the email is confirmed
+        // (TenantSignupService), and SignInManager.SignInAsync — unlike CheckPasswordSignInAsync — does NOT
+        // enforce lockout, so this check is what keeps a sign-in link from bypassing email confirmation.
+        if (await SignInManager.UserManager.IsLockedOutAsync(user))
+        {
+            Logger.LogWarning("Magic-link sign-in blocked for {Email}: account is locked/not yet activated", user.Email);
+            errorMessage = "Your account is not active yet. Confirm your email or contact an administrator.";
+            return;
+        }
+
+        if (user.TenantId is int tenantId && !await ConfigCache.IsTenantEnabledAsync(tenantId))
+        {
+            Logger.LogWarning("Magic-link sign-in blocked for {Email}: tenant {TenantId} is disabled", user.Email, tenantId);
+            errorMessage = "Your organization's account is disabled. Contact an administrator.";
+            return;
+        }
+
+        // Make the link single-use: the token embeds the user's security stamp, so rotating the stamp
+        // invalidates this (and any other outstanding) token — a captured/forwarded link cannot be
+        // replayed. The cookie issued immediately after carries the NEW stamp, so this session stays valid.
+        await SignInManager.UserManager.UpdateSecurityStampAsync(user);
+        await SignInManager.SignInAsync(user, isPersistent: false);
+        Logger.LogInformation("Admin {Email} signed in via sign-in link", user.Email);
+
+        // A temporary-password (MustChangePassword) account is funnelled to the change-password page by
+        // MainLayout's post-sign-in redirect, exactly as for a password sign-in — no special-casing here.
+        Nav.NavigateTo("/");
+    }
+}

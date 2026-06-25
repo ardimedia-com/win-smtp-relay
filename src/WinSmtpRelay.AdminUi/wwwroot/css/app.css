@@ -393,6 +393,27 @@ a[class*="button" i] { white-space: nowrap; }
 }
 .account-button:hover { opacity: 0.9; }
 
+/* Secondary action (e.g. "Email me a sign-in link") shares the .account-button box but reads as an
+   outline button so it does not compete with the primary submit. */
+.account-button-secondary {
+    margin-top: 0.5rem;
+    background: transparent;
+    color: var(--foreground);
+    border: 1px solid var(--border);
+}
+.account-button-secondary:hover { background: var(--muted); opacity: 1; }
+
+.account-info {
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 1rem;
+    border-radius: 0.5rem;
+    background: var(--muted);
+    color: var(--foreground);
+    border: 1px solid var(--border);
+    font-size: 0.85rem;
+    line-height: 1.45;
+}
+
 .account-error {
     padding: 0.6rem 0.75rem;
     margin-bottom: 1rem;

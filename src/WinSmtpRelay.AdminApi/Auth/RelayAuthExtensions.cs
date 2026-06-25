@@ -33,7 +33,9 @@ public static class RelayAuthExtensions
             .AddRoles<AdminRole>()
             .AddEntityFrameworkStores<RelayDbContext>()
             .AddSignInManager()
-            .AddDefaultTokenProviders();
+            .AddDefaultTokenProviders()
+            // Short-lived, single-use tokens for passwordless sign-in links (see MagicLinkTokenProvider).
+            .AddTokenProvider<MagicLinkTokenProvider>(WinSmtpRelay.Core.Authorization.MagicLinkDefaults.ProviderName);
 
         services.AddScoped<IUserClaimsPrincipalFactory<AdminUser>, AdditionalUserClaimsPrincipalFactory>();
         services.AddScoped<WinSmtpRelay.Storage.ITenantSignupService, WinSmtpRelay.Storage.TenantSignupService>();

@@ -3,21 +3,34 @@
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Options
+@using WinSmtpRelay.Core.Configuration
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
 @inject SignInManager<AdminUser> SignInManager
 @inject WinSmtpRelay.Core.Interfaces.IRuntimeConfigCache ConfigCache
 @inject NavigationManager Nav
 @inject ILogger<Login> Logger
 @inject WinSmtpRelay.Core.Interfaces.IPortalSettingsService PortalSettings
+@inject IMessageQueue Queue
+@inject IOptions<AdminUiOptions> UiOptions
 
 <h1 class="account-title">Sign in</h1>
 <p class="account-subtitle">Enter your administrator credentials.</p>
 
-@if (errorMessage is not null)
+@if (linkSent)
+{
+    <div class="account-info" role="status">
+        If an account exists for that address, a sign-in link is on its way. It expires in
+        @((int)WinSmtpRelay.Core.Authorization.MagicLinkDefaults.TokenLifetime.TotalMinutes) minutes and can be used once.
+    </div>
+}
+else if (errorMessage is not null)
 {
     <div class="account-error" role="alert">@errorMessage</div>
 }
 
-<EditForm Model="Input" method="post" OnValidSubmit="LoginUser" FormName="login">
+<EditForm Model="Input" method="post" OnValidSubmit="HandleSubmitAsync" FormName="login">
     <DataAnnotationsValidator />
     <div class="account-field">
         <label for="email">Email</label>
@@ -35,7 +48,12 @@
     <label class="account-checkbox">
         <InputCheckbox @bind-Value="Input.RememberMe" /> Keep me signed in
     </label>
-    <button type="submit" class="account-button">Sign in</button>
+    @* Two submit buttons share this form so the magic-link button reuses the email already typed above.
+       Only the activated button's name/value is posted, so Input.Action tells the handler which ran. *@
+    <button type="submit" name="Input.Action" value="@PasswordAction" class="account-button">Sign in</button>
+    <button type="submit" name="Input.Action" value="@MagicLinkAction" class="account-button account-button-secondary">
+        Email me a sign-in link
+    </button>
 </EditForm>
 
 <p class="account-subtitle" style="margin-top:1rem;text-align:center;">
@@ -57,7 +75,12 @@
     private string? ReturnUrl { get; set; }
 
     private string? errorMessage;
+    private bool linkSent;
     private bool signupEnabled;
+
+    // Form-action discriminators for the two submit buttons (only the clicked button's value is posted).
+    private const string PasswordAction = "password";
+    private const string MagicLinkAction = "magiclink";
 
     protected override async Task OnInitializedAsync()
     {
@@ -70,8 +93,19 @@
             Nav.NavigateTo("/account/initial-setup");
     }
 
+    // Both submit buttons post this single form; branch on which one was activated. Password is no longer
+    // a model-level [Required] (the magic-link path needs no password), so the password path validates it.
+    private Task HandleSubmitAsync()
+        => Input.Action == MagicLinkAction ? SendMagicLinkAsync() : LoginUser();
+
     private async Task LoginUser()
     {
+        if (string.IsNullOrEmpty(Input.Password))
+        {
+            errorMessage = "Enter your password, or request a sign-in link instead.";
+            return;
+        }
+
         // Validate the password without issuing the cookie yet, so a disabled tenant
         // can be blocked after a correct password (avoids revealing valid credentials
         // for an account whose tenant is disabled).
@@ -106,6 +140,58 @@
         Logger.LogWarning("Failed admin sign-in for {Email}", Input.Email);
     }
 
+    // Email a short-lived, single-use sign-in link to the address entered above. Mirrors ForgotPassword:
+    // always shows the same neutral result so it never reveals whether an account (or mail) is configured.
+    private async Task SendMagicLinkAsync()
+    {
+        var email = Input.Email.Trim();
+        var user = await SignInManager.UserManager.FindByEmailAsync(email);
+        if (user is not null)
+        {
+            // Prefer the runtime (DB) from-address; fall back to the appsettings value.
+            var from = (await PortalSettings.GetAsync()).SignupFromAddress;
+            if (string.IsNullOrWhiteSpace(from))
+                from = UiOptions.Value.SignupFromAddress;
+            if (!string.IsNullOrWhiteSpace(from))
+            {
+                var token = await SignInManager.UserManager.GenerateUserTokenAsync(
+                    user, MagicLinkDefaults.ProviderName, MagicLinkDefaults.Purpose);
+                var linkUrl = $"{Nav.BaseUri}account/magic-link?userId={user.Id}&token={Uri.EscapeDataString(token)}";
+                var minutes = (int)MagicLinkDefaults.TokenLifetime.TotalMinutes;
+                var content = new WinSmtpRelay.Core.Mail.SystemEmailContent
+                {
+                    Title = "Your sign-in link",
+                    Paragraphs =
+                    [
+                        "A sign-in link was requested for your WIN-SMTP-RELAY administrator account.",
+                        $"Use the button below to sign in. The link expires in {minutes} minutes and can be used once.",
+                    ],
+                    ButtonText = "Sign in",
+                    ActionUrl = linkUrl,
+                    FooterNote = "If you did not request this, ignore this email — your account stays secure.",
+                };
+                try
+                {
+                    await AccountEmail.EnqueueAsync(Queue, from, email, "Your WIN-SMTP-RELAY sign-in link", content,
+                        user.TenantId ?? TenantDefaults.DefaultTenantId);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Failed to enqueue sign-in-link email for {Email}", email);
+                }
+            }
+            else
+            {
+                Logger.LogWarning("Sign-in link requested for {Email} but AdminUi:SignupFromAddress is not configured — use a password or have an administrator reset it.", email);
+            }
+
+            Logger.LogInformation("Sign-in link requested for {Email}", email);
+        }
+
+        // Always show the same result — do not reveal whether the account exists.
+        linkSent = true;
+    }
+
     // Prevent open redirects: only allow local relative paths.
     private string GetSafeReturnUrl()
     {
@@ -119,9 +205,14 @@
         [Required, EmailAddress]
         public string Email { get; set; } = "";
 
-        [Required, DataType(DataType.Password)]
+        // Not [Required]: the "Email me a sign-in link" button posts this form without a password.
+        // The password sign-in path validates presence itself (see LoginUser).
+        [DataType(DataType.Password)]
         public string Password { get; set; } = "";
 
         public bool RememberMe { get; set; }
+
+        // Set by the activated submit button to PasswordAction or MagicLinkAction.
+        public string? Action { get; set; }
     }
 }
