@@ -5,6 +5,7 @@
 @inject SignInManager<AdminUser> SignInManager
 @inject WinSmtpRelay.Core.Interfaces.IRuntimeConfigCache ConfigCache
 @inject WinSmtpRelay.Core.Interfaces.IAdminMembershipService Memberships
+@inject WinSmtpRelay.Core.Interfaces.IAdminAuditService Audit
 @inject NavigationManager Nav
 @inject ILogger<MagicLink> Logger
 
@@ -77,6 +78,7 @@ else
         // replayed. The cookie issued immediately after carries the NEW stamp, so this session stays valid.
         await SignInManager.UserManager.UpdateSecurityStampAsync(user);
         await SignInManager.SignInAsync(user, isPersistent: false);
+        await Audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "sign-in link");
         Logger.LogInformation("Admin {Email} signed in via sign-in link", user.Email);
 
         // A temporary-password (MustChangePassword) account is funnelled to the change-password page by

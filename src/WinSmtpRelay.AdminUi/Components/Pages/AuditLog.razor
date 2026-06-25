@@ -1,0 +1,154 @@
+@page "/host/audit"
+@using Microsoft.EntityFrameworkCore
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
+@inject IServiceScopeFactory ScopeFactory
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>Audit Log</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>Audit Log</h1>
+    <p>Admin- and security-relevant events: account and membership lifecycle, break-glass, and sign-in.
+       Append-only.</p>
+</div>
+
+<div class="search-bar">
+    <BbNativeSelect TValue="string" @bind-Value="actionFilter" @bind-Value:after="ReloadFirstPage">
+        <option value="">All actions</option>
+        @foreach (var a in KnownActions)
+        {
+            <option value="@a.Key">@a.Value</option>
+        }
+    </BbNativeSelect>
+    <div class="search-input-wrapper">
+        <BbInput @bind-Value="search" @bind-Value:after="ReloadFirstPage" Placeholder="Search actor or detail…" />
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[300px] w-full" />
+}
+else
+{
+    <BbTable Data="@rows">
+        <BbTableHeader>
+            <BbTableRow TData="Row">
+                <BbTableHeaderCell TData="Row">When</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Action</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Actor</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Target</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Tenant</BbTableHeaderCell>
+                <BbTableHeaderCell TData="Row">Detail</BbTableHeaderCell>
+            </BbTableRow>
+        </BbTableHeader>
+        <BbTableBody>
+            @if (rows.Count == 0)
+            {
+                <BbTableRow TData="Row"><BbTableCell colspan="6" style="text-align:center;">No audit events</BbTableCell></BbTableRow>
+            }
+            @foreach (var r in rows)
+            {
+                <BbTableRow Item="@r">
+                    <BbTableCell><LocalTime Utc="@r.When" Format="yyyy-MM-dd HH:mm:ss" /></BbTableCell>
+                    <BbTableCell>@Humanize(r.Action)</BbTableCell>
+                    <BbTableCell>@(r.Actor ?? "—")</BbTableCell>
+                    <BbTableCell>@(r.Target ?? "—")</BbTableCell>
+                    <BbTableCell>@(r.TenantId?.ToString() ?? "—")</BbTableCell>
+                    <BbTableCell><span class="text-muted" style="font-size:0.82rem;">@r.Detail</span></BbTableCell>
+                </BbTableRow>
+            }
+        </BbTableBody>
+    </BbTable>
+
+    <div class="flex gap-1 items-center" style="margin-top:0.75rem;">
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="PrevPage" Disabled="@(page == 0)">Previous</BbButton>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="NextPage" Disabled="@((page + 1) * PageSize >= total)">Next</BbButton>
+        <span class="text-muted" style="font-size:0.82rem;margin-left:0.5rem;">
+            @(total == 0 ? 0 : page * PageSize + 1)–@(Math.Min((page + 1) * PageSize, total)) of @total
+        </span>
+    </div>
+}
+
+@code {
+    private const int PageSize = 100;
+
+    private sealed record Row(DateTimeOffset When, string Action, string? Actor, string? Target, int? TenantId, string? Detail);
+
+    private static readonly Dictionary<string, string> KnownActions = new()
+    {
+        [AdminAuditActions.AdminCreated] = "Admin created",
+        [AdminAuditActions.AdminDisabled] = "Admin disabled",
+        [AdminAuditActions.AdminEnabled] = "Admin enabled",
+        [AdminAuditActions.AdminDeleted] = "Admin deleted",
+        [AdminAuditActions.AdminPasswordReset] = "Password reset",
+        [AdminAuditActions.MembershipGranted] = "Membership granted",
+        [AdminAuditActions.MembershipRevoked] = "Membership revoked",
+        [AdminAuditActions.BreakGlassEntered] = "Break-glass access",
+        [AdminAuditActions.SignInSucceeded] = "Sign-in succeeded",
+        [AdminAuditActions.SignInFailed] = "Sign-in failed",
+        [AdminAuditActions.SignInLink] = "Sign-in link requested",
+    };
+
+    private static string Humanize(string action) => KnownActions.TryGetValue(action, out var label) ? label : action;
+
+    private List<Row> rows = [];
+    private bool isLoading = true;
+    private string actionFilter = "";
+    private string search = "";
+    private int page;
+    private int total;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task ReloadFirstPage()
+    {
+        page = 0;
+        await LoadAsync();
+    }
+
+    private async Task PrevPage()
+    {
+        if (page > 0) { page--; await LoadAsync(); }
+    }
+
+    private async Task NextPage()
+    {
+        if ((page + 1) * PageSize < total) { page++; await LoadAsync(); }
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        using var scope = ScopeFactory.CreateScope();
+        var sp = scope.ServiceProvider;
+        var audit = sp.GetRequiredService<IAdminAuditService>();
+        var um = sp.GetRequiredService<UserManager<AdminUser>>();
+
+        var (events, count) = await audit.QueryAsync(
+            string.IsNullOrWhiteSpace(actionFilter) ? null : actionFilter,
+            null,
+            string.IsNullOrWhiteSpace(search) ? null : search,
+            page * PageSize, PageSize);
+        total = count;
+
+        // Resolve target emails for the page (the actor email is denormalised on the event already).
+        var targetIds = events.Where(e => e.TargetUserId is not null).Select(e => e.TargetUserId!.Value).Distinct().ToList();
+        var emails = targetIds.Count == 0
+            ? new Dictionary<int, string?>()
+            : await um.Users.Where(u => targetIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.Email);
+
+        rows = events.Select(e => new Row(
+            e.OccurredUtc, e.Action, e.ActorEmail,
+            e.TargetUserId is int tid ? (emails.GetValueOrDefault(tid) ?? $"#{tid}") : null,
+            e.TenantId, e.Detail)).ToList();
+        isLoading = false;
+    }
+}

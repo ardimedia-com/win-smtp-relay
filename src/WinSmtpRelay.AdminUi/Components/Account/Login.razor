@@ -15,6 +15,7 @@
 @inject IMessageQueue Queue
 @inject IOptions<AdminUiOptions> UiOptions
 @inject IAdminMembershipService Memberships
+@inject IAdminAuditService Audit
 
 <h1 class="account-title">Sign in</h1>
 <p class="account-subtitle">Enter your administrator credentials.</p>
@@ -124,6 +125,7 @@ else if (errorMessage is not null)
                 }
 
                 await SignInManager.SignInAsync(user, Input.RememberMe);
+                await Audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "password");
                 Logger.LogInformation("Admin {Email} signed in", Input.Email);
                 Nav.NavigateTo(GetSafeReturnUrl());
                 return;
@@ -133,12 +135,14 @@ else if (errorMessage is not null)
             {
                 errorMessage = "Account locked due to too many failed attempts. Try again later.";
                 Logger.LogWarning("Failed admin sign-in for {Email} (lockedOut=True)", Input.Email);
+                await Audit.WriteAsync(AdminAuditActions.SignInFailed, user.Id, user.Email, targetUserId: user.Id, detail: "locked out");
                 return;
             }
         }
 
         errorMessage = "Invalid email or password.";
         Logger.LogWarning("Failed admin sign-in for {Email}", Input.Email);
+        await Audit.WriteAsync(AdminAuditActions.SignInFailed, user?.Id, Input.Email, targetUserId: user?.Id, detail: "invalid credentials");
     }
 
     // Email a short-lived, single-use sign-in link to the address entered above. Mirrors ForgotPassword:
@@ -187,6 +191,7 @@ else if (errorMessage is not null)
             }
 
             Logger.LogInformation("Sign-in link requested for {Email}", email);
+            await Audit.WriteAsync(AdminAuditActions.SignInLink, user.Id, user.Email, targetUserId: user.Id);
         }
 
         // Always show the same result — do not reveal whether the account exists.

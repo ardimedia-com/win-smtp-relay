@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
@@ -21,5 +22,26 @@ public class AdminAuditService(RelayDbContext db) : IAdminAuditService
             Detail = detail is { Length: > 1024 } ? detail[..1024] : detail,
         });
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<(IReadOnlyList<AdminAuditEvent> Events, int Total)> QueryAsync(
+        string? action, int? tenantId, string? search, int skip, int take, CancellationToken ct = default)
+    {
+        var q = db.AdminAuditEvents.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(action))
+            q = q.Where(e => e.Action == action);
+        if (tenantId is int t)
+            q = q.Where(e => e.TenantId == t);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(e => (e.ActorEmail != null && e.ActorEmail.Contains(s))
+                          || (e.Detail != null && e.Detail.Contains(s)));
+        }
+
+        var total = await q.CountAsync(ct);
+        // Order by the autoincrement Id (insertion order = chronological), which SQLite always translates.
+        var events = await q.OrderByDescending(e => e.Id).Skip(skip).Take(take).ToListAsync(ct);
+        return (events, total);
     }
 }
