@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build55] - 2026-06-25
+
 ### Added
 
 - **Two-factor authentication (TOTP).** Administrators can enable an authenticator app (Microsoft/Google Authenticator, 1Password, …) from their account page (Your account → Two-factor authentication); sign-in then requires a 6-digit code after the password. Includes one-time **recovery codes** (and regeneration) for lost-authenticator access, an optional "don't ask again on this device for 30 days", and audited enable/disable. Recovery-code sign-in is available from the 2FA step.
