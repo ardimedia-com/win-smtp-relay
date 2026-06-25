@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Two-factor authentication (TOTP).** Administrators can enable an authenticator app (Microsoft/Google Authenticator, 1Password, …) from their account page (Your account → Two-factor authentication); sign-in then requires a 6-digit code after the password. Includes one-time **recovery codes** (and regeneration) for lost-authenticator access, an optional "don't ask again on this device for 30 days", and audited enable/disable. Recovery-code sign-in is available from the 2FA step.
+- **Disable email-based recovery per deployment.** A host setting (Host → Signup → Account recovery) turns off the "Email me a sign-in link" button **and** the "Forgot your password?" reset, so control of an admin's mailbox is no longer sufficient to gain access — an admin who forgets their password is reset by another administrator instead. Recommended once 2FA is set up and more than one administrator exists.
+
 ## [1.0.0-beta1-build54] - 2026-06-25
 
 ### Added

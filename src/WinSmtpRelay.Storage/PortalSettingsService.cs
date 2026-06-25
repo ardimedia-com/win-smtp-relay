@@ -52,4 +52,18 @@ public class PortalSettingsService(RelayDbContext db) : IPortalSettingsService
         settings.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
     }
+
+    public async Task SetEmailRecoveryEnabledAsync(bool enabled, CancellationToken ct = default)
+    {
+        var settings = await db.PortalSettings.FindAsync([1], ct);
+        if (settings is null)
+        {
+            settings = new PortalSettings { Id = 1 };
+            db.PortalSettings.Add(settings);
+        }
+
+        settings.EmailRecoveryEnabled = enabled;
+        settings.UpdatedUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
 }

@@ -18,4 +18,8 @@ public static class AdminAuditActions
     public const string SignInSucceeded = "signin.succeeded";
     public const string SignInFailed = "signin.failed";
     public const string SignInLink = "signin.link_requested";
+
+    public const string MfaEnabled = "mfa.enabled";
+    public const string MfaDisabled = "mfa.disabled";
+    public const string MfaRecoveryCodesRegenerated = "mfa.recovery_regenerated";
 }

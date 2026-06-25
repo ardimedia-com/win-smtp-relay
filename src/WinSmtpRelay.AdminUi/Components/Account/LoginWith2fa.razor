@@ -1,0 +1,89 @@
+@page "/account/login-2fa"
+@layout AccountLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@inject SignInManager<AdminUser> SignInManager
+@inject WinSmtpRelay.Core.Interfaces.IAdminAuditService Audit
+@inject NavigationManager Nav
+@inject ILogger<LoginWith2fa> Logger
+
+<h1 class="account-title">Two-factor sign-in</h1>
+<p class="account-subtitle">Enter the 6-digit code from your authenticator app.</p>
+
+@if (errorMessage is not null)
+{
+    <div class="account-error" role="alert">@errorMessage</div>
+}
+
+<EditForm Model="Input" method="post" OnValidSubmit="SubmitAsync" FormName="login-2fa">
+    <DataAnnotationsValidator />
+    <div class="account-field">
+        <label for="code">Authenticator code</label>
+        <InputText id="code" @bind-Value="Input.Code" autocomplete="one-time-code" inputmode="numeric" class="account-input" />
+        <ValidationMessage For="() => Input.Code" />
+    </div>
+    <label class="account-checkbox">
+        <InputCheckbox @bind-Value="Input.RememberMachine" /> Don't ask again on this device for 30 days
+    </label>
+    <button type="submit" class="account-button">Verify</button>
+</EditForm>
+
+<p class="account-subtitle" style="margin-top:1rem;text-align:center;">
+    <a href="@($"/account/login-recovery?rememberMe={RememberMe}")">Use a recovery code</a>
+</p>
+
+@code {
+    [SupplyParameterFromForm] private InputModel Input { get; set; } = new();
+    [SupplyParameterFromQuery] private bool RememberMe { get; set; }
+    [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The password step stored a pending two-factor user; if it's gone, start over.
+        if (await SignInManager.GetTwoFactorAuthenticationUserAsync() is null)
+            Nav.NavigateTo("/account/login", forceLoad: true);
+    }
+
+    private async Task SubmitAsync()
+    {
+        var user = await SignInManager.GetTwoFactorAuthenticationUserAsync();
+        if (user is null)
+        {
+            Nav.NavigateTo("/account/login", forceLoad: true);
+            return;
+        }
+
+        var code = (Input.Code ?? "").Replace(" ", "").Replace("-", "");
+        var result = await SignInManager.TwoFactorAuthenticatorSignInAsync(code, isPersistent: RememberMe, rememberClient: Input.RememberMachine);
+        if (result.Succeeded)
+        {
+            await Audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "password + 2FA");
+            Logger.LogInformation("Admin {Email} completed two-factor sign-in", user.Email);
+            Nav.NavigateTo(SafeReturnUrl());
+            return;
+        }
+
+        if (result.IsLockedOut)
+        {
+            errorMessage = "Account locked due to too many failed attempts. Try again later.";
+            await Audit.WriteAsync(AdminAuditActions.SignInFailed, user.Id, user.Email, targetUserId: user.Id, detail: "2FA locked out");
+            return;
+        }
+
+        errorMessage = "Invalid code. Try again, or use a recovery code.";
+        await Audit.WriteAsync(AdminAuditActions.SignInFailed, user.Id, user.Email, targetUserId: user.Id, detail: "invalid 2FA code");
+    }
+
+    private string SafeReturnUrl()
+        => !string.IsNullOrEmpty(ReturnUrl) && Uri.IsWellFormedUriString(ReturnUrl, UriKind.Relative) && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//")
+            ? ReturnUrl : "/";
+
+    private sealed class InputModel
+    {
+        [Required]
+        public string? Code { get; set; }
+        public bool RememberMachine { get; set; }
+    }
+}

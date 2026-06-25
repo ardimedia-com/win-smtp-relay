@@ -1,0 +1,159 @@
+@page "/account/two-factor"
+@layout AccountLayout
+@attribute [Authorize]
+@attribute [ExcludeFromInteractiveRouting]
+@inject UserManager<AdminUser> UserManager
+@inject SignInManager<AdminUser> SignInManager
+@inject WinSmtpRelay.Core.Interfaces.IAdminAuditService Audit
+@inject ILogger<TwoFactor> Logger
+
+<h1 class="account-title">Two-factor authentication</h1>
+
+@if (errorMessage is not null)
+{
+    <div class="account-error" role="alert">@errorMessage</div>
+}
+
+@if (recoveryCodes is not null)
+{
+    <div class="account-info" role="status">
+        <strong>Save these recovery codes now.</strong> Each can be used once if you lose your authenticator.
+        They are shown only this once.
+    </div>
+    <div class="account-readonly" style="font-family:monospace;line-height:1.8;">
+        @foreach (var c in recoveryCodes)
+        {
+            <div>@c</div>
+        }
+    </div>
+    <p class="account-subtitle" style="margin-top:1rem;text-align:center;"><a href="/account/profile">Back to your account</a></p>
+}
+else if (enabled)
+{
+    <p class="account-subtitle">Two-factor authentication is <strong>on</strong>. You'll be asked for a code from your authenticator app at sign-in.</p>
+    <p class="account-subtitle">Recovery codes remaining: <strong>@recoveryLeft</strong>.</p>
+
+    <EditForm Model="Input" method="post" OnValidSubmit="HandleSubmitAsync" FormName="two-factor">
+        <DataAnnotationsValidator />
+        <button type="submit" name="Input.Action" value="regen" class="account-button account-button-secondary">Regenerate recovery codes</button>
+        <button type="submit" name="Input.Action" value="disable" class="account-button" style="margin-top:0.5rem;background:var(--destructive);">Turn off two-factor</button>
+    </EditForm>
+    <p class="account-subtitle" style="margin-top:1rem;text-align:center;"><a href="/account/profile">Back to your account</a></p>
+}
+else
+{
+    <p class="account-subtitle">Add an authenticator app (e.g. Microsoft Authenticator, Google Authenticator, 1Password) as a second factor.</p>
+    <ol class="account-subtitle" style="text-align:left;line-height:1.7;">
+        <li>In your authenticator app, add an account and enter this key (or scan if your app supports the URI):</li>
+    </ol>
+    <div class="account-readonly" style="font-family:monospace;font-size:1rem;letter-spacing:0.1em;">@formattedKey</div>
+    <p class="account-subtitle" style="font-size:0.78rem;word-break:break-all;margin-top:0.4rem;">@otpauthUri</p>
+
+    <EditForm Model="Input" method="post" OnValidSubmit="HandleSubmitAsync" FormName="two-factor">
+        <DataAnnotationsValidator />
+        <input type="hidden" name="Input.Action" value="enable" />
+        <div class="account-field">
+            <label for="code">Enter the 6-digit code from the app</label>
+            <InputText id="code" @bind-Value="Input.Code" autocomplete="one-time-code" inputmode="numeric" class="account-input" />
+        </div>
+        <button type="submit" class="account-button">Verify &amp; enable</button>
+    </EditForm>
+    <p class="account-subtitle" style="margin-top:1rem;text-align:center;"><a href="/account/profile">Cancel</a></p>
+}
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromForm] private InputModel Input { get; set; } = new();
+
+    private const string Issuer = "WIN-SMTP-RELAY";
+
+    private bool enabled;
+    private int recoveryLeft;
+    private string formattedKey = "";
+    private string otpauthUri = "";
+    private string[]? recoveryCodes;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+            return;
+
+        enabled = await UserManager.GetTwoFactorEnabledAsync(user);
+        if (enabled)
+        {
+            recoveryLeft = await UserManager.CountRecoveryCodesAsync(user);
+            return;
+        }
+
+        // Setup view: ensure an authenticator key exists, then show it. GetAuthenticatorKeyAsync returns the
+        // existing key (stable across the GET→POST), so the code the user enters matches.
+        var key = await UserManager.GetAuthenticatorKeyAsync(user);
+        if (string.IsNullOrEmpty(key))
+        {
+            await UserManager.ResetAuthenticatorKeyAsync(user);
+            key = await UserManager.GetAuthenticatorKeyAsync(user);
+        }
+        formattedKey = FormatKey(key!);
+        var email = user.Email ?? user.UserName ?? "user";
+        otpauthUri = $"otpauth://totp/{Uri.EscapeDataString(Issuer)}:{Uri.EscapeDataString(email)}?secret={key}&issuer={Uri.EscapeDataString(Issuer)}&digits=6";
+    }
+
+    private async Task HandleSubmitAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+            return;
+
+        switch (Input.Action)
+        {
+            case "enable":
+                var code = (Input.Code ?? "").Replace(" ", "").Replace("-", "");
+                var valid = await UserManager.VerifyTwoFactorTokenAsync(
+                    user, UserManager.Options.Tokens.AuthenticatorTokenProvider, code);
+                if (!valid)
+                {
+                    errorMessage = "That code didn't match. Check your authenticator and try again.";
+                    await OnInitializedAsync(); // re-populate the setup view
+                    return;
+                }
+                await UserManager.SetTwoFactorEnabledAsync(user, true);
+                recoveryCodes = (await UserManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10))?.ToArray();
+                await SignInManager.RefreshSignInAsync(user);
+                await Audit.WriteAsync(AdminAuditActions.MfaEnabled, user.Id, user.Email, targetUserId: user.Id, detail: "authenticator (TOTP)");
+                Logger.LogInformation("Admin {Email} enabled two-factor authentication", user.Email);
+                enabled = true;
+                break;
+
+            case "disable":
+                await UserManager.SetTwoFactorEnabledAsync(user, false);
+                await UserManager.ResetAuthenticatorKeyAsync(user); // invalidate the old secret
+                await SignInManager.RefreshSignInAsync(user);
+                await Audit.WriteAsync(AdminAuditActions.MfaDisabled, user.Id, user.Email, targetUserId: user.Id);
+                Logger.LogWarning("Admin {Email} disabled two-factor authentication", user.Email);
+                enabled = false;
+                await OnInitializedAsync(); // re-populate the setup view
+                break;
+
+            case "regen":
+                recoveryCodes = (await UserManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10))?.ToArray();
+                await Audit.WriteAsync(AdminAuditActions.MfaRecoveryCodesRegenerated, user.Id, user.Email, targetUserId: user.Id);
+                break;
+        }
+    }
+
+    private static string FormatKey(string key)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (var i = 0; i < key.Length; i += 4)
+            sb.Append(key.AsSpan(i, Math.Min(4, key.Length - i))).Append(' ');
+        return sb.ToString().Trim().ToLowerInvariant();
+    }
+
+    private sealed class InputModel
+    {
+        public string? Action { get; set; }
+        public string? Code { get; set; }
+    }
+}

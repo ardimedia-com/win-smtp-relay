@@ -53,14 +53,20 @@ else if (errorMessage is not null)
     @* Two submit buttons share this form so the magic-link button reuses the email already typed above.
        Only the activated button's name/value is posted, so Input.Action tells the handler which ran. *@
     <button type="submit" name="Input.Action" value="@PasswordAction" class="account-button">Sign in</button>
-    <button type="submit" name="Input.Action" value="@MagicLinkAction" class="account-button account-button-secondary">
-        Email me a sign-in link
-    </button>
+    @if (emailRecoveryEnabled)
+    {
+        <button type="submit" name="Input.Action" value="@MagicLinkAction" class="account-button account-button-secondary">
+            Email me a sign-in link
+        </button>
+    }
 </EditForm>
 
-<p class="account-subtitle" style="margin-top:1rem;text-align:center;">
-    <a href="/account/forgot-password">Forgot your password?</a>
-</p>
+@if (emailRecoveryEnabled)
+{
+    <p class="account-subtitle" style="margin-top:1rem;text-align:center;">
+        <a href="/account/forgot-password">Forgot your password?</a>
+    </p>
+}
 
 @if (signupEnabled)
 {
@@ -79,6 +85,7 @@ else if (errorMessage is not null)
     private string? errorMessage;
     private bool linkSent;
     private bool signupEnabled;
+    private bool emailRecoveryEnabled = true;
 
     // Form-action discriminators for the two submit buttons (only the clicked button's value is posted).
     private const string PasswordAction = "password";
@@ -86,7 +93,9 @@ else if (errorMessage is not null)
 
     protected override async Task OnInitializedAsync()
     {
-        signupEnabled = (await PortalSettings.GetAsync()).SelfServiceSignupEnabled;
+        var portal = await PortalSettings.GetAsync();
+        signupEnabled = portal.SelfServiceSignupEnabled;
+        emailRecoveryEnabled = portal.EmailRecoveryEnabled;
 
         // First run: when no administrator exists yet, there is nobody to sign in as — send the operator to
         // first-run setup to define the first administrator. (The setup page redirects back here once an
@@ -124,6 +133,29 @@ else if (errorMessage is not null)
                     return;
                 }
 
+                if (await SignInManager.UserManager.GetTwoFactorEnabledAsync(user))
+                {
+                    // Hand off to the Identity two-factor flow: PasswordSignInAsync (re-checks the already
+                    // validated password) establishes the pending-2FA cookie and returns RequiresTwoFactor,
+                    // unless this device is remembered (then it signs in directly).
+                    var twoFa = await SignInManager.PasswordSignInAsync(user, Input.Password, Input.RememberMe, lockoutOnFailure: false);
+                    if (twoFa.Succeeded)
+                    {
+                        await Audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "password (2FA remembered)");
+                        Logger.LogInformation("Admin {Email} signed in (2FA remembered device)", Input.Email);
+                        Nav.NavigateTo(GetSafeReturnUrl());
+                        return;
+                    }
+                    if (twoFa.RequiresTwoFactor)
+                    {
+                        var rt = string.IsNullOrEmpty(ReturnUrl) ? "" : $"&returnUrl={Uri.EscapeDataString(ReturnUrl)}";
+                        Nav.NavigateTo($"/account/login-2fa?rememberMe={Input.RememberMe}{rt}");
+                        return;
+                    }
+                    errorMessage = "Account locked due to too many failed attempts. Try again later.";
+                    return;
+                }
+
                 await SignInManager.SignInAsync(user, Input.RememberMe);
                 await Audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "password");
                 Logger.LogInformation("Admin {Email} signed in", Input.Email);
@@ -149,6 +181,13 @@ else if (errorMessage is not null)
     // always shows the same neutral result so it never reveals whether an account (or mail) is configured.
     private async Task SendMagicLinkAsync()
     {
+        // Email recovery can be disabled per deployment; if so this path is a neutral no-op.
+        if (!emailRecoveryEnabled)
+        {
+            linkSent = true;
+            return;
+        }
+
         var email = Input.Email.Trim();
         var user = await SignInManager.UserManager.FindByEmailAsync(email);
         if (user is not null)

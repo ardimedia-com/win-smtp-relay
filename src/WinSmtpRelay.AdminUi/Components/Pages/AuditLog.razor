@@ -95,6 +95,9 @@ else
         [AdminAuditActions.SignInSucceeded] = "Sign-in succeeded",
         [AdminAuditActions.SignInFailed] = "Sign-in failed",
         [AdminAuditActions.SignInLink] = "Sign-in link requested",
+        [AdminAuditActions.MfaEnabled] = "Two-factor enabled",
+        [AdminAuditActions.MfaDisabled] = "Two-factor disabled",
+        [AdminAuditActions.MfaRecoveryCodesRegenerated] = "Recovery codes regenerated",
     };
 
     private static string Humanize(string action) => KnownActions.TryGetValue(action, out var label) ? label : action;

@@ -70,6 +70,20 @@ else
             </div>
 
             <div class="settings-group">
+                <div class="settings-group-title">Account recovery</div>
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <BbSwitch Checked="emailRecoveryEnabled" CheckedChanged="OnEmailRecoveryToggleAsync" id="recovery-toggle" />
+                    <label for="recovery-toggle" style="cursor:pointer;">Allow the email sign-in link and password reset</label>
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.75rem;margin-bottom:0;">
+                    When off, the "Email me a sign-in link" button and "Forgot your password?" reset are hidden and
+                    refused, so control of an admin's mailbox is no longer enough to gain access. An admin who forgets
+                    their password is then reset by another administrator (Host Admins / Tenant Admins). Recommended off
+                    once you've set up 2FA and have more than one administrator.
+                </p>
+            </div>
+
+            <div class="settings-group">
                 <div class="settings-group-title">Abuse protection</div>
                 <div class="form-group" style="margin-bottom:0;">
                     <BbLabel For="signup-attempts-per-ip-per-hour">Signup attempts per IP per hour</BbLabel>
@@ -97,6 +111,7 @@ else
     private bool signupEnabled;
     private string? signupFromAddress;
     private string signupMaxPerHour = "5";
+    private bool emailRecoveryEnabled = true;
     private bool isLoading = true;
     private bool fromAddressConfigured;
     private string? statusMessage;
@@ -108,8 +123,17 @@ else
         signupEnabled = portal.SelfServiceSignupEnabled;
         signupFromAddress = portal.SignupFromAddress;
         signupMaxPerHour = portal.SignupMaxAttemptsPerIpPerHour.ToString();
+        emailRecoveryEnabled = portal.EmailRecoveryEnabled;
         UpdateFromAddressConfigured();
         isLoading = false;
+    }
+
+    private async Task OnEmailRecoveryToggleAsync(bool value)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetEmailRecoveryEnabledAsync(value);
+        emailRecoveryEnabled = value;
+        statusMessage = value ? "Email sign-in link & password reset enabled." : "Email sign-in link & password reset disabled.";
     }
 
     // The effective from-address is the DB value if set, otherwise the appsettings fallback. When both are

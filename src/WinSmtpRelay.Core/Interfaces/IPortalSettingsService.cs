@@ -14,4 +14,7 @@ public interface IPortalSettingsService
 
     /// <summary>Sets the per-IP-per-hour signup attempt limit (clamped to >= 0; 0 disables the throttle).</summary>
     Task SetSignupMaxAttemptsPerIpPerHourAsync(int maxPerHour, CancellationToken ct = default);
+
+    /// <summary>Enables/disables the email-based sign-in-link + password-reset paths (no restart needed).</summary>
+    Task SetEmailRecoveryEnabledAsync(bool enabled, CancellationToken ct = default);
 }

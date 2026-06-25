@@ -6,6 +6,7 @@
 @inject WinSmtpRelay.Core.Interfaces.IRuntimeConfigCache ConfigCache
 @inject WinSmtpRelay.Core.Interfaces.IAdminMembershipService Memberships
 @inject WinSmtpRelay.Core.Interfaces.IAdminAuditService Audit
+@inject WinSmtpRelay.Core.Interfaces.IPortalSettingsService PortalSettings
 @inject NavigationManager Nav
 @inject ILogger<MagicLink> Logger
 
@@ -33,6 +34,13 @@ else
     protected override async Task OnInitializedAsync()
     {
         const string invalid = "This sign-in link is invalid or has expired. Request a new one from the sign-in page.";
+
+        // Email recovery can be turned off per deployment; once off, outstanding links stop working.
+        if (!(await PortalSettings.GetAsync()).EmailRecoveryEnabled)
+        {
+            errorMessage = invalid;
+            return;
+        }
 
         if (UserId <= 0 || string.IsNullOrEmpty(Token))
         {

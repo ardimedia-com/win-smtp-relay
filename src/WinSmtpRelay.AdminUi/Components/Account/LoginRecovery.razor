@@ -1,0 +1,83 @@
+@page "/account/login-recovery"
+@layout AccountLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@inject SignInManager<AdminUser> SignInManager
+@inject WinSmtpRelay.Core.Interfaces.IAdminAuditService Audit
+@inject NavigationManager Nav
+@inject ILogger<LoginRecovery> Logger
+
+<h1 class="account-title">Recovery code</h1>
+<p class="account-subtitle">Enter one of the recovery codes you saved when you set up two-factor authentication. Each works once.</p>
+
+@if (errorMessage is not null)
+{
+    <div class="account-error" role="alert">@errorMessage</div>
+}
+
+<EditForm Model="Input" method="post" OnValidSubmit="SubmitAsync" FormName="login-recovery">
+    <DataAnnotationsValidator />
+    <div class="account-field">
+        <label for="code">Recovery code</label>
+        <InputText id="code" @bind-Value="Input.Code" autocomplete="one-time-code" class="account-input" />
+        <ValidationMessage For="() => Input.Code" />
+    </div>
+    <button type="submit" class="account-button">Sign in</button>
+</EditForm>
+
+<p class="account-subtitle" style="margin-top:1rem;text-align:center;">
+    <a href="@($"/account/login-2fa?rememberMe={RememberMe}")">Back to authenticator code</a>
+</p>
+
+@code {
+    [SupplyParameterFromForm] private InputModel Input { get; set; } = new();
+    [SupplyParameterFromQuery] private bool RememberMe { get; set; }
+    [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (await SignInManager.GetTwoFactorAuthenticationUserAsync() is null)
+            Nav.NavigateTo("/account/login", forceLoad: true);
+    }
+
+    private async Task SubmitAsync()
+    {
+        var user = await SignInManager.GetTwoFactorAuthenticationUserAsync();
+        if (user is null)
+        {
+            Nav.NavigateTo("/account/login", forceLoad: true);
+            return;
+        }
+
+        var code = (Input.Code ?? "").Replace(" ", "");
+        var result = await SignInManager.TwoFactorRecoveryCodeSignInAsync(code);
+        if (result.Succeeded)
+        {
+            await Audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "recovery code");
+            Logger.LogWarning("Admin {Email} signed in with a recovery code", user.Email);
+            Nav.NavigateTo(SafeReturnUrl());
+            return;
+        }
+
+        if (result.IsLockedOut)
+        {
+            errorMessage = "Account locked due to too many failed attempts. Try again later.";
+            return;
+        }
+
+        errorMessage = "Invalid recovery code.";
+        await Audit.WriteAsync(AdminAuditActions.SignInFailed, user.Id, user.Email, targetUserId: user.Id, detail: "invalid recovery code");
+    }
+
+    private string SafeReturnUrl()
+        => !string.IsNullOrEmpty(ReturnUrl) && Uri.IsWellFormedUriString(ReturnUrl, UriKind.Relative) && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//")
+            ? ReturnUrl : "/";
+
+    private sealed class InputModel
+    {
+        [Required]
+        public string? Code { get; set; }
+    }
+}

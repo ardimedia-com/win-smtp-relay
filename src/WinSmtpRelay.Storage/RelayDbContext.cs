@@ -255,11 +255,14 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.SignupFromAddress).HasMaxLength(320);
+            // Default true so existing installs keep email recovery on after the column is added.
+            entity.Property(e => e.EmailRecoveryEnabled).HasDefaultValue(true);
             entity.HasData(new PortalSettings
             {
                 Id = 1,
                 SelfServiceSignupEnabled = false,
                 SignupMaxAttemptsPerIpPerHour = 5,
+                EmailRecoveryEnabled = true,
                 UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });
