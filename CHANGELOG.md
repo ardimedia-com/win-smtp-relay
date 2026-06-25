@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build53] - 2026-06-25
+
 ### Added
 
 - **Admin access is now a membership model — an admin can manage several tenants.** Instead of one tenant per account, access is held as memberships: a *host* membership (host-level administration) and/or memberships in individual tenants, each with its own role. New pages: **Host Admins** (Host → Host Admins) and **Tenant Admins** (per selected tenant). The Tenant Admins page can **add an existing account by email** to delegate access to that tenant, or create a new one — this is the delegation the single-tenant-per-user model couldn't express.
