@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build54] - 2026-06-25
+
 ### Added
 
 - **Admin/security audit log viewer.** Host → **Audit Log** shows the append-only audit trail — account and membership lifecycle, break-glass, and now **sign-in outcomes** (success/failure/sign-in-link requests) — with an action filter, free-text search (actor/detail), and paging; timestamps render in the viewer's local time zone. (The account/membership events were already being recorded; this build adds the viewer and records sign-in events.)
