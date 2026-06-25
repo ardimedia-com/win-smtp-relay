@@ -29,6 +29,8 @@ public static class RelayAuthExtensions
                 options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
                 options.User.RequireUniqueEmail = true;
                 options.SignIn.RequireConfirmedAccount = false;
+                // Schema v3 adds the AspNetUserPasskeys table (WebAuthn passkey credentials).
+                options.Stores.SchemaVersion = IdentitySchemaVersions.Version3;
             })
             .AddRoles<AdminRole>()
             .AddEntityFrameworkStores<RelayDbContext>()

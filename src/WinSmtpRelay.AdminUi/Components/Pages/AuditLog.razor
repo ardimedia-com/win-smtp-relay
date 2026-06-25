@@ -98,6 +98,8 @@ else
         [AdminAuditActions.MfaEnabled] = "Two-factor enabled",
         [AdminAuditActions.MfaDisabled] = "Two-factor disabled",
         [AdminAuditActions.MfaRecoveryCodesRegenerated] = "Recovery codes regenerated",
+        [AdminAuditActions.PasskeyAdded] = "Passkey added",
+        [AdminAuditActions.PasskeyRemoved] = "Passkey removed",
     };
 
     private static string Humanize(string action) => KnownActions.TryGetValue(action, out var label) ? label : action;

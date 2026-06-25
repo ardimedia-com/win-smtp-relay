@@ -68,12 +68,20 @@ else if (errorMessage is not null)
     </p>
 }
 
+<button type="button" id="passkey-signin" class="account-button account-button-secondary" style="margin-top:1rem;"
+        onclick="winSmtpPasskey.signin('/account/passkey/request-options','/account/passkey/signin','/','pk-status')">
+    Sign in with a passkey
+</button>
+<p id="pk-status" class="account-error" style="margin-top:0.5rem;"></p>
+
 @if (signupEnabled)
 {
     <p class="account-subtitle" style="margin-top:1rem;text-align:center;">
         No account? <a href="/signup">Create an organization</a>
     </p>
 }
+
+<script src="js/passkeys.js"></script>
 
 @code {
     [SupplyParameterFromForm]

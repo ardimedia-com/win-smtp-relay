@@ -1,0 +1,61 @@
+@page "/account/passkeys"
+@layout AccountLayout
+@attribute [Authorize]
+@attribute [ExcludeFromInteractiveRouting]
+@inject UserManager<AdminUser> UserManager
+
+<h1 class="account-title">Passkeys</h1>
+<p class="account-subtitle">
+    Passwordless sign-in with a device or security key (Windows Hello, Touch ID, a phone, or a hardware
+    key). Once registered, use "Sign in with a passkey" on the sign-in page.
+</p>
+
+@if (passkeys.Count == 0)
+{
+    <p class="account-subtitle">No passkeys registered yet.</p>
+}
+else
+{
+    <div class="account-field">
+        @foreach (var p in passkeys)
+        {
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;border:1px solid var(--border);border-radius:0.5rem;padding:0.5rem 0.7rem;margin-bottom:0.4rem;">
+                <div>
+                    <strong>@(string.IsNullOrEmpty(p.Name) ? "Passkey" : p.Name)</strong><br />
+                    <span class="text-muted" style="font-size:0.78rem;">added <LocalTime Utc="@p.CreatedAt" Format="yyyy-MM-dd" /></span>
+                </div>
+                <form method="post" action="/account/passkey/remove" style="margin:0;">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="credentialId" value="@B64Url(p.CredentialId)" />
+                    <button type="submit" class="account-button account-button-secondary" style="width:auto;padding-inline:0.8rem;">Remove</button>
+                </form>
+            </div>
+        }
+    </div>
+}
+
+<button type="button" id="add-passkey" class="account-button"
+        onclick="winSmtpPasskey.register('/account/passkey/creation-options','/account/passkey/register','pk-status')">
+    Add a passkey
+</button>
+<p id="pk-status" class="account-error" style="margin-top:0.5rem;"></p>
+
+<p class="account-subtitle" style="margin-top:1rem;text-align:center;"><a href="/account/profile">Back to your account</a></p>
+
+<script src="js/passkeys.js"></script>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    private IList<UserPasskeyInfo> passkeys = new List<UserPasskeyInfo>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is not null)
+            passkeys = await UserManager.GetPasskeysAsync(user);
+    }
+
+    private static string B64Url(byte[] id)
+        => Convert.ToBase64String(id).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+}

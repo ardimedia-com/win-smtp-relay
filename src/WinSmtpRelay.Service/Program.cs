@@ -282,6 +282,85 @@ if (adminUiConfig.Enabled)
         return Results.LocalRedirect("/");
     }).RequireAuthorization(AuthorizationPolicies.HostAdmin);
 
+    // ---- Passkeys (WebAuthn). Passwordless PRIMARY sign-in via ASP.NET Core Identity (.NET 10). ----
+
+    // Registration options for adding a passkey to your own account (authenticated).
+    app.MapPost("/account/passkey/creation-options", async (HttpContext ctx, UserManager<AdminUser> um, SignInManager<AdminUser> sm) =>
+    {
+        var user = await um.GetUserAsync(ctx.User);
+        if (user is null)
+            return Results.Unauthorized();
+        var userName = await um.GetUserNameAsync(user) ?? "admin";
+        var optionsJson = await sm.MakePasskeyCreationOptionsAsync(new PasskeyUserEntity
+        {
+            Id = await um.GetUserIdAsync(user),
+            Name = userName,
+            DisplayName = string.IsNullOrWhiteSpace(user.DisplayName) ? userName : user.DisplayName!,
+        });
+        return Results.Content(optionsJson, "application/json");
+    }).RequireAuthorization();
+
+    // Verify the attestation and store the new passkey (authenticated).
+    app.MapPost("/account/passkey/register", async (HttpContext ctx, UserManager<AdminUser> um, SignInManager<AdminUser> sm, IAdminAuditService audit) =>
+    {
+        var user = await um.GetUserAsync(ctx.User);
+        if (user is null)
+            return Results.Unauthorized();
+        var credentialJson = await new StreamReader(ctx.Request.Body).ReadToEndAsync();
+        var attestation = await sm.PerformPasskeyAttestationAsync(credentialJson);
+        if (!attestation.Succeeded)
+            return Results.BadRequest(attestation.Failure?.Message ?? "Could not verify the passkey.");
+        var passkey = attestation.Passkey;
+        passkey.Name ??= $"Passkey {DateTimeOffset.UtcNow:yyyy-MM-dd}";
+        var add = await um.AddOrUpdatePasskeyAsync(user, passkey);
+        if (!add.Succeeded)
+            return Results.BadRequest("Could not store the passkey.");
+        await audit.WriteAsync(AdminAuditActions.PasskeyAdded, user.Id, user.Email, targetUserId: user.Id, detail: passkey.Name);
+        return Results.Ok();
+    }).RequireAuthorization();
+
+    // Assertion options for passwordless sign-in (anonymous, username-less / discoverable credentials).
+    app.MapPost("/account/passkey/request-options", async (SignInManager<AdminUser> sm) =>
+    {
+        var optionsJson = await sm.MakePasskeyRequestOptionsAsync(user: null);
+        return Results.Content(optionsJson, "application/json");
+    }).AllowAnonymous();
+
+    // Verify the assertion, apply the same gates as the other sign-in paths, then sign in (anonymous).
+    app.MapPost("/account/passkey/signin", async (HttpContext ctx, UserManager<AdminUser> um, SignInManager<AdminUser> sm,
+        IAdminMembershipService memberships, IRuntimeConfigCache cache, IAdminAuditService audit) =>
+    {
+        var credentialJson = await new StreamReader(ctx.Request.Body).ReadToEndAsync();
+        var assertion = await sm.PerformPasskeyAssertionAsync(credentialJson);
+        if (!assertion.Succeeded)
+            return Results.Unauthorized();
+
+        var user = assertion.User;
+        // Same gates as password / magic-link sign-in: locked-out (e.g. pending signup) and no-usable-scope
+        // accounts are refused. (SignInAsync, unlike a password check, does not enforce lockout.)
+        if (await um.IsLockedOutAsync(user) ||
+            !await WinSmtpRelay.AdminUi.Services.AccountAccess.HasUsableScopeAsync(memberships, cache, user.Id))
+            return Results.Unauthorized();
+
+        await um.AddOrUpdatePasskeyAsync(user, assertion.Passkey); // persist the updated sign counter
+        await sm.SignInAsync(user, isPersistent: false);
+        await audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "passkey");
+        return Results.Ok();
+    }).AllowAnonymous();
+
+    // Remove one of your own passkeys (authenticated).
+    app.MapPost("/account/passkey/remove", async (HttpContext ctx, [FromForm] string credentialId, UserManager<AdminUser> um, IAdminAuditService audit) =>
+    {
+        var user = await um.GetUserAsync(ctx.User);
+        if (user is not null && !string.IsNullOrEmpty(credentialId))
+        {
+            var id = Convert.FromBase64String(credentialId.Replace('-', '+').Replace('_', '/').PadRight(credentialId.Length + (4 - credentialId.Length % 4) % 4, '='));
+            await um.RemovePasskeyAsync(user, id);
+            await audit.WriteAsync(AdminAuditActions.PasskeyRemoved, user.Id, user.Email, targetUserId: user.Id);
+        }
+        return Results.LocalRedirect("/account/passkeys");
+    }).RequireAuthorization();
+
     // Static assets (fingerprinted CSS/JS from RCLs)
     app.MapStaticAssets();
 

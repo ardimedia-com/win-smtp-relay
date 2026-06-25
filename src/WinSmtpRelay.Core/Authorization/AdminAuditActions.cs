@@ -22,4 +22,7 @@ public static class AdminAuditActions
     public const string MfaEnabled = "mfa.enabled";
     public const string MfaDisabled = "mfa.disabled";
     public const string MfaRecoveryCodesRegenerated = "mfa.recovery_regenerated";
+
+    public const string PasskeyAdded = "passkey.added";
+    public const string PasskeyRemoved = "passkey.removed";
 }
