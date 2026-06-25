@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The first administrator is now operator-defined via first-run setup — no admin is auto-seeded.** Previously the service seeded a host administrator `admin@local` on first start and surfaced a one-time password (a file next to the binaries + the Event Log). Now, when no account exists, the sign-in page sends the operator to a first-run setup page (`/account/initial-setup`, anonymous, available only while zero accounts exist) where they create the first administrator with their own email and password. That account becomes the host administrator (full access). The setup page re-checks "no account exists" on submit (closing the only window in which an anonymous page could create an account) and closes itself once an administrator exists, so it cannot be used to add a second one and cannot loop with the login redirect.
+- **The installer's "Reset administrator access" option (formerly "Reset the admin@local password") now clears all administrator accounts** rather than regenerating the `admin@local` password. On the next service start every administrator account is removed and first-run setup runs again — the operator-driven equivalent of lost-access recovery.
+
+### Removed
+
+- **The auto-seeded `admin@local` account and its one-time `initial-admin-password.txt` file.** A leftover `admin@local` from an older install is removed on start **only when it is the only account**, so a real administrator must be defined through first-run setup; installs that already have other administrators are untouched.
+
 ## [1.0.0-beta1-build49] - 2026-06-25
 
 ### Added

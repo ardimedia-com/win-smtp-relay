@@ -220,14 +220,9 @@ sc.exe start WinSmtpRelay
 
 The admin UI and REST API require authentication and bind to `127.0.0.1` over HTTPS by default.
 
-On first start the service seeds a host administrator and writes a one-time password to `initial-admin-password.txt` next to the service binaries (the sign-in page links to it; the Windows Event Log and console carry it as a fallback):
+No administrator is created automatically. On first start, open the admin UI at `https://localhost:8025/account/login` — with no account yet, you are taken to **first-run setup** (`/account/initial-setup`) to define the first administrator (email + password). That account becomes the host administrator with full access. Once it exists, the setup page is closed and `/account/login` is shown normally.
 
-```
-Username: admin@local
-Password: <random, shown once>
-```
-
-Sign in at `https://localhost:8025/account/login` and change the password immediately (you are prompted to). To expose the admin UI beyond loopback, use the installer's network-access option (also available later via Repair), or change `AdminUi:BindAddress` deliberately / put it behind a reverse proxy. For HTTPS, the admin UI starts with a self-signed certificate; replace it on the **HTTPS Certificate** page by uploading a PFX or picking a certificate from the Windows certificate store (applied immediately, no restart). Alternatively, `AdminUi:CertificatePath` / `AdminUi:CertificatePassword` can point to a PFX on disk.
+If an older install still carries the legacy seeded `admin@local` account *and it is the only account*, the service removes it on start so a new administrator must be defined through first-run setup. If you ever lose admin access, re-run the installer (Repair) and tick **Reset administrator access**: on the next start all administrator accounts are removed and first-run setup runs again. To expose the admin UI beyond loopback, use the installer's network-access option (also available later via Repair), or change `AdminUi:BindAddress` deliberately / put it behind a reverse proxy. For HTTPS, the admin UI starts with a self-signed certificate; replace it on the **HTTPS Certificate** page by uploading a PFX or picking a certificate from the Windows certificate store (applied immediately, no restart). Alternatively, `AdminUi:CertificatePath` / `AdminUi:CertificatePassword` can point to a PFX on disk.
 
 For automation, create an API key and pass it as `X-Api-Key: <key>` (or `Authorization: Bearer <key>`). Keys are scoped to a tenant and a role.
 

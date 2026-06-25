@@ -1,0 +1,129 @@
+@page "/account/initial-setup"
+@layout AccountLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@using Microsoft.EntityFrameworkCore
+@inject SignInManager<AdminUser> SignInManager
+@inject NavigationManager Nav
+@inject ILogger<InitialSetup> Logger
+
+@if (alreadyConfigured)
+{
+    <h1 class="account-title">Already set up</h1>
+    <p class="account-subtitle">An administrator already exists on this relay.</p>
+    <a class="account-button" href="/account/login">Go to sign in</a>
+}
+else
+{
+    <h1 class="account-title">Set up the first administrator</h1>
+    <p class="account-subtitle">
+        This relay has no administrator yet. Create the first one — it becomes the host administrator with
+        full access to manage tenants, listeners, certificates and settings.
+    </p>
+
+    @if (errorMessage is not null)
+    {
+        <div class="account-error" role="alert">@errorMessage</div>
+    }
+
+    <EditForm Model="Input" method="post" OnValidSubmit="SubmitAsync" FormName="initial-setup">
+        <DataAnnotationsValidator />
+        <div class="account-field">
+            <label for="name">Name</label>
+            <InputText id="name" @bind-Value="Input.DisplayName" class="account-input" placeholder="Administrator" />
+            <ValidationMessage For="() => Input.DisplayName" />
+        </div>
+        <div class="account-field">
+            <label for="email">Email</label>
+            <InputText id="email" @bind-Value="Input.Email" autocomplete="username" class="account-input" />
+            <ValidationMessage For="() => Input.Email" />
+        </div>
+        <div class="account-field">
+            <label for="password">Password</label>
+            <div class="password-field">
+                <InputText id="password" type="password" @bind-Value="Input.Password" autocomplete="new-password" class="account-input" />
+                <PasswordToggle />
+            </div>
+            <ValidationMessage For="() => Input.Password" />
+        </div>
+        <div class="account-field">
+            <label for="confirm">Confirm password</label>
+            <div class="password-field">
+                <InputText id="confirm" type="password" @bind-Value="Input.ConfirmPassword" autocomplete="new-password" class="account-input" />
+                <PasswordToggle />
+            </div>
+            <ValidationMessage For="() => Input.ConfirmPassword" />
+        </div>
+        <button type="submit" class="account-button">Create administrator</button>
+    </EditForm>
+}
+
+@code {
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = new();
+
+    private string? errorMessage;
+    private bool alreadyConfigured;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // First-run only: once any administrator exists, this page must not create another — redirect to
+        // sign in. (Login redirects here while no account exists, so the two cannot loop.)
+        if (await SignInManager.UserManager.Users.AnyAsync())
+        {
+            alreadyConfigured = true;
+            Nav.NavigateTo("/account/login");
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        // Re-check live: refuse to create a second "first" admin if one was created between page load and
+        // submit (e.g. a concurrent request). Closes the only window in which this anonymous page could
+        // create an extra account.
+        if (await SignInManager.UserManager.Users.AnyAsync())
+        {
+            alreadyConfigured = true;
+            return;
+        }
+
+        var user = new AdminUser
+        {
+            UserName = Input.Email,
+            Email = Input.Email,
+            EmailConfirmed = true,
+            IsHostAdmin = true,
+            TenantId = null,
+            DisplayName = string.IsNullOrWhiteSpace(Input.DisplayName) ? "Administrator" : Input.DisplayName.Trim(),
+            MustChangePassword = false,
+            CreatedUtc = DateTimeOffset.UtcNow
+        };
+
+        var result = await SignInManager.UserManager.CreateAsync(user, Input.Password);
+        if (!result.Succeeded)
+        {
+            errorMessage = string.Join(" ", result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        await SignInManager.UserManager.AddToRoleAsync(user, RelayRoles.HostAdmin);
+        await SignInManager.SignInAsync(user, isPersistent: false);
+        Logger.LogWarning("First-run setup created the initial host administrator {Email}", Input.Email);
+        Nav.NavigateTo("/");
+    }
+
+    private sealed class InputModel
+    {
+        [StringLength(200)]
+        public string DisplayName { get; set; } = "";
+
+        [Required, EmailAddress]
+        public string Email { get; set; } = "";
+
+        [Required, DataType(DataType.Password), MinLength(12, ErrorMessage = "Must be at least 12 characters.")]
+        public string Password { get; set; } = "";
+
+        [Required, DataType(DataType.Password), Compare(nameof(Password), ErrorMessage = "Passwords do not match.")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

@@ -38,9 +38,9 @@
 
         <Control Id="ResetPwCheckbox" Type="CheckBox" X="20" Y="145" Width="330" Height="18"
                  Property="RESETADMINPASSWORD" CheckBoxValue="1"
-                 Text="Reset the admin@local password (only if you have lost it)" />
+                 Text="Reset administrator access (only if you have lost admin access)" />
         <Control Id="ResetPwInfo" Type="Text" X="35" Y="167" Width="315" Height="58" Transparent="yes" NoPrefix="yes"
-                 Text="On the next service start a new one-time password is generated for admin@local and written to initial-admin-password.txt (and the Event Log). Leave this unchecked for normal installs." />
+                 Text="On the next service start all administrator accounts are removed; you then define a new administrator through first-run setup in the admin UI. Leave this unchecked for normal installs." />
 
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
@@ -204,9 +204,10 @@
     <CustomAction Id="WriteAdminConfig" BinaryRef="WinSmtpRelayCA" DllEntry="WriteAdminConfig"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
-    <!-- Lost-password recovery: when the operator ticks the reset option, set a registry flag the service
-         reads on its next start to regenerate the admin@local password (same as a fresh install). /reg:64
-         targets the 64-bit view the service reads. The service clears the flag after acting. -->
+    <!-- Lost-access recovery: when the operator ticks the reset option, set a registry flag the service
+         reads on its next start to remove all administrator accounts (the operator then defines a new
+         administrator via first-run setup). /reg:64 targets the 64-bit view the service reads. The service
+         clears the flag after acting. -->
     <CustomAction Id="SetResetAdminFlag"
                   Directory="System64Folder"
                   ExeCommand="reg.exe add HKLM\SOFTWARE\ARDIMEDIA\WinSmtpRelay /v ResetAdminPassword /t REG_DWORD /d 1 /f /reg:64"
