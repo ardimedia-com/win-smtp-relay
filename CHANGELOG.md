@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build50] - 2026-06-25
+
 ### Changed
 
 - **The first administrator is now operator-defined via first-run setup — no admin is auto-seeded.** Previously the service seeded a host administrator `admin@local` on first start and surfaced a one-time password (a file next to the binaries + the Event Log). Now, when no account exists, the sign-in page sends the operator to a first-run setup page (`/account/initial-setup`, anonymous, available only while zero accounts exist) where they create the first administrator with their own email and password. That account becomes the host administrator (full access). The setup page re-checks "no account exists" on submit (closing the only window in which an anonymous page could create an account) and closes itself once an administrator exists, so it cannot be used to add a second one and cannot loop with the login redirect.
