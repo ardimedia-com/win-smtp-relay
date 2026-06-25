@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build56] - 2026-06-25
+
 ### Added
 
 - **Passkeys (WebAuthn) for passwordless sign-in.** Administrators can register a passkey — Windows Hello, Touch ID, a phone, or a hardware security key — from their account page (Your account → Passkeys), then sign in with "Sign in with a passkey" on the sign-in page, no password required. Passkeys are phishing-resistant and, per .NET 10 ASP.NET Core Identity, are a **primary** authentication factor; the passkey sign-in applies the same gates as password sign-in (locked / no-usable-scope accounts are refused). Add/remove and passkey sign-in are audited. Requires HTTPS (always on for the admin plane). Credentials are stored in the new `AspNetUserPasskeys` table.
