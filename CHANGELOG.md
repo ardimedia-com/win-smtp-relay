@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A temporary-password account no longer dead-ends when changing its password without the temporary one.** An administrator created (or reset) by another admin gets a temporary password and `MustChangePassword`; if such an account reached an authenticated session without typing that password — e.g. via the new sign-in link — the forced change-password page still demanded the *current* (temporary) password, which the user did not have. The change-password page now omits the current-password field for a `MustChangePassword` account and sets the new password directly (validated against policy, rolling the security stamp); the current-password re-auth guard is kept for ordinary voluntary password changes.
+
 ## [1.0.0-beta1-build51] - 2026-06-25
 
 ### Added
