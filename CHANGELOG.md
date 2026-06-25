@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build52] - 2026-06-25
+
 ### Added
 
 - **Self-service account page.** A signed-in administrator can now open their own account from the header (click your email, top right) at `/account/profile` to change their password and edit their display name. Previously the change-password page was only reachable from the temporary-password banner, so an ordinary signed-in admin had no way to change their own password in the UI.
