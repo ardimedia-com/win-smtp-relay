@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build49] - 2026-06-25
+
 ### Added
 
 - **DMARC alignment outcome per sender domain.** The Deliverability page now shows a synthesised "DMARC outcome" banner for each sender domain — *Passes (DKIM-aligned)*, *Conditional (SPF only)*, or *Will fail* — answering the question the three per-record checks (SPF/DKIM/DMARC) don't answer on their own: will mail from this domain, sent through this relay, actually reach DMARC pass? A green SPF record alone is not enough; the banner explains that DKIM (which the relay signs with `d=` equal to the From domain) makes alignment robust, whereas an SPF-only setup passes DMARC only when the sending app's envelope-from (Return-Path) is on the From domain.
