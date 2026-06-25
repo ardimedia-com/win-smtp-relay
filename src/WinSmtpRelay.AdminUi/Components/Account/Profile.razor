@@ -1,0 +1,103 @@
+@page "/account/profile"
+@layout AccountLayout
+@attribute [Authorize]
+@attribute [ExcludeFromInteractiveRouting]
+@inject UserManager<AdminUser> UserManager
+@inject SignInManager<AdminUser> SignInManager
+@inject ILogger<Profile> Logger
+
+<h1 class="account-title">Your account</h1>
+<p class="account-subtitle">Manage your administrator account.</p>
+
+@if (saved)
+{
+    <div class="account-info" role="status">Display name saved.</div>
+}
+else if (errorMessage is not null)
+{
+    <div class="account-error" role="alert">@errorMessage</div>
+}
+
+<div class="account-field">
+    <label>Email</label>
+    <div class="account-readonly">@email</div>
+</div>
+@if (!string.IsNullOrEmpty(roleSummary))
+{
+    <div class="account-field">
+        <label>Role</label>
+        <div class="account-readonly">@roleSummary</div>
+    </div>
+}
+
+<EditForm Model="Input" method="post" OnValidSubmit="SaveAsync" FormName="profile">
+    <DataAnnotationsValidator />
+    <div class="account-field">
+        <label for="displayName">Display name</label>
+        <InputText id="displayName" @bind-Value="Input.DisplayName" class="account-input" />
+        <ValidationMessage For="() => Input.DisplayName" />
+    </div>
+    <button type="submit" class="account-button">Save</button>
+</EditForm>
+
+<a class="account-button account-button-secondary" href="/account/change-password" style="margin-top:1rem;">Change password</a>
+
+<p class="account-subtitle" style="margin-top:1rem;text-align:center;">
+    <a href="/">Back to dashboard</a>
+</p>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = new();
+
+    private string email = "";
+    private string roleSummary = "";
+    private bool saved;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+            return;
+
+        email = user.Email ?? user.UserName ?? "";
+        roleSummary = string.Join(", ", await UserManager.GetRolesAsync(user));
+
+        // On the initial GET, seed the form from the stored value; on POST it comes from the form.
+        if (HttpMethods.IsGet(HttpContext.Request.Method))
+            Input.DisplayName = user.DisplayName ?? "";
+    }
+
+    private async Task SaveAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            errorMessage = "Your session has expired. Sign in again.";
+            return;
+        }
+
+        user.DisplayName = string.IsNullOrWhiteSpace(Input.DisplayName) ? null : Input.DisplayName.Trim();
+        var result = await UserManager.UpdateAsync(user);
+        if (!result.Succeeded)
+        {
+            errorMessage = string.Join(" ", result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        // Refresh the cookie so any name-derived claim reflects the change immediately.
+        await SignInManager.RefreshSignInAsync(user);
+        Logger.LogInformation("Admin {Email} updated their display name", user.Email);
+        saved = true;
+    }
+
+    private sealed class InputModel
+    {
+        [StringLength(200)]
+        public string DisplayName { get; set; } = "";
+    }
+}

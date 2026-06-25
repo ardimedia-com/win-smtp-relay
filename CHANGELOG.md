@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Self-service account page.** A signed-in administrator can now open their own account from the header (click your email, top right) at `/account/profile` to change their password and edit their display name. Previously the change-password page was only reachable from the temporary-password banner, so an ordinary signed-in admin had no way to change their own password in the UI.
+
+### Changed
+
+- **System-email from-address is now discoverable and warns when unset.** The relay's own emails (signup verification, password reset, and sign-in links) all use one from-address; if it is not configured, those emails are silently not sent. The Signup page section is relabelled **System emails**, its description now names all three email types, and it shows a warning when no address is set. A matching in-app banner is shown to host administrators (with a link to configure it) so a missing from-address is no longer discovered only by "I clicked the button and nothing arrived". The banner self-clears once an address is set.
+- **The "Accounts" navigation group is renamed "Users & Access"** to make administrator-account management easier to find.
+
 ### Fixed
 
 - **A temporary-password account no longer dead-ends when changing its password without the temporary one.** An administrator created (or reset) by another admin gets a temporary password and `MustChangePassword`; if such an account reached an authenticated session without typing that password — e.g. via the new sign-in link — the forced change-password page still demanded the *current* (temporary) password, which the user did not have. The change-password page now omits the current-password field for a `MustChangePassword` account and sets the new password directly (validated against policy, rolling the security stamp); the current-password re-auth guard is kept for ordinary voluntary password changes.

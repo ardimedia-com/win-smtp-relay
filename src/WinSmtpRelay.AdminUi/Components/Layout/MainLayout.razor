@@ -4,6 +4,8 @@
 @inject IJSRuntime JS
 @inject ICurrentTenant CurrentTenant
 @inject WinSmtpRelay.AdminUi.Services.BrowserTimeService BrowserTime
+@inject IPortalSettingsService PortalSettings
+@inject Microsoft.Extensions.Options.IOptions<WinSmtpRelay.Core.Configuration.AdminUiOptions> UiOptions
 
 @* Constant browser-tab title for every interactive page. Without an always-rendered PageTitle, the
    interactive HeadOutlet blanks the document title on navigation and the browser falls back to the URL
@@ -137,7 +139,7 @@
                scope). API keys are per-tenant, so they appear only when a specific tenant is selected. *@
             <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="acctAuth">
                 <BbSidebarGroup>
-                    <BbSidebarGroupLabel>Accounts</BbSidebarGroupLabel>
+                    <BbSidebarGroupLabel>Users & Access</BbSidebarGroupLabel>
                     <BbSidebarMenu>
                         <BbSidebarMenuItem>
                             <BbSidebarMenuButton Href="adminusers">
@@ -248,7 +250,7 @@
                 <TenantSwitcher />
                 <AuthorizeView>
                     <Authorized>
-                        <span style="font-size:0.85rem;color:var(--muted-foreground);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@context.User.Identity?.Name">@context.User.Identity?.Name</span>
+                        <a href="/account/profile" class="header-user-link" title="Your account — @context.User.Identity?.Name">@context.User.Identity?.Name</a>
                         <form action="/account/logout" method="post" style="margin:0;">
                             <AntiforgeryToken />
                             <button type="submit" class="logout-button" title="Sign out">
@@ -268,6 +270,14 @@
                         <LucideIcon Name="triangle-alert" Size="16" />
                         <span>You are signed in with a temporary password.</span>
                         <a href="/account/change-password">Change it now</a>
+                    </div>
+                }
+                else if (systemEmailUnconfigured)
+                {
+                    <div class="must-change-banner" role="alert">
+                        <LucideIcon Name="triangle-alert" Size="16" />
+                        <span>No from-address is set for system emails — password-reset and sign-in-link emails won't be sent.</span>
+                        <a href="/host/signup">Configure it</a>
                     </div>
                 }
             </Authorized>
@@ -335,6 +345,8 @@
         }
     }
 
+    private bool systemEmailUnconfigured;
+
     protected override async Task OnInitializedAsync()
     {
         if (AuthState is null)
@@ -345,7 +357,21 @@
         // AccountLayout, so this layout — and thus this redirect — never runs there).
         var state = await AuthState;
         if (state.User.HasClaim(RelayClaimTypes.MustChangePassword, "true"))
+        {
             Nav.NavigateTo("/account/change-password", forceLoad: true);
+            return;
+        }
+
+        // Operability nudge for host admins: if no from-address is configured, the relay silently can't
+        // send its own emails (password reset, sign-in links, signup verification). Surface it so it isn't
+        // discovered only by "I clicked the button and nothing arrived". Self-clears once configured.
+        if (state.User.HasClaim(RelayClaimTypes.IsHostAdmin, "true"))
+        {
+            var from = (await PortalSettings.GetAsync()).SignupFromAddress;
+            if (string.IsNullOrWhiteSpace(from))
+                from = UiOptions.Value.SignupFromAddress;
+            systemEmailUnconfigured = string.IsNullOrWhiteSpace(from);
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

@@ -414,6 +414,17 @@ a[class*="button" i] { white-space: nowrap; }
     line-height: 1.45;
 }
 
+/* Read-only value shown like a disabled input on account pages (e.g. email/role on the profile page). */
+.account-readonly {
+    padding: 0.55rem 0.7rem;
+    border-radius: 0.5rem;
+    background: var(--muted);
+    color: var(--muted-foreground);
+    border: 1px solid var(--border);
+    font-size: 0.9rem;
+    word-break: break-all;
+}
+
 .account-error {
     padding: 0.6rem 0.75rem;
     margin-bottom: 1rem;
@@ -425,6 +436,18 @@ a[class*="button" i] { white-space: nowrap; }
 }
 
 .account-card .validation-message { color: var(--destructive); font-size: 0.78rem; }
+
+/* Header user link (opens the account page) */
+.header-user-link {
+    font-size: 0.85rem;
+    color: var(--muted-foreground);
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-decoration: none;
+}
+.header-user-link:hover { color: var(--foreground); text-decoration: underline; }
 
 /* Header logout button + temp-password banner */
 .logout-button {

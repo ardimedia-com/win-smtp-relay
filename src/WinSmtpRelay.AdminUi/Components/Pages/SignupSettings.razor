@@ -1,7 +1,10 @@
 @page "/host/signup"
+@using Microsoft.Extensions.Options
+@using WinSmtpRelay.Core.Configuration
 @using WinSmtpRelay.Core.Interfaces
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
+@inject IOptions<AdminUiOptions> UiOptions
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -41,7 +44,14 @@ else
             </div>
 
             <div class="settings-group">
-                <div class="settings-group-title">Verification email</div>
+                <div class="settings-group-title">System emails</div>
+                @if (!fromAddressConfigured)
+                {
+                    <div class="badge-status badge-warning" style="display:block;padding:0.6rem 0.75rem;line-height:1.5;margin-bottom:0.85rem;">
+                        <strong>No from-address is set.</strong> Password-reset, sign-in-link, and signup-verification
+                        emails will <strong>not be sent</strong> until you set one below.
+                    </div>
+                }
                 <div class="form-group" style="margin-bottom:0;">
                     <BbLabel For="from-address">From-address</BbLabel>
                     <div style="display:flex;gap:0.5rem;align-items:center;">
@@ -51,9 +61,10 @@ else
                         </BbButton>
                     </div>
                     <p class="text-muted" style="font-size:0.8rem;margin-top:0.5rem;margin-bottom:0;">
-                        From-address for signup verification and password-reset emails, sent through this relay's own
-                        delivery pipeline. Leave blank to use the <span class="mono">appsettings</span> value. The domain
-                        should be one this relay is configured to send for (accepted sender domain, ideally with DKIM).
+                        From-address for the emails this relay sends itself — signup verification, password reset, and
+                        sign-in links — through its own delivery pipeline. Leave blank to use the
+                        <span class="mono">appsettings</span> value. The domain should be one this relay is configured to
+                        send for (accepted sender domain, ideally with DKIM).
                     </p>
                 </div>
             </div>
@@ -87,6 +98,7 @@ else
     private string? signupFromAddress;
     private string signupMaxPerHour = "5";
     private bool isLoading = true;
+    private bool fromAddressConfigured;
     private string? statusMessage;
 
     protected override async Task OnInitializedAsync()
@@ -96,8 +108,15 @@ else
         signupEnabled = portal.SelfServiceSignupEnabled;
         signupFromAddress = portal.SignupFromAddress;
         signupMaxPerHour = portal.SignupMaxAttemptsPerIpPerHour.ToString();
+        UpdateFromAddressConfigured();
         isLoading = false;
     }
+
+    // The effective from-address is the DB value if set, otherwise the appsettings fallback. When both are
+    // blank, no system email (verification, password reset, sign-in link) can be sent.
+    private void UpdateFromAddressConfigured()
+        => fromAddressConfigured = !string.IsNullOrWhiteSpace(signupFromAddress)
+            || !string.IsNullOrWhiteSpace(UiOptions.Value.SignupFromAddress);
 
     private async Task OnToggleAsync(bool value)
     {
@@ -111,6 +130,7 @@ else
     {
         using var scope = ScopeFactory.CreateScope();
         await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSignupFromAddressAsync(signupFromAddress);
+        UpdateFromAddressConfigured();
         statusMessage = string.IsNullOrWhiteSpace(signupFromAddress)
             ? "From-address cleared (using the appsettings value)."
             : $"From-address set to {signupFromAddress.Trim()}.";
