@@ -213,6 +213,31 @@
                   ExeCommand="reg.exe add HKLM\SOFTWARE\ARDIMEDIA\WinSmtpRelay /v ResetAdminPassword /t REG_DWORD /d 1 /f /reg:64"
                   Execute="deferred" Return="ignore" Impersonate="no" />
 
+    <!-- Register the SYSTEM updater scheduled task (elevated). This task is the security boundary for the
+         unattended self-update: it RE-VERIFIES the staged MSI's Authenticode signature + publisher before
+         installing as SYSTEM, so the low-privilege relay account (NetworkService) can hand it a verified
+         download without ever gaining SYSTEM code-execution. Mirrors HardenInstallDirAcl: deferred type-34
+         CA with [INSTALLFOLDER] in the command. -Force overwrites any prior registration on upgrade. -->
+    <CustomAction Id="RegisterUpdateTask"
+                  Directory="System64Folder"
+                  ExeCommand="powershell.exe -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command &quot;Register-ScheduledTask -TaskName 'WinSmtpRelayUpdate' -Xml ([System.IO.File]::ReadAllText('[INSTALLFOLDER]update-task.xml')) -Force&quot;"
+                  Execute="deferred" Return="ignore" Impersonate="no" />
+
+    <!-- Remove the updater task on uninstall. -->
+    <CustomAction Id="UnregisterUpdateTask"
+                  Directory="System64Folder"
+                  ExeCommand="powershell.exe -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command &quot;Unregister-ScheduledTask -TaskName 'WinSmtpRelayUpdate' -Confirm:$false -ErrorAction SilentlyContinue&quot;"
+                  Execute="deferred" Return="ignore" Impersonate="no" />
+
+    <!-- Lock the SYSTEM-only updater staging folder to SYSTEM + Administrators (break inheritance) so the
+         low-privilege relay account cannot tamper with the package between the task's signature check and
+         the install (TOCTOU). Mirrors HardenInstallDirAcl. "[UpdaterWorkFolder]." keeps the trailing
+         backslash from escaping the closing quote. -->
+    <CustomAction Id="HardenUpdaterWorkAcl"
+                  Directory="System64Folder"
+                  ExeCommand="icacls.exe &quot;[UpdaterWorkFolder].&quot; /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F"
+                  Execute="deferred" Return="ignore" Impersonate="no" />
+
     <InstallUISequence>
       <Custom Action="CheckPorts" After="CostFinalize"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
@@ -238,11 +263,17 @@
               Condition="(NOT Installed) OR (WSRMAINTUI = &quot;1&quot; AND NOT REMOVE)" />
       <Custom Action="HardenInstallDirAcl" After="WriteAdminConfig"
               Condition="NOT (REMOVE = &quot;ALL&quot;)" />
+      <Custom Action="HardenUpdaterWorkAcl" After="HardenInstallDirAcl"
+              Condition="NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom Action="SetResetAdminFlag" After="WriteRegistryValues"
               Condition="RESETADMINPASSWORD = &quot;1&quot;" />
       <Custom Action="StartServiceOnUpgrade"
               After="StartServices"
               Condition="WIX_UPGRADE_DETECTED AND (SERVICEWASRUNNING = &quot;#1&quot;)" />
+      <!-- (Re)register the SYSTEM updater task on every install/upgrade, after the task XML is laid down;
+           remove it on a full uninstall. -->
+      <Custom Action="RegisterUpdateTask" After="StartServices" Condition="NOT REMOVE" />
+      <Custom Action="UnregisterUpdateTask" Before="RemoveFiles" Condition="REMOVE = &quot;ALL&quot;" />
     </InstallExecuteSequence>
 
     <!-- .NET 10 runtime check for framework-dependent variant -->
@@ -274,6 +305,9 @@
       <ComponentRef Id="EventLogSource" />
       <ComponentRef Id="InstallDirPermissions" />
       <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="UpdateDropFolderComponent" />
+      <ComponentRef Id="UpdaterWorkFolderComponent" />
+      <ComponentRef Id="UpdaterTaskFile" />
 
       <!-- Auto-harvested published files -->
       <Files Directory="INSTALLFOLDER" Include="$(var.HarvestPath)**">

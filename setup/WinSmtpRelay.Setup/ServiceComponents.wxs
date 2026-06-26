@@ -115,6 +115,46 @@
       </CreateFolder>
     </Component>
 
+    <!-- ============================================================
+         Unattended self-update support. The relay service runs as the low-privilege NetworkService and
+         cannot install an MSI; it downloads + verifies the package, stages it here, and triggers the
+         elevated SYSTEM updater task (registered in Package.wxs), which RE-VERIFIES the signature before
+         installing. See update-task.xml.
+         ============================================================ -->
+
+    <!-- Staging folder for the verified MSI (ProgramData), writable by the service account so the service
+         can hand the package to the SYSTEM updater task. -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="WsrProgramData" Name="WinSmtpRelay">
+        <Directory Id="UpdateDropFolder" Name="updates" />
+        <Directory Id="UpdaterWorkFolder" Name="updater-work" />
+      </Directory>
+    </StandardDirectory>
+
+    <Component Id="UpdateDropFolderComponent" Directory="UpdateDropFolder" Guid="e3f1a8b4-2c6d-4e9a-bf01-7a2c5d8e9f01">
+      <CreateFolder>
+        <util:PermissionEx User="NT AUTHORITY\NetworkService" GenericAll="yes" />
+      </CreateFolder>
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" Name="UpdateDropConfigured"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- SYSTEM-only staging-copy folder: the updater task copies pending.msi here (the service account
+         CANNOT write it) and verifies + installs the copy, which closes the time-of-check/time-of-use gap.
+         Its ACL is tightened to SYSTEM + Administrators (inheritance broken) by HardenUpdaterWorkAcl in
+         Package.wxs — so it grants NO write to NetworkService here. -->
+    <Component Id="UpdaterWorkFolderComponent" Directory="UpdaterWorkFolder" Guid="b4c2d9e6-3f70-4a1c-8d52-9e0a1b2c3d4f">
+      <CreateFolder />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" Name="UpdaterWorkConfigured"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- The updater scheduled-task definition, installed next to the binaries. The MSI reads it once to
+         register the SYSTEM task; the registered task is independent of this file afterward. -->
+    <Component Id="UpdaterTaskFile" Directory="INSTALLFOLDER" Guid="a7b2c9d4-5e6f-4a1b-9c8d-2e3f4a5b6c7d">
+      <File Id="UpdateTaskXml" Source="update-task.xml" KeyPath="yes" />
+    </Component>
+
     <!-- Start menu shortcut to the admin UI (opens the URL in the default browser). The URL is the
          default admin endpoint; a future installer step can substitute the chosen port. -->
     <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="f4a2c1d7-8b3e-4c5a-9d6f-2e1b7c0a5d3e">

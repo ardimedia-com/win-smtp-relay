@@ -25,4 +25,7 @@ public static class AdminAuditActions
 
     public const string PasskeyAdded = "passkey.added";
     public const string PasskeyRemoved = "passkey.removed";
+
+    /// <summary>An administrator triggered an unattended software self-update (download + verified install).</summary>
+    public const string ServerUpdateStarted = "server.update_started";
 }

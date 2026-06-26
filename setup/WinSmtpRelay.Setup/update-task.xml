@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WIN-SMTP-RELAY unattended updater task.
+
+  Registered by the MSI (elevated). Runs as SYSTEM and is the SECURITY BOUNDARY for the self-update:
+  the relay service runs as the low-privilege NetworkService account and cannot install an MSI, so it
+  downloads + verifies the package, stages it as %ProgramData%\WinSmtpRelay\updates\pending.msi (a folder
+  the service account may write), and writes Windows Event 9100 (source WinSmtpRelay.Service) — the event
+  trigger below.
+
+  This task then (a) COPIES the staged MSI into %ProgramData%\WinSmtpRelay\updater-work — a SYSTEM-only
+  folder the service account cannot write — and (b) RE-VERIFIES that copy's Authenticode signature and the
+  exact Organization (O=ARDIMEDIA) before installing it. The copy closes the time-of-check/time-of-use gap
+  (the service account can no longer swap the file between verification and install), and the publisher pin
+  is on the O RDN, not a loose substring. So a compromised relay account can never get an unsigned or
+  foreign package installed as SYSTEM.
+
+  The action is a base64 -EncodedCommand (UTF-16LE), baked into the task definition (which lives under
+  C:\Windows\System32\Tasks, writable only by SYSTEM/Administrators) so the low-privilege account cannot
+  tamper with what runs. Decoded, it is:
+
+      $ErrorActionPreference = 'Stop'
+      $drop = Join-Path $env:ProgramData 'WinSmtpRelay\updates'
+      $work = Join-Path $env:ProgramData 'WinSmtpRelay\updater-work'
+      $pending = Join-Path $drop 'pending.msi'
+      $staged = Join-Path $work 'staged.msi'
+      $log = Join-Path $work 'update.log'
+      if (-not (Test-Path $pending)) { exit 10 }
+      New-Item -ItemType Directory -Force -Path $work | Out-Null
+      if (Test-Path $staged) { Remove-Item $staged -Force }
+      Copy-Item -LiteralPath $pending -Destination $staged -Force      # snapshot into the SYSTEM-only dir
+      Remove-Item -LiteralPath $pending -Force -ErrorAction SilentlyContinue
+      $sig = Get-AuthenticodeSignature $staged
+      if ($sig.Status -ne 'Valid') { Remove-Item $staged -Force -EA SilentlyContinue; exit 11 }
+      if ($sig.SignerCertificate.Subject -notmatch '(?i)(^|,\s*)O=ARDIMEDIA(\s*,|\s*$)') { Remove-Item $staged -Force -EA SilentlyContinue; exit 12 }
+      $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$staged`"", '/qn', '/norestart', '/l*v', "`"$log`"") -Wait -PassThru
+      Start-Sleep -Seconds 2
+      Start-Service 'WinSmtpRelay' -ErrorAction SilentlyContinue
+      Remove-Item $staged -Force -ErrorAction SilentlyContinue
+      exit $p.ExitCode
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>WIN-SMTP-RELAY unattended updater. Triggered by the relay service (Application event 9100); copies the staged MSI to a SYSTEM-only folder, re-verifies its Authenticode signature (publisher O=ARDIMEDIA), and installs it as SYSTEM.</Description>
+    <URI>\WinSmtpRelayUpdate</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <EventTrigger>
+      <Enabled>true</Enabled>
+      <Subscription>&lt;QueryList&gt;&lt;Query Id="0" Path="Application"&gt;&lt;Select Path="Application"&gt;*[System[Provider[@Name='WinSmtpRelay.Service'] and (EventID=9100)]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>
+    </EventTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>false</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+    <Priority>5</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQAgAD0AIAAnAFMAdABvAHAAJwAKACQAZAByAG8AcAAgAD0AIABKAG8AaQBuAC0AUABhAHQAaAAgACQAZQBuAHYAOgBQAHIAbwBnAHIAYQBtAEQAYQB0AGEAIAAnAFcAaQBuAFMAbQB0AHAAUgBlAGwAYQB5AFwAdQBwAGQAYQB0AGUAcwAnAAoAJAB3AG8AcgBrACAAPQAgAEoAbwBpAG4ALQBQAGEAdABoACAAJABlAG4AdgA6AFAAcgBvAGcAcgBhAG0ARABhAHQAYQAgACcAVwBpAG4AUwBtAHQAcABSAGUAbABhAHkAXAB1AHAAZABhAHQAZQByAC0AdwBvAHIAawAnAAoAJABwAGUAbgBkAGkAbgBnACAAPQAgAEoAbwBpAG4ALQBQAGEAdABoACAAJABkAHIAbwBwACAAJwBwAGUAbgBkAGkAbgBnAC4AbQBzAGkAJwAKACQAcwB0AGEAZwBlAGQAIAA9ACAASgBvAGkAbgAtAFAAYQB0AGgAIAAkAHcAbwByAGsAIAAnAHMAdABhAGcAZQBkAC4AbQBzAGkAJwAKACQAbABvAGcAIAA9ACAASgBvAGkAbgAtAFAAYQB0AGgAIAAkAHcAbwByAGsAIAAnAHUAcABkAGEAdABlAC4AbABvAGcAJwAKAGkAZgAgACgALQBuAG8AdAAgACgAVABlAHMAdAAtAFAAYQB0AGgAIAAkAHAAZQBuAGQAaQBuAGcAKQApACAAewAgAGUAeABpAHQAIAAxADAAIAB9AAoATgBlAHcALQBJAHQAZQBtACAALQBJAHQAZQBtAFQAeQBwAGUAIABEAGkAcgBlAGMAdABvAHIAeQAgAC0ARgBvAHIAYwBlACAALQBQAGEAdABoACAAJAB3AG8AcgBrACAAfAAgAE8AdQB0AC0ATgB1AGwAbAAKAGkAZgAgACgAVABlAHMAdAAtAFAAYQB0AGgAIAAkAHMAdABhAGcAZQBkACkAIAB7ACAAUgBlAG0AbwB2AGUALQBJAHQAZQBtACAAJABzAHQAYQBnAGUAZAAgAC0ARgBvAHIAYwBlACAAfQAKAEMAbwBwAHkALQBJAHQAZQBtACAALQBMAGkAdABlAHIAYQBsAFAAYQB0AGgAIAAkAHAAZQBuAGQAaQBuAGcAIAAtAEQAZQBzAHQAaQBuAGEAdABpAG8AbgAgACQAcwB0AGEAZwBlAGQAIAAtAEYAbwByAGMAZQAKAFIAZQBtAG8AdgBlAC0ASQB0AGUAbQAgAC0ATABpAHQAZQByAGEAbABQAGEAdABoACAAJABwAGUAbgBkAGkAbgBnACAALQBGAG8AcgBjAGUAIAAtAEUAcgByAG8AcgBBAGMAdABpAG8AbgAgAFMAaQBsAGUAbgB0AGwAeQBDAG8AbgB0AGkAbgB1AGUACgAkAHMAaQBnACAAPQAgAEcAZQB0AC0AQQB1AHQAaABlAG4AdABpAGMAbwBkAGUAUwBpAGcAbgBhAHQAdQByAGUAIAAkAHMAdABhAGcAZQBkAAoAaQBmACAAKAAkAHMAaQBnAC4AUwB0AGEAdAB1AHMAIAAtAG4AZQAgACcAVgBhAGwAaQBkACcAKQAgAHsAIABSAGUAbQBvAHYAZQAtAEkAdABlAG0AIAAkAHMAdABhAGcAZQBkACAALQBGAG8AcgBjAGUAIAAtAEUAcgByAG8AcgBBAGMAdABpAG8AbgAgAFMAaQBsAGUAbgB0AGwAeQBDAG8AbgB0AGkAbgB1AGUAOwAgAGUAeABpAHQAIAAxADEAIAB9AAoAaQBmACAAKAAkAHMAaQBnAC4AUwBpAGcAbgBlAHIAQwBlAHIAdABpAGYAaQBjAGEAdABlAC4AUwB1AGIAagBlAGMAdAAgAC0AbgBvAHQAbQBhAHQAYwBoACAAJwAoAD8AaQApACgAXgB8ACwAXABzACoAKQBPAD0AQQBSAEQASQBNAEUARABJAEEAKABcAHMAKgAsAHwAXABzACoAJAApACcAKQAgAHsAIABSAGUAbQBvAHYAZQAtAEkAdABlAG0AIAAkAHMAdABhAGcAZQBkACAALQBGAG8AcgBjAGUAIAAtAEUAcgByAG8AcgBBAGMAdABpAG8AbgAgAFMAaQBsAGUAbgB0AGwAeQBDAG8AbgB0AGkAbgB1AGUAOwAgAGUAeABpAHQAIAAxADIAIAB9AAoAJABwACAAPQAgAFMAdABhAHIAdAAtAFAAcgBvAGMAZQBzAHMAIABtAHMAaQBlAHgAZQBjAC4AZQB4AGUAIAAtAEEAcgBnAHUAbQBlAG4AdABMAGkAcwB0ACAAQAAoACcALwBpACcALAAgACIAYAAiACQAcwB0AGEAZwBlAGQAYAAiACIALAAgACcALwBxAG4AJwAsACAAJwAvAG4AbwByAGUAcwB0AGEAcgB0ACcALAAgACcALwBsACoAdgAnACwAIAAiAGAAIgAkAGwAbwBnAGAAIgAiACkAIAAtAFcAYQBpAHQAIAAtAFAAYQBzAHMAVABoAHIAdQAKAFMAdABhAHIAdAAtAFMAbABlAGUAcAAgAC0AUwBlAGMAbwBuAGQAcwAgADIACgBTAHQAYQByAHQALQBTAGUAcgB2AGkAYwBlACAAJwBXAGkAbgBTAG0AdABwAFIAZQBsAGEAeQAnACAALQBFAHIAcgBvAHIAQQBjAHQAaQBvAG4AIABTAGkAbABlAG4AdABsAHkAQwBvAG4AdABpAG4AdQBlAAoAUgBlAG0AbwB2AGUALQBJAHQAZQBtACAAJABzAHQAYQBnAGUAZAAgAC0ARgBvAHIAYwBlACAALQBFAHIAcgBvAHIAQQBjAHQAaQBvAG4AIABTAGkAbABlAG4AdABsAHkAQwBvAG4AdABpAG4AdQBlAAoAZQB4AGkAdAAgACQAcAAuAEUAeABpAHQAQwBvAGQAZQAKAA==</Arguments>
+    </Exec>
+  </Actions>
+</Task>

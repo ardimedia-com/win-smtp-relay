@@ -14,6 +14,7 @@ using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Delivery;
 using WinSmtpRelay.Security;
+using WinSmtpRelay.Service.HealthChecks;
 using WinSmtpRelay.SmtpListener;
 using WinSmtpRelay.Storage;
 using WinSmtpRelay.Storage.Identity;
@@ -43,6 +44,8 @@ builder.Services.Configure<BackupMxOptions>(builder.Configuration.GetSection(Bac
 builder.Services.Configure<StatisticsOptions>(builder.Configuration.GetSection(StatisticsOptions.SectionName));
 builder.Services.Configure<DataRetentionOptions>(builder.Configuration.GetSection(DataRetentionOptions.SectionName));
 builder.Services.Configure<DnsOptions>(builder.Configuration.GetSection(DnsOptions.SectionName));
+builder.Services.Configure<HealthCheckOptions>(builder.Configuration.GetSection(HealthCheckOptions.SectionName));
+builder.Services.Configure<UpdateOptions>(builder.Configuration.GetSection(UpdateOptions.SectionName));
 
 // Storage
 var connectionString = builder.Configuration.GetConnectionString("RelayDb") ?? "Data Source=winsmtprelay.db";
@@ -163,6 +166,11 @@ if (adminUiConfig.Enabled)
     builder.Services.AddHostedService<WinSmtpRelay.Service.TrayIconService>();
     builder.Services.AddHostedService<WinSmtpRelay.Service.StatisticsAggregator>();
     builder.Services.AddHostedService<WinSmtpRelay.Service.ReportingService>();
+    // Daily self-check (setup/deliverability/journal diagnostics) + its scheduled runner.
+    builder.Services.AddRelayHealthChecks();
+    builder.Services.AddHostedService<HealthCheckService>();
+    // Unattended software self-update (download + verify + hand to the elevated SYSTEM updater task).
+    builder.Services.AddSingleton<WinSmtpRelay.Core.Interfaces.IUpdateService, WinSmtpRelay.Service.Update.UpdateService>();
     builder.Services.AddHostedService<WinSmtpRelay.Storage.ConfigurationSeeder>();
     builder.Services.AddHostedService<WinSmtpRelay.Service.AdminSeeder>();
 }

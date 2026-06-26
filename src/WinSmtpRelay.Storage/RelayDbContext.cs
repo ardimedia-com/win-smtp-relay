@@ -17,6 +17,10 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<RelayUser> RelayUsers => Set<RelayUser>();
     public DbSet<DailyStatistics> DailyStatistics => Set<DailyStatistics>();
 
+    // Daily self-check (host-level setup/deliverability/journal diagnostic) — not tenant-owned.
+    public DbSet<HealthCheckSnapshot> HealthCheckSnapshots => Set<HealthCheckSnapshot>();
+    public DbSet<HealthCheckFinding> HealthCheckFindings => Set<HealthCheckFinding>();
+
     // Multi-tenancy + admin auth
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
@@ -164,6 +168,30 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
         modelBuilder.Entity<DailyStatistics>(entity =>
         {
             entity.HasKey(e => new { e.TenantId, e.Date });
+        });
+
+        // Daily self-check snapshots + their findings (host-level; cascade-deleted with the snapshot).
+        modelBuilder.Entity<HealthCheckSnapshot>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.RunUtc);
+            entity.Ignore(e => e.OverallSeverity);
+            entity.Ignore(e => e.IssueCount);
+            entity.HasMany(e => e.Findings)
+                .WithOne()
+                .HasForeignKey(f => f.SnapshotId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<HealthCheckFinding>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.SnapshotId);
+            entity.Property(e => e.Category).HasMaxLength(40);
+            entity.Property(e => e.Code).HasMaxLength(80);
+            entity.Property(e => e.Title).HasMaxLength(300);
+            entity.Property(e => e.Target).HasMaxLength(320);
+            entity.Property(e => e.Severity).HasConversion<int>();
         });
 
         // Configuration entities

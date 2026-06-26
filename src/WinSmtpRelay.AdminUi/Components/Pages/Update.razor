@@ -1,8 +1,14 @@
 @page "/update"
 @using System.Text.Json
 @using System.Text.RegularExpressions
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using WinSmtpRelay.Core.Interfaces
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IHttpClientFactory HttpClientFactory
+@inject IUpdateService Updater
+@inject IAdminAuditService Audit
+@inject NavigationManager Nav
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -42,6 +48,34 @@
         </p>
     </BbCardContent>
 </BbCard>
+
+@if (installing || installLaunched || installMessage is not null)
+{
+    <BbCard Class="mb-1">
+        <BbCardContent Class="pt-6">
+            @if (installing)
+            {
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                    <BbSpinner /> <span class="text-muted">Downloading and verifying the update…</span>
+                </div>
+            }
+            else if (installLaunched)
+            {
+                <BbAlert>
+                    <strong>Update is installing.</strong> The service will stop, install @installVersion, and restart
+                    (about a minute). This page briefly loses its connection. @installMessage
+                </BbAlert>
+                <BbButton Variant="ButtonVariant.Outline" Class="mt-1" @onclick="Reload">
+                    <LucideIcon Name="refresh-cw" /> Reload to check
+                </BbButton>
+            }
+            else if (installMessage is not null)
+            {
+                <BbAlert>@installMessage</BbAlert>
+            }
+        </BbCardContent>
+    </BbCard>
+}
 
 @if (isChecking)
 {
@@ -170,7 +204,40 @@ else
     </BbDialogContent>
 </BbDialog>
 
+<BbDialog @bind-Open="showInstallConfirm">
+    <BbDialogContent>
+        <BbDialogHeader>
+            <BbDialogTitle>Install update on this server?</BbDialogTitle>
+            <BbDialogDescription>Unattended install of @installVersion (@installVariant)</BbDialogDescription>
+        </BbDialogHeader>
+        <div style="font-size:0.875rem;line-height:1.6;">
+            <p>
+                The server downloads the signed installer, verifies its Authenticode signature
+                (publisher <strong>ARDIMEDIA</strong>), and installs it silently. The
+                <strong>service stops, upgrades, and restarts</strong> — the admin UI is briefly unavailable.
+                Your <code>appsettings.json</code> and database are preserved across the update.
+            </p>
+        </div>
+        <BbDialogFooter>
+            <BbButton Variant="ButtonVariant.Outline" @onclick="() => showInstallConfirm = false">Cancel</BbButton>
+            <BbButton Variant="ButtonVariant.Default" @onclick="InstallAsync" Disabled="@installing">
+                <LucideIcon Name="download" /> Install now
+            </BbButton>
+        </BbDialogFooter>
+    </BbDialogContent>
+</BbDialog>
+
 @code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool showInstallConfirm;
+    private string? installAsset;
+    private string? installVersion;
+    private string? installVariant;
+    private bool installing;
+    private bool installLaunched;
+    private string? installMessage;
+
     private bool showHelp;
     private string currentVersion = typeof(Update).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion
                                      ?? typeof(Update).Assembly.GetName().Version?.ToString()
@@ -232,6 +299,13 @@ else
                     }
                 </tbody>
             </table>
+
+            if (Updater.IsSupported)
+            {
+                <BbButton Variant="ButtonVariant.Default" Class="mt-1" @onclick="() => PromptInstall(release, scAsset, fdAsset)">
+                    <LucideIcon Name="download" /> Install on this server
+                </BbButton>
+            }
         }
 
         if (!string.IsNullOrEmpty(release.Body))
@@ -304,6 +378,60 @@ else
             isChecking = false;
         }
     }
+
+    private void PromptInstall(GitHubRelease release, GitHubAsset? sc, GitHubAsset? fd)
+    {
+        // Match the installed variant so we don't swap self-contained <-> framework-dependent unintentionally:
+        // a self-contained install ships the runtime (coreclr.dll) next to the binaries.
+        var selfContained = File.Exists(Path.Combine(AppContext.BaseDirectory, "coreclr.dll"));
+        var chosen = selfContained ? (sc ?? fd) : (fd ?? sc);
+        if (chosen is null) return;
+
+        installAsset = chosen.DownloadUrl;
+        installVersion = release.TagName?.TrimStart('v') ?? "";
+        installVariant = chosen == sc ? "self-contained" : "framework-dependent";
+        installMessage = null;
+        installLaunched = false;
+        showInstallConfirm = true;
+    }
+
+    // Non-idempotent + privileged: guard against a double-submit with the busy flag before any await.
+    private async Task InstallAsync()
+    {
+        if (installing || installAsset is null) return;
+        installing = true;
+        showInstallConfirm = false;
+        installMessage = null;
+        StateHasChanged();
+        try
+        {
+            var result = await Updater.StartUpdateAsync(installAsset, installVersion ?? "");
+            installMessage = result.Message;
+            installLaunched = result.Launched;
+            if (result.Launched)
+                await WriteAuditAsync();
+        }
+        catch (Exception ex)
+        {
+            installMessage = $"Update could not be started: {ex.Message}";
+            installLaunched = false;
+        }
+        finally
+        {
+            installing = false;
+        }
+    }
+
+    private async Task WriteAuditAsync()
+    {
+        if (AuthState is null) return;
+        var user = (await AuthState).User;
+        int? uid = int.TryParse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+        var email = user.FindFirst(ClaimTypes.Email)?.Value ?? user.Identity?.Name;
+        await Audit.WriteAsync(AdminAuditActions.ServerUpdateStarted, uid, email, detail: $"{installVariant} {installVersion}");
+    }
+
+    private void Reload() => Nav.NavigateTo("/update", forceLoad: true);
 
     /// <summary>
     /// Semver-aware comparison: 1.0.0 > 1.0.0-beta13 > 1.0.0-beta2 > 1.0.0-alpha1

@@ -21,6 +21,7 @@ the source with DocFX). See also [Using the components](#using-the-components-em
 - DKIM signing (per tenant), inbound SPF/DKIM/DMARC verification (DMARC passes via SPF *or* DKIM alignment)
 - Setup page (`/setup`): live per-organization readiness checklist (can-send + deliverability) with the DNS records to publish, a test-message sender, and a local authentication self-test ("Verify auth, no send") that builds, signs and verifies a message against the relay's own key to confirm it will pass DMARC
 - Health page (`/health`): live deliverability checks per sender domain and sending IP — a synthesised **DMARC alignment outcome** per domain (passes via DKIM / conditional via SPF / will fail), plus SPF, DKIM, DMARC, MX, reverse DNS (PTR/FCrDNS), public-hostname A/AAAA, SPF coverage and 10-lookup-limit warnings, and DNSBL (Spamhaus ZEN / SpamCop), with copy-ready records
+- Daily self-check (`/diagnostics`): a once-a-day diagnostic of setup correctness, deliverability and the message journal — SPF/DKIM/DMARC alignment, reverse DNS, DNSBL and outbound-IP drift, outbound port 25 and smart-host reachability/credentials, TLS and admin-certificate expiry, required sending identity, every listener port actually accepting, queue health (oldest-pending age, stuck/retrying messages, 24h bounce rate, suppression spikes, disk space), relay-security posture, pending migrations, Event Log errors and clock skew. Surfaced in the daily report, on a Self-check page (with run history and an on-demand "Run now"), and as an immediate alert email when a new blocking problem appears
 - Optional envelope-from (Return-Path) realignment on delivery (`Delivery:AlignReturnPath`) so SPF aligns for DMARC; off by default, with a warning logged when an unaligned envelope-from is detected
 - Domain ownership verification (DNS TXT) for accepted sender and recipient domains, with optional enforcement on the SMTP path
 - IP-based relay restrictions, with optional strict IP-to-tenant binding for unauthenticated submission (blocks cross-tenant sender-domain spoofing)
@@ -30,6 +31,7 @@ the source with DocFX). See also [Using the components](#using-the-components-em
 - Multi-tenant: isolated per-tenant configuration and data, **a single admin can be delegated to several tenants**, a tenant switcher, per-tenant egress (source) IP, and optional self-service tenant signup
 - REST API for management and monitoring
 - Windows Service with Event Log integration
+- Unattended self-update (`/update` → "Install on this server"): downloads the signed MSI from the official GitHub release, verifies its Authenticode signature (publisher ARDIMEDIA), and installs it via an elevated SYSTEM scheduled task that re-verifies the signature before installing — the relay service stays least-privilege (NetworkService) and never installs the MSI itself; settings and database are preserved
 - MSI installer (WiX v5)
 
 ## Architecture

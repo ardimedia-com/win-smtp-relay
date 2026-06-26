@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using WinSmtpRelay.Core.Health;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Mail;
 using WinSmtpRelay.Core.Models;
@@ -204,6 +205,8 @@ public class ReportingService(
             }
         }
 
+        await AppendHealthSectionAsync(sp, sb, ct);
+
         return new SystemEmailContent
         {
             Title = "Daily report",
@@ -211,6 +214,43 @@ public class ReportingService(
             MonospaceBlock = sb.ToString(),
             FooterNote = "Sent by WIN-SMTP-RELAY email reporting — configure under Settings → Reporting.",
         };
+    }
+
+    /// <summary>Appends the latest daily self-check summary (Setup &amp; Health) to the digest body.</summary>
+    private static async Task AppendHealthSectionAsync(IServiceProvider sp, StringBuilder sb, CancellationToken ct)
+    {
+        var snapshot = await sp.GetRequiredService<IHealthCheckSnapshotService>().GetLatestAsync(ct);
+        sb.AppendLine();
+        if (snapshot is null)
+        {
+            sb.AppendLine("Setup & health self-check: not run yet.");
+            return;
+        }
+
+        sb.AppendLine($"Setup & health self-check (as of {snapshot.RunUtc:yyyy-MM-dd HH:mm} UTC):");
+        sb.AppendLine($"  Errors:   {snapshot.ErrorCount}");
+        sb.AppendLine($"  Warnings: {snapshot.WarningCount}");
+        sb.AppendLine($"  OK:       {snapshot.OkCount}");
+
+        var issues = snapshot.Findings
+            .Where(x => x.Severity >= HealthSeverity.Warning)
+            .OrderByDescending(x => x.Severity)
+            .Take(15)
+            .ToList();
+        if (issues.Count == 0)
+        {
+            sb.AppendLine("  No problems found.");
+            return;
+        }
+
+        sb.AppendLine();
+        foreach (var x in issues)
+        {
+            var target = string.IsNullOrWhiteSpace(x.Target) ? "" : $" [{x.Target}]";
+            sb.AppendLine($"  [{x.Severity.ToString().ToUpperInvariant()}] {x.Title}{target}");
+        }
+        if (snapshot.IssueCount > issues.Count)
+            sb.AppendLine($"  … and {snapshot.IssueCount - issues.Count} more — see Diagnostics in the admin UI.");
     }
 
     /// <summary>Delivery-log counts over the last 24h (host-wide). Suppressed skips are excluded from bounces.</summary>

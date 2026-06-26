@@ -1,0 +1,248 @@
+@page "/diagnostics"
+@attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
+@using WinSmtpRelay.Core.Health
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject IHealthCheckSnapshotService Snapshots
+@inject IHealthCheckRunner Runner
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>Self-check</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header page-header-row">
+    <div>
+        <h1>Self-check</h1>
+        <p>
+            A daily diagnostic of setup correctness, deliverability and the message journal. It runs once a day
+            and is summarised in the daily report; a new blocking problem also triggers an immediate alert.
+            Run it on demand here.
+        </p>
+    </div>
+    <div class="flex gap-1 items-center">
+        <BbButton Variant="ButtonVariant.Default" Size="ButtonSize.Small" @onclick="RunNowAsync" Disabled="@isRunning">
+            @if (isRunning)
+            {
+                <span class="spin" style="display:inline-flex;"><LucideIcon Name="loader-circle" /></span> <text>Running…</text>
+            }
+            else
+            {
+                <LucideIcon Name="play" /> <text>Run now</text>
+            }
+        </BbButton>
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <BbCard>
+        <BbCardContent>
+            <BbSkeleton Class="h-[160px] w-full" />
+        </BbCardContent>
+    </BbCard>
+}
+else if (loadError is not null)
+{
+    <p class="text-danger">@loadError</p>
+}
+else if (latest is null)
+{
+    <BbCard>
+        <BbCardContent>
+            <div class="text-muted" style="padding:1rem 0;">
+                The self-check hasn't run yet. It runs automatically each day; click <strong>Run now</strong> to run it immediately.
+            </div>
+        </BbCardContent>
+    </BbCard>
+}
+else
+{
+    @* ---- Summary ---- *@
+    <BbCard Class="mb-1">
+        <BbCardHeader>
+            <BbCardTitle>
+                <span class="badge-status @BadgeCss(latest.OverallSeverity)" style="margin-right:0.5rem;">@SeverityLabel(latest.OverallSeverity)</span>
+                @(latest.IssueCount == 0 ? "No problems found" : $"{latest.IssueCount} item(s) need attention")
+            </BbCardTitle>
+            <BbCardDescription>
+                Last run <LocalTime Utc="latest.RunUtc" Format="yyyy-MM-dd HH:mm" /> · @latest.DurationMs ms
+            </BbCardDescription>
+        </BbCardHeader>
+        <BbCardContent>
+            <div class="flex gap-1 items-center" style="flex-wrap:wrap;">
+                <span class="badge-status badge-error">@latest.ErrorCount error(s)</span>
+                <span class="badge-status badge-warning">@latest.WarningCount warning(s)</span>
+                <span class="badge-status badge-muted">@latest.InfoCount info</span>
+                <span class="badge-status badge-success">@latest.OkCount ok</span>
+                <span style="margin-left:auto;display:flex;align-items:center;gap:0.4rem;">
+                    <BbSwitch Checked="showOk" CheckedChanged="@(v => showOk = v)" id="show-ok" />
+                    <BbLabel For="show-ok">Show passing checks</BbLabel>
+                </span>
+            </div>
+        </BbCardContent>
+    </BbCard>
+
+    @* ---- Findings grouped by category ---- *@
+    @foreach (var group in GroupedFindings())
+    {
+        var visible = group.Where(x => showOk || x.Severity != HealthSeverity.Ok)
+                           .OrderByDescending(x => x.Severity).ThenBy(x => x.Title).ToList();
+        if (visible.Count == 0) { continue; }
+
+        <BbCard Class="mb-1">
+            <BbCardHeader>
+                <BbCardTitle>@group.Key</BbCardTitle>
+            </BbCardHeader>
+            <BbCardContent>
+                @foreach (var fnd in visible)
+                {
+                    <div class="dns-record" style="border-left:3px solid @BarColor(fnd.Severity);padding-left:0.75rem;">
+                        <div class="dns-record-head">
+                            <strong>@fnd.Title</strong>
+                            <span class="badge-status @BadgeCss(fnd.Severity)">@SeverityLabel(fnd.Severity)</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(fnd.Target))
+                        {
+                            <div class="dns-record-name mono text-muted">@fnd.Target</div>
+                        }
+                        <div class="text-muted" style="font-size:0.8rem;">@fnd.Detail</div>
+                        @if (!string.IsNullOrWhiteSpace(fnd.Hint))
+                        {
+                            <div class="dns-record-row" style="font-size:0.8rem;">
+                                <LucideIcon Name="arrow-right" Size="14" /> <span>@fnd.Hint</span>
+                            </div>
+                        }
+                    </div>
+                }
+            </BbCardContent>
+        </BbCard>
+    }
+
+    @* ---- History ---- *@
+    @if (history.Count > 1)
+    {
+        <BbCard Class="mb-1">
+            <BbCardHeader>
+                <BbCardTitle>Recent runs</BbCardTitle>
+                <BbCardDescription>The last @history.Count self-check runs</BbCardDescription>
+            </BbCardHeader>
+            <BbCardContent>
+                <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                    <thead>
+                        <tr class="text-muted" style="text-align:left;">
+                            <th style="padding:0.25rem 0.5rem;">Run</th>
+                            <th style="padding:0.25rem 0.5rem;">Status</th>
+                            <th style="padding:0.25rem 0.5rem;">Errors</th>
+                            <th style="padding:0.25rem 0.5rem;">Warnings</th>
+                            <th style="padding:0.25rem 0.5rem;">OK</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in history)
+                        {
+                            <tr style="border-top:1px solid var(--border);">
+                                <td style="padding:0.25rem 0.5rem;white-space:nowrap;"><LocalTime Utc="s.RunUtc" Format="yyyy-MM-dd HH:mm" /></td>
+                                <td style="padding:0.25rem 0.5rem;"><span class="badge-status @BadgeCss(s.OverallSeverity)">@SeverityLabel(s.OverallSeverity)</span></td>
+                                <td style="padding:0.25rem 0.5rem;">@s.ErrorCount</td>
+                                <td style="padding:0.25rem 0.5rem;">@s.WarningCount</td>
+                                <td style="padding:0.25rem 0.5rem;">@s.OkCount</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </BbCardContent>
+        </BbCard>
+    }
+}
+
+@code {
+    private HealthCheckSnapshot? latest;
+    private IReadOnlyList<HealthCheckSnapshot> history = [];
+    private bool isLoading = true;
+    private bool isRunning;
+    private string? loadError;
+    private bool showOk;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        loadError = null;
+        try
+        {
+            latest = await Snapshots.GetLatestAsync();
+            history = await Snapshots.GetHistoryAsync(14);
+        }
+        catch
+        {
+            loadError = "Could not load the self-check results.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    // "Run now" is a long, non-idempotent operation (live network probes + a DB write). Guard against a
+    // double-click with the busy flag before any await, and disable the button while it runs.
+    private async Task RunNowAsync()
+    {
+        if (isRunning) return;
+        isRunning = true;
+        loadError = null;
+        StateHasChanged();
+        try
+        {
+            latest = await Runner.RunAndSaveAsync();
+            history = await Snapshots.GetHistoryAsync(14);
+        }
+        catch
+        {
+            loadError = "The self-check could not be run just now — try again.";
+        }
+        finally
+        {
+            isRunning = false;
+        }
+    }
+
+    private IEnumerable<IGrouping<string, HealthCheckFinding>> GroupedFindings() =>
+        latest is null
+            ? []
+            : latest.Findings.GroupBy(x => x.Category).OrderBy(g => CategoryRank(g.Key));
+
+    private static int CategoryRank(string category)
+    {
+        var idx = HealthCategories.Display.ToList().IndexOf(category);
+        return idx < 0 ? int.MaxValue : idx;
+    }
+
+    private static string BadgeCss(HealthSeverity s) => s switch
+    {
+        HealthSeverity.Error => "badge-error",
+        HealthSeverity.Warning => "badge-warning",
+        HealthSeverity.Ok => "badge-success",
+        _ => "badge-muted",
+    };
+
+    private static string SeverityLabel(HealthSeverity s) => s switch
+    {
+        HealthSeverity.Error => "Error",
+        HealthSeverity.Warning => "Warning",
+        HealthSeverity.Ok => "OK",
+        _ => "Info",
+    };
+
+    private static string BarColor(HealthSeverity s) => s switch
+    {
+        HealthSeverity.Error => "#dc2626",
+        HealthSeverity.Warning => "#d97706",
+        HealthSeverity.Ok => "var(--primary)",
+        _ => "var(--border)",
+    };
+}

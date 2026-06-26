@@ -41,6 +41,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAdminCertificateService, AdminCertificateService>();
         services.AddScoped<IReportingSettingsService, ReportingSettingsService>();
         services.AddScoped<IDnsSettingsService, DnsSettingsService>();
+        services.AddScoped<IHealthCheckSnapshotService, HealthCheckSnapshotService>();
         services.AddScoped<IMessageFilterService, MessageFilterService>();
         services.AddScoped<ISuppressionService, SuppressionService>();
 
