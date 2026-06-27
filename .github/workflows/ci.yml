@@ -89,27 +89,39 @@ jobs:
           -p:VersionSuffix=${{ env.VERSION_SUFFIX }}
           -o ${{ github.workspace }}/publish-fd/
 
-      # Code signing placeholder — uncomment when certificate is available
-      # Requires GitHub secrets: CODE_SIGNING_CERTIFICATE (base64 PFX), CODE_SIGNING_PASSWORD
-      #
-      # - name: Decode signing certificate
-      #   run: |
-      #     $certBytes = [Convert]::FromBase64String("${{ secrets.CODE_SIGNING_CERTIFICATE }}")
-      #     [IO.File]::WriteAllBytes("${{ runner.temp }}\cert.pfx", $certBytes)
-      #
-      # - name: Sign EXE (self-contained)
-      #   run: >
-      #     signtool sign /f "${{ runner.temp }}\cert.pfx"
-      #     /p "${{ secrets.CODE_SIGNING_PASSWORD }}"
-      #     /tr http://timestamp.digicert.com /td sha256 /fd sha256
-      #     publish-sc/WinSmtpRelay.Service.exe
-      #
-      # - name: Sign EXE (framework-dependent)
-      #   run: >
-      #     signtool sign /f "${{ runner.temp }}\cert.pfx"
-      #     /p "${{ secrets.CODE_SIGNING_PASSWORD }}"
-      #     /tr http://timestamp.digicert.com /td sha256 /fd sha256
-      #     publish-fd/WinSmtpRelay.Service.exe
+      # Code signing — runs only when the signing secrets are present (skipped on forks / PRs without
+      # them). Sign the EXEs BEFORE the MSI build so the harvested copies inside the MSI are signed too.
+      # Requires repo secrets: CODE_SIGNING_CERTIFICATE (base64 PFX), CODE_SIGNING_PASSWORD.
+      - name: Set up code signing
+        id: signing
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.CODE_SIGNING_CERTIFICATE }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CERT_B64)) {
+            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host "No CODE_SIGNING_CERTIFICATE secret — skipping signing."
+            return
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
+          $st = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $st) { throw "signtool.exe not found on the runner." }
+          "enabled=true"              | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "pfx=$pfx"                  | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "signtool=$($st.FullName)"  | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Signing enabled using $($st.FullName)"
+
+      - name: Sign service executables
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          PW: ${{ secrets.CODE_SIGNING_PASSWORD }}
+        run: |
+          & "${{ steps.signing.outputs.signtool }}" sign /f "${{ steps.signing.outputs.pfx }}" /p "$env:PW" `
+            /fd sha256 /tr http://timestamp.digicert.com /td sha256 `
+            "publish-sc\WinSmtpRelay.Service.exe" "publish-fd\WinSmtpRelay.Service.exe"
 
       # Verify publish output before MSI build
       - name: Verify publish output
@@ -156,24 +168,23 @@ jobs:
           find msi-sc -name "WinSmtpRelay.Setup.msi" -exec mv {} "msi-sc/WinSmtpRelay-${TAG_LABEL}-x64-self-contained.msi" \;
           find msi-fd -name "WinSmtpRelay.Setup.msi" -exec mv {} "msi-fd/WinSmtpRelay-${TAG_LABEL}-x64.msi" \;
 
-      # Code signing placeholder — sign MSI files after build
-      # - name: Sign MSI (self-contained)
-      #   run: >
-      #     signtool sign /f "${{ runner.temp }}\cert.pfx"
-      #     /p "${{ secrets.CODE_SIGNING_PASSWORD }}"
-      #     /tr http://timestamp.digicert.com /td sha256 /fd sha256
-      #     "msi-sc/WinSmtpRelay-${{ env.VERSION }}-x64-self-contained.msi"
-      #
-      # - name: Sign MSI (framework-dependent)
-      #   run: >
-      #     signtool sign /f "${{ runner.temp }}\cert.pfx"
-      #     /p "${{ secrets.CODE_SIGNING_PASSWORD }}"
-      #     /tr http://timestamp.digicert.com /td sha256 /fd sha256
-      #     "msi-fd/WinSmtpRelay-${{ env.VERSION }}-x64.msi"
-      #
-      # - name: Clean up certificate
-      #   if: always()
-      #   run: Remove-Item "${{ runner.temp }}\cert.pfx" -Force -ErrorAction SilentlyContinue
+      # Sign the built MSIs (after rename). The unattended self-update verifies THIS signature, so it is
+      # the one that must match the publisher (O=ARDIMEDIA) on target machines.
+      - name: Sign MSI installers
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          PW: ${{ secrets.CODE_SIGNING_PASSWORD }}
+        run: |
+          Get-ChildItem msi-sc, msi-fd -Filter *.msi | ForEach-Object {
+            & "${{ steps.signing.outputs.signtool }}" sign /f "${{ steps.signing.outputs.pfx }}" /p "$env:PW" `
+              /fd sha256 /tr http://timestamp.digicert.com /td sha256 $_.FullName
+          }
+
+      - name: Clean up signing certificate
+        if: always() && steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: Remove-Item "${{ steps.signing.outputs.pfx }}" -Force -ErrorAction SilentlyContinue
 
       # Upload MSI artifacts (always available for download from workflow run)
       - name: Upload MSI (self-contained)

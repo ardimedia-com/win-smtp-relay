@@ -1,6 +1,9 @@
-<?xml version="1.0" encoding="UTF-8"?>
 <!--
   WIN-SMTP-RELAY unattended updater task.
+
+  NOTE: intentionally NO <?xml ... encoding ...?> declaration. The installer registers this task by
+  reading the file into a string and passing it to Register-ScheduledTask -Xml, which rejects an encoding
+  declaration on an in-memory (UTF-16) string with "the task XML is invalid / encoding cannot be changed".
 
   Registered by the MSI (elevated). Runs as SYSTEM and is the SECURITY BOUNDARY for the self-update:
   the relay service runs as the low-privilege NetworkService account and cannot install an MSI, so it
