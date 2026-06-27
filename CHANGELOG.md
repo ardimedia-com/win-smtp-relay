@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build58] - 2026-06-27
+
 ### Fixed
 
 - **The unattended-updater SYSTEM scheduled task now registers at install.** The `WinSmtpRelayUpdate` task definition carried an `<?xml … encoding="UTF-8"?>` declaration, which `Register-ScheduledTask -Xml` rejects when the installer passes the file as an in-memory string ("the task XML is invalid / encoding cannot be changed"), so the task was silently not created (the registration custom action ignores errors by design). Removed the declaration. The drop/work folders and their ACLs were already created correctly.
