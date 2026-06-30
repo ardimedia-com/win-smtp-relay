@@ -263,7 +263,10 @@ else if (errorMessage is not null)
         [DataType(DataType.Password)]
         public string Password { get; set; } = "";
 
-        public bool RememberMe { get; set; }
+        // Default to a persistent cookie so the admin stays signed in across browser restarts / idle
+        // periods. Unchecking it falls back to a session cookie (cleared when the browser closes) for
+        // shared machines.
+        public bool RememberMe { get; set; } = true;
 
         // Set by the activated submit button to PasswordAction or MagicLinkAction.
         public string? Action { get; set; }

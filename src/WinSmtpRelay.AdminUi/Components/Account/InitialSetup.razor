@@ -116,7 +116,8 @@ else
         await Audit.WriteAsync(AdminAuditActions.AdminCreated, user.Id, user.Email, targetUserId: user.Id,
             detail: "first-run host administrator (host + default-tenant membership)");
 
-        await SignInManager.SignInAsync(user, isPersistent: false);
+        // Persistent cookie, consistent with the other sign-in paths (stay signed in across restarts / idle).
+        await SignInManager.SignInAsync(user, isPersistent: true);
         Logger.LogWarning("First-run setup created the initial host administrator {Email}", Input.Email);
         Nav.NavigateTo("/");
     }

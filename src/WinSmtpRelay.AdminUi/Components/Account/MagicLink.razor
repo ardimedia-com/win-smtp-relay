@@ -85,7 +85,9 @@ else
         // invalidates this (and any other outstanding) token — a captured/forwarded link cannot be
         // replayed. The cookie issued immediately after carries the NEW stamp, so this session stays valid.
         await SignInManager.UserManager.UpdateSecurityStampAsync(user);
-        await SignInManager.SignInAsync(user, isPersistent: false);
+        // Persistent cookie, consistent with password sign-in: stay signed in across browser restarts /
+        // idle rather than only for the browser session.
+        await SignInManager.SignInAsync(user, isPersistent: true);
         await Audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "sign-in link");
         Logger.LogInformation("Admin {Email} signed in via sign-in link", user.Email);
 

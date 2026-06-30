@@ -74,7 +74,13 @@ public static class RelayAuthExtensions
             options.LoginPath = "/account/login";
             options.LogoutPath = "/account/logout";
             options.AccessDeniedPath = "/account/access-denied";
-            options.ExpireTimeSpan = TimeSpan.FromHours(8);
+            // 7-day ticket so an admin who leaves the console idle (or whose machine sleeps) stays
+            // signed in instead of being bounced to the login page. Sliding renews it on real HTTP
+            // requests; note that in-app Blazor Server interaction runs over the SignalR circuit and
+            // does NOT issue cookie-bearing requests, so this is effectively the absolute lifetime
+            // from sign-in. The cookie is HttpOnly + SameSite=Strict and only travels over HTTPS
+            // (non-loopback HTTP is refused at startup), so the longer window is a safe trade-off.
+            options.ExpireTimeSpan = TimeSpan.FromDays(7);
             options.SlidingExpiration = true;
 
             // API clients get status codes, browsers get redirects.

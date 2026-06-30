@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build60] - 2026-06-30
+
+### Changed
+
+- **You stay signed in much longer instead of being logged out after a short idle.** The admin session cookie now lasts 7 days (was 8 hours) and the "Keep me signed in" box on the login page is pre-checked, so the cookie survives browser restarts, machine sleep and idle periods rather than expiring with the browser session — uncheck it on a shared machine to keep the old session-only behaviour. The other sign-in methods (sign-in link, passkey, and the first-run setup) now keep you signed in the same way instead of only for the browser session. Returning to an idle console also resumes the same live session for up to 30 minutes (was 3) before the page needs to reload. The cookie remains HttpOnly, SameSite=Strict and HTTPS-only, so the longer window does not weaken its protection.
+
 ## [1.0.0-beta1-build59] - 2026-06-30
 
 ### Added

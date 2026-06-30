@@ -144,7 +144,14 @@ if (adminUiConfig.Enabled)
     builder.Services.AddOpenApi();
 
     builder.Services.AddRazorComponents()
-        .AddInteractiveServerComponents();
+        .AddInteractiveServerComponents(options =>
+        {
+            // Keep a disconnected circuit (idle tab, brief network drop, machine sleep) alive far longer
+            // than the 3-minute default so returning to the console resumes the same session instead of
+            // forcing a full page reload. The auth cookie (see RelayAuthExtensions) is what actually keeps
+            // the admin signed in; this only makes the reconnect seamless.
+            options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(30);
+        });
 
     builder.Services.AddBlazorBlueprintComponents();
 
@@ -351,7 +358,8 @@ if (adminUiConfig.Enabled)
             return Results.Unauthorized();
 
         await um.AddOrUpdatePasskeyAsync(user, assertion.Passkey); // persist the updated sign counter
-        await sm.SignInAsync(user, isPersistent: false);
+        // Persistent cookie, consistent with password sign-in (stay signed in across restarts / idle).
+        await sm.SignInAsync(user, isPersistent: true);
         await audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "passkey");
         return Results.Ok();
     }).AllowAnonymous();
