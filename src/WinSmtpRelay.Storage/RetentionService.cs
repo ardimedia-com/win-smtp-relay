@@ -49,11 +49,48 @@ public class RetentionService(
                 .ExecuteDeleteAsync(ct);
         }
 
-        if (messages + deliveryLogs + suppressions > 0)
-            logger.LogInformation(
-                "Retention purge removed {Messages} message(s), {Logs} delivery-log row(s), {Suppressions} suppression(s)",
-                messages, deliveryLogs, suppressions);
+        // Resend grace: a partially-delivered message (one with undelivered recipients, e.g. a recipient
+        // skipped by the suppression list) keeps its body so an admin can resend it. Once it ages past the
+        // resend window the body is dropped — the metadata row stays until MessageHistoryDays. Only when
+        // bodies are stripped on delivery (minimisation on); archive/regulated profiles
+        // (StripBodyOnDelivery off) deliberately retain content for the whole history window.
+        var resendBodiesStripped = 0;
+        if (s.StripBodyOnDelivery && s.ResendRetentionDays > 0)
+        {
+            var resendCutoff = now.AddDays(-s.ResendRetentionDays);
+            // Candidates: terminal messages past the window that still carry a body. Fully-delivered
+            // messages already had their body stripped at delivery, so a present body here means the
+            // message has undelivered recipients — but confirm in memory (set difference isn't translatable).
+            // Note: an empty-blob inequality (`RawMessage <> x''`) is used rather than `RawMessage.Length > 0`
+            // because EF rewrites the latter to a non-translatable `Any()` over the binary column.
+            var emptyBody = Array.Empty<byte>();
+            var withBody = await db.QueuedMessages
+                .Where(m => (m.Status == MessageStatus.Delivered
+                          || m.Status == MessageStatus.Bounced
+                          || m.Status == MessageStatus.Failed
+                          || m.Status == MessageStatus.Suppressed)
+                         && m.CreatedUtc < resendCutoff
+                         && m.RawMessage != emptyBody)
+                .Select(m => new { m.Id, m.Recipients, m.DeliveredRecipients })
+                .ToListAsync(ct);
 
-        return new RetentionPurgeResult(messages, deliveryLogs, suppressions);
+            var staleIds = withBody
+                .Where(m => RecipientList.HasUndelivered(m.Recipients, m.DeliveredRecipients))
+                .Select(m => m.Id)
+                .ToList();
+
+            if (staleIds.Count > 0)
+                resendBodiesStripped = await db.QueuedMessages
+                    .Where(m => staleIds.Contains(m.Id))
+                    .ExecuteUpdateAsync(u => u.SetProperty(m => m.RawMessage, Array.Empty<byte>()), ct);
+        }
+
+        if (messages + deliveryLogs + suppressions + resendBodiesStripped > 0)
+            logger.LogInformation(
+                "Retention purge removed {Messages} message(s), {Logs} delivery-log row(s), {Suppressions} suppression(s), "
+                + "stripped {ResendBodies} resend-grace body/bodies",
+                messages, deliveryLogs, suppressions, resendBodiesStripped);
+
+        return new RetentionPurgeResult(messages, deliveryLogs, suppressions, resendBodiesStripped);
     }
 }

@@ -81,6 +81,10 @@ else
                     <BbTableCell><LocalTime Utc="@msg.CreatedUtc" /></BbTableCell>
                     <BbTableCell>
                         <div class="list-row-actions">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Details / resend"
+                                    @onclick="@(() => Navigation.NavigateTo($"/messages/{msg.Id}"))">
+                                <LucideIcon Name="mail" />
+                            </BbButton>
                             @if (msg.Status is MessageStatus.Failed or MessageStatus.Bounced)
                             {
                                 <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Retry" @onclick="() => RetryAsync(msg.Id)">

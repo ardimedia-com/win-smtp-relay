@@ -193,15 +193,28 @@ public class DeliveryWorker(
             await queue.UpdateStatusAsync(message.Id, MessageStatus.Delivered, cancellationToken: cancellationToken);
             _ = activityNotifier.NotifyQueueChangedAsync();
 
+            // Record the recipients that actually received the message (a full success delivered every
+            // deliverable recipient), so the undelivered ones — those skipped by the suppression list — stay
+            // identifiable for a later resend. The persisted Recipients column keeps the ORIGINAL list.
+            await queue.SetDeliveredRecipientsAsync(message.Id, string.Join(';', deliverable), cancellationToken);
+
             // Data-retention policy: drop the message body once delivered (the metadata row stays for the
-            // queue/audit history). Archive/regulated profiles turn this off to retain the content. Best-effort:
-            // this runs after delivery already succeeded, so a settings-read hiccup must never revert the
-            // message to Queued — and the nightly retention purge removes the body either way.
+            // queue/audit history). Two cases keep the body: archive/regulated profiles (StripBodyOnDelivery
+            // off), and the resend grace — a message with undelivered (suppressed) recipients keeps its body for
+            // ResendRetentionDays so an admin can resend it; the nightly purge drops it after that window.
+            // Best-effort: this runs after delivery already succeeded, so a settings-read hiccup must never
+            // revert the message to Queued — the nightly retention purge removes the body either way.
             try
             {
                 var retention = scope.ServiceProvider.GetService<IDataRetentionSettingsService>();
-                if (retention is not null && (await retention.GetAsync(cancellationToken)).StripBodyOnDelivery)
-                    await queue.StripBodyAsync(message.Id, cancellationToken);
+                if (retention is not null)
+                {
+                    var settings = await retention.GetAsync(cancellationToken);
+                    var hasUndelivered = allRecipients.Any(r => !deliverable.Contains(r, StringComparer.OrdinalIgnoreCase));
+                    var keepForResend = settings.ResendRetentionDays > 0 && hasUndelivered;
+                    if (settings.StripBodyOnDelivery && !keepForResend)
+                        await queue.StripBodyAsync(message.Id, cancellationToken);
+                }
             }
             catch (Exception stripEx)
             {
@@ -253,9 +266,13 @@ public class DeliveryWorker(
                 if (delivered.Count != before)
                     await queue.SetDeliveredRecipientsAsync(message.Id, string.Join(';', delivered), cancellationToken);
 
-                // Auto-suppress recipients that got a permanent (5xx) failure. Repeatedly mailing dead
-                // addresses is a primary cause of blocklisting; future messages to them are skipped.
-                foreach (var dr in dex.Results.Where(r => !r.Success && r.StatusCode.StartsWith('5')))
+                // Auto-suppress recipients the destination explicitly rejected at RCPT TO with a permanent
+                // (5xx) code. Repeatedly mailing dead addresses is a primary cause of blocklisting; future
+                // messages to them are skipped. The RecipientRejected guard is essential: a transaction-wide
+                // 5xx (sender/DATA rejection, all-MX-exhausted) is painted onto every recipient but is NOT
+                // the recipient's fault — suppressing on it would poison valid co-recipients that merely
+                // shared an envelope with one bad address.
+                foreach (var dr in dex.Results.Where(r => r.RecipientRejected && !r.Success && r.StatusCode.StartsWith('5')))
                     await suppression.AddAsync(dr.Recipient, SuppressionReason.HardBounce,
                         $"{dr.StatusCode} {dr.StatusMessage}", message.TenantId, cancellationToken);
             }

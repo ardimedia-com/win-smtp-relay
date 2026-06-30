@@ -57,6 +57,9 @@ public class DeliveryWorkerSuppressionTests
         services.AddScoped<RelayDbContext>(_ => NewContext());
         services.AddScoped<IMessageQueue>(sp => new MessageQueue(sp.GetRequiredService<RelayDbContext>()));
         services.AddScoped<ISuppressionService>(sp => new SuppressionService(sp.GetRequiredService<RelayDbContext>()));
+        // Seeded DataRetentionSettings (StripBodyOnDelivery=true, ResendRetentionDays=7) drives the
+        // body-retention behaviour exercised below.
+        services.AddScoped<IDataRetentionSettingsService>(sp => new DataRetentionSettingsService(sp.GetRequiredService<RelayDbContext>()));
         services.AddScoped<IDeliveryService>(_ => _delivery);
         // No IMessageFilter registered → GetServices returns empty → filters are a no-op.
         _provider = services.BuildServiceProvider();
@@ -174,7 +177,8 @@ public class DeliveryWorkerSuppressionTests
     [TestCategory("Unit")]
     public async Task PermanentFailure_AutoAddsRecipientToSuppressionList()
     {
-        // The delivery service reports a permanent 5xx for the recipient → the worker must auto-suppress it.
+        // The destination explicitly rejected THIS recipient at RCPT TO with a permanent 5xx
+        // (RecipientRejected = true) → the worker must auto-suppress it.
         _delivery.FailWith = _ => new DeliveryException("permanent failure",
         [
             new DeliveryResult
@@ -182,7 +186,8 @@ public class DeliveryWorkerSuppressionTests
                 Recipient = "dead@example.com",
                 StatusCode = "550",
                 StatusMessage = "mailbox unavailable",
-                RemoteServer = "mx.example.com"
+                RemoteServer = "mx.example.com",
+                RecipientRejected = true
             }
         ]);
 
@@ -198,6 +203,85 @@ public class DeliveryWorkerSuppressionTests
 
         // An all-5xx failure is permanent → the message bounces (not re-queued).
         Assert.AreEqual(MessageStatus.Bounced, await StatusOfAsync(message.Id));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task TransactionWide5xx_DoesNotSuppressCoRecipients()
+    {
+        // Regression guard for the multi-recipient poisoning bug: a single bad address in a same-domain
+        // SMTP transaction makes the destination reject the whole transaction, so every recipient is
+        // painted with the same 5xx — but NOT flagged RecipientRejected. A transaction-wide 5xx must
+        // bounce the message WITHOUT suppressing the (otherwise valid) co-recipients.
+        _delivery.FailWith = _ => new DeliveryException("transaction failed",
+        [
+            new DeliveryResult
+            {
+                Recipient = "valid@example.com",
+                StatusCode = "550",
+                StatusMessage = "All MX hosts exhausted for domain example.com: 5.4.1 Access denied",
+                RemoteServer = "mx.example.com",
+                RecipientRejected = false
+            },
+            new DeliveryResult
+            {
+                Recipient = "alsovalid@example.com",
+                StatusCode = "550",
+                StatusMessage = "All MX hosts exhausted for domain example.com: 5.4.1 Access denied",
+                RemoteServer = "mx.example.com",
+                RecipientRejected = false
+            }
+        ]);
+
+        var message = await EnqueueAsync("valid@example.com;alsovalid@example.com");
+        var worker = CreateWorker();
+
+        await worker.ProcessMessageAsync(message, CancellationToken.None);
+
+        await using var ctx = NewContext();
+        var suppression = new SuppressionService(ctx);
+        Assert.IsFalse(await suppression.IsSuppressedAsync("valid@example.com", Tenant),
+            "a transaction-wide 5xx must NOT auto-suppress a co-recipient");
+        Assert.IsFalse(await suppression.IsSuppressedAsync("alsovalid@example.com", Tenant),
+            "a transaction-wide 5xx must NOT auto-suppress a co-recipient");
+
+        // It is still an all-5xx failure → the message bounces.
+        Assert.AreEqual(MessageStatus.Bounced, await StatusOfAsync(message.Id));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task PartialDelivery_KeepsBodyForResend_AndRecordsDeliveredRecipients()
+    {
+        // good@ delivers; bad@ is suppressed (undelivered). The message keeps its body so it can be resent.
+        await SuppressAsync("bad@example.com", SuppressionReason.HardBounce);
+
+        var message = await EnqueueAsync("good@example.com;bad@example.com");
+        var worker = CreateWorker();
+
+        await worker.ProcessMessageAsync(message, CancellationToken.None);
+
+        await using var ctx = NewContext();
+        var stored = await ctx.QueuedMessages.AsNoTracking().FirstAsync(m => m.Id == message.Id);
+        Assert.AreEqual(MessageStatus.Delivered, stored.Status);
+        Assert.IsTrue(stored.RawMessage.Length > 0, "a message with an undelivered (suppressed) recipient keeps its body for resend");
+        Assert.AreEqual("good@example.com", stored.DeliveredRecipients);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task FullDelivery_StripsBody()
+    {
+        var message = await EnqueueAsync("ok@example.com");
+        var worker = CreateWorker();
+
+        await worker.ProcessMessageAsync(message, CancellationToken.None);
+
+        await using var ctx = NewContext();
+        var stored = await ctx.QueuedMessages.AsNoTracking().FirstAsync(m => m.Id == message.Id);
+        Assert.AreEqual(MessageStatus.Delivered, stored.Status);
+        Assert.AreEqual(0, stored.RawMessage.Length, "a fully-delivered message has nothing to resend, so its body is stripped");
+        Assert.AreEqual("ok@example.com", stored.DeliveredRecipients);
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Net;
+using MailKit;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Logging;
@@ -305,7 +306,11 @@ public class SmtpDeliveryService : IDeliveryService
         IPEndPoint? egressEndPoint,
         CancellationToken cancellationToken)
     {
-        using var client = new SmtpClient(new MailKitProtocolLogger(_logger));
+        // PerRecipientSmtpClient records each recipient's RCPT TO verdict instead of MailKit's default of
+        // aborting the whole envelope on the first rejection. Without it, a single bad address (e.g. a
+        // non-existent mailbox) fails — and would auto-suppress — every valid co-recipient in the same
+        // same-domain transaction.
+        using var client = new PerRecipientSmtpClient(new MailKitProtocolLogger(_logger));
         client.Timeout = connectTimeoutSeconds * 1000;
 
         // Bind outbound connections to the tenant's source IP when configured.
@@ -330,23 +335,111 @@ public class SmtpDeliveryService : IDeliveryService
 
         var senderAddress = MailboxAddress.Parse(sender);
         var recipientAddresses = recipients.Select(MailboxAddress.Parse).ToList();
-
-        await client.SendAsync(mimeMessage, senderAddress, recipientAddresses, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
-
         var remoteServer = $"{host}:{port}";
-        _logger.LogInformation("Delivered to {Recipients} via {Host}:{Port}",
-            string.Join(", ", recipients), host, port);
 
-        return recipients.Select(r => new DeliveryResult
+        try
         {
-            Recipient = r,
-            StatusCode = "250",
-            StatusMessage = $"Delivered via {remoteServer}",
-            RemoteServer = remoteServer
-        }).ToList();
+            // MailKit still delivers the DATA payload to the accepted recipients; rejected ones are
+            // captured per-recipient in the client.
+            await client.SendAsync(mimeMessage, senderAddress, recipientAddresses, cancellationToken);
+        }
+        catch (AllRecipientsRejectedException)
+        {
+            // Every recipient was rejected at RCPT TO (none accepted). The per-recipient verdicts are
+            // authoritative — sibling MX hosts for a domain share the same recipient set — so surface them
+            // per recipient instead of letting the caller fall through and retry the next MX.
+        }
+        finally
+        {
+            if (client.IsConnected)
+            {
+                try { await client.DisconnectAsync(true, cancellationToken); }
+                catch { /* best-effort QUIT; the per-recipient verdicts are already captured */ }
+            }
+        }
+        // Any OTHER failure from SendAsync (sender rejected, DATA rejected, dropped connection, timeout) is
+        // not recipient-attributable, so it propagates here and the caller tries the next MX as before.
+
+        var results = BuildRecipientResults(recipients, recipientAddresses, client.Rejected, remoteServer);
+
+        var accepted = results.Where(r => r.Success).Select(r => r.Recipient).ToList();
+        if (accepted.Count > 0)
+            _logger.LogInformation("Delivered to {Recipients} via {Host}:{Port}",
+                string.Join(", ", accepted), host, port);
+        foreach (var r in results.Where(r => !r.Success))
+            _logger.LogWarning("Recipient {Recipient} rejected by {Host}:{Port}: {Code} {Message}",
+                r.Recipient, host, port, r.StatusCode, r.StatusMessage);
+
+        return results;
+    }
+
+    /// <summary>
+    /// Maps the recorded per-recipient RCPT TO verdicts onto <see cref="DeliveryResult"/>s. A recipient
+    /// found in <paramref name="rejected"/> carries its real status code and is flagged
+    /// <see cref="DeliveryResult.RecipientRejected"/>; every other recipient was accepted and received the
+    /// DATA payload (250).
+    /// </summary>
+    private static List<DeliveryResult> BuildRecipientResults(
+        List<string> recipients, List<MailboxAddress> recipientAddresses,
+        IReadOnlyDictionary<string, SmtpResponse> rejected, string remoteServer)
+    {
+        var results = new List<DeliveryResult>(recipients.Count);
+        for (var i = 0; i < recipients.Count; i++)
+        {
+            if (rejected.TryGetValue(recipientAddresses[i].Address, out var reject))
+            {
+                results.Add(new DeliveryResult
+                {
+                    Recipient = recipients[i],
+                    StatusCode = ((int)reject.StatusCode).ToString(),
+                    StatusMessage = string.IsNullOrWhiteSpace(reject.Response)
+                        ? $"Recipient rejected ({(int)reject.StatusCode})"
+                        : reject.Response,
+                    RemoteServer = remoteServer,
+                    RecipientRejected = true
+                });
+            }
+            else
+            {
+                results.Add(new DeliveryResult
+                {
+                    Recipient = recipients[i],
+                    StatusCode = "250",
+                    StatusMessage = $"Delivered via {remoteServer}",
+                    RemoteServer = remoteServer
+                });
+            }
+        }
+        return results;
     }
 }
+
+/// <summary>
+/// An <see cref="SmtpClient"/> that captures each recipient's RCPT TO verdict instead of MailKit's default
+/// behaviour of throwing on the first rejected recipient (which aborts the whole envelope). This enables
+/// per-recipient delivery accounting: one bad address no longer fails its valid co-recipients. Follows
+/// MailKit's documented pairing — override <see cref="OnRecipientNotAccepted"/> to not throw, and
+/// <see cref="OnNoRecipientsAccepted"/> to throw when none are accepted.
+/// </summary>
+file sealed class PerRecipientSmtpClient(IProtocolLogger protocolLogger) : SmtpClient(protocolLogger)
+{
+    /// <summary>Recipients the server rejected at RCPT TO, keyed by address (case-insensitive).</summary>
+    public Dictionary<string, SmtpResponse> Rejected { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override void OnRecipientNotAccepted(MimeMessage message, MailboxAddress mailbox, SmtpResponse response)
+        => Rejected[mailbox.Address] = response;
+
+    // Since OnRecipientNotAccepted no longer throws, surface the "every recipient rejected" case here so
+    // SendAsync does not proceed to DATA with zero recipients (MailKit's documented requirement).
+    protected override void OnNoRecipientsAccepted(MimeMessage message)
+        => throw new AllRecipientsRejectedException();
+}
+
+/// <summary>
+/// Thrown by <see cref="PerRecipientSmtpClient"/> when the destination rejected every recipient at RCPT TO.
+/// Caught by the delivery service, which then reports the captured per-recipient rejections.
+/// </summary>
+file sealed class AllRecipientsRejectedException : Exception;
 
 /// <summary>
 /// Exception that carries per-recipient delivery results even when some recipients fail.

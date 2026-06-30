@@ -16,6 +16,7 @@ the source with DocFX). See also [Using the components](#using-the-components-em
 - Multiple receive connectors (different port/IP/TLS/auth per connector)
 - Send connectors with per-domain routing (MX or smart host)
 - Store-and-forward message queue (SQLite)
+- Per-message detail view (open it from the Journal or the Queue) with the per-recipient delivery outcomes and a **resend** action for recipients that were never delivered (e.g. an address skipped by the suppression list) — edit the recipient list before resending, with a warning + one-click un-suppress for any still-suppressed address. Bodies of partially-delivered messages are kept for a configurable **resend-retention window** (Settings → Data retention, default 7 days) so they remain resendable; fully-delivered bodies are still stripped on delivery
 - STARTTLS (port 587) and implicit TLS (port 465)
 - SMTP AUTH with per-user SendAs control and rate limits
 - DKIM signing (per tenant), inbound SPF/DKIM/DMARC verification (DMARC passes via SPF *or* DKIM alignment)

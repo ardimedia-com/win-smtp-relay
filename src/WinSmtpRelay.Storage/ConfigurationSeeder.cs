@@ -295,6 +295,7 @@ public class ConfigurationSeeder(
         existing.MessageHistoryDays = opts.MessageHistoryDays;
         existing.DeliveryLogDays = Math.Max(DataRetentionSettings.DeliveryLogFloorDays, opts.DeliveryLogDays);
         existing.SuppressionDays = opts.SuppressionDays;
+        existing.ResendRetentionDays = Math.Max(0, opts.ResendRetentionDays);
         // Keep UpdatedUtc at the sentinel (explicitly) so appsettings remains the source until a UI edit.
         existing.UpdatedUtc = SeedSentinel;
         await db.SaveChangesAsync(ct);

@@ -111,17 +111,97 @@ public class RetentionServiceTests
         Assert.AreEqual(DataRetentionSettings.DeliveryLogFloorDays, stored.DeliveryLogDays);
     }
 
-    private async Task SaveSettings(int messageHistoryDays, int deliveryLogDays, int suppressionDays)
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task RunPurge_StripsResendableBodies_AfterWindow_KeepsRecentAndFullyDelivered()
+    {
+        var now = DateTimeOffset.UtcNow;
+        // Resendable (an undelivered recipient remains) + past the window + body present -> body stripped.
+        var resendableOld = await AddResendableMessageAsync("a@x.com;b@x.com", delivered: "a@x.com", now.AddDays(-10));
+        // Resendable but still within the window -> kept.
+        var resendableRecent = await AddResendableMessageAsync("a@x.com;b@x.com", delivered: "a@x.com", now.AddDays(-3));
+        // Fully delivered (nothing left to resend) + old + body present -> kept by the resend purge.
+        var fullyDelivered = await AddResendableMessageAsync("a@x.com", delivered: "a@x.com", now.AddDays(-10));
+
+        await SaveSettings(messageHistoryDays: 30, deliveryLogDays: 90, suppressionDays: 0, resendRetentionDays: 7);
+
+        var result = await _retention.RunPurgeAsync();
+
+        Assert.AreEqual(1, result.ResendBodiesStripped);
+        _db.ChangeTracker.Clear();
+        Assert.AreEqual(0, (await _db.QueuedMessages.FirstAsync(m => m.Id == resendableOld)).RawMessage.Length,
+            "old resendable body should be stripped after the window");
+        Assert.IsTrue((await _db.QueuedMessages.FirstAsync(m => m.Id == resendableRecent)).RawMessage.Length > 0,
+            "recent resendable body should be kept");
+        Assert.IsTrue((await _db.QueuedMessages.FirstAsync(m => m.Id == fullyDelivered)).RawMessage.Length > 0,
+            "fully-delivered body is not a resend candidate and must be left to the message-history purge");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task RunPurge_ResendStrip_Disabled_WhenWindowZero()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var resendableOld = await AddResendableMessageAsync("a@x.com;b@x.com", delivered: "a@x.com", now.AddDays(-10));
+
+        await SaveSettings(messageHistoryDays: 30, deliveryLogDays: 90, suppressionDays: 0, resendRetentionDays: 0);
+
+        var result = await _retention.RunPurgeAsync();
+
+        Assert.AreEqual(0, result.ResendBodiesStripped);
+        _db.ChangeTracker.Clear();
+        Assert.IsTrue((await _db.QueuedMessages.FirstAsync(m => m.Id == resendableOld)).RawMessage.Length > 0);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task RunPurge_ResendStrip_Disabled_WhenArchiveProfile()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var resendableOld = await AddResendableMessageAsync("a@x.com;b@x.com", delivered: "a@x.com", now.AddDays(-10));
+
+        // Archive profile keeps content for the full history window -> resend purge must not touch it.
+        await SaveSettings(messageHistoryDays: 3650, deliveryLogDays: 90, suppressionDays: 0, resendRetentionDays: 7, stripBody: false);
+
+        var result = await _retention.RunPurgeAsync();
+
+        Assert.AreEqual(0, result.ResendBodiesStripped);
+        _db.ChangeTracker.Clear();
+        Assert.IsTrue((await _db.QueuedMessages.FirstAsync(m => m.Id == resendableOld)).RawMessage.Length > 0);
+    }
+
+    private async Task SaveSettings(int messageHistoryDays, int deliveryLogDays, int suppressionDays,
+        int resendRetentionDays = 0, bool stripBody = true)
     {
         await _settings.UpdateAsync(new DataRetentionSettings
         {
             Profile = "Custom",
-            StripBodyOnDelivery = true,
+            StripBodyOnDelivery = stripBody,
             MessageHistoryDays = messageHistoryDays,
             DeliveryLogDays = deliveryLogDays,
-            SuppressionDays = suppressionDays
+            SuppressionDays = suppressionDays,
+            ResendRetentionDays = resendRetentionDays
         });
         _db.ChangeTracker.Clear();
+    }
+
+    private async Task<long> AddResendableMessageAsync(string recipients, string? delivered, DateTimeOffset createdUtc)
+    {
+        var m = new QueuedMessage
+        {
+            MessageId = $"<{Guid.NewGuid()}@test>",
+            Sender = "sender@example.com",
+            Recipients = recipients,
+            DeliveredRecipients = delivered,
+            RawMessage = "Subject: Test\r\n\r\nBody"u8.ToArray(),
+            SizeBytes = 100,
+            Status = MessageStatus.Delivered,
+            CreatedUtc = createdUtc
+        };
+        _db.QueuedMessages.Add(m);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+        return m.Id;
     }
 
     private async Task AddMessageAsync(MessageStatus status, DateTimeOffset createdUtc)

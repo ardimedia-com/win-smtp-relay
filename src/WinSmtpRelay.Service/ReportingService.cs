@@ -25,6 +25,7 @@ public class ReportingService(
     private static readonly TimeSpan DnsblAlertCooldown = TimeSpan.FromHours(12);
     private static readonly TimeSpan BounceAlertCooldown = TimeSpan.FromHours(6);
     private const int MinAttemptsForBounceAlert = 20;
+    private const int MaxNewSuppressionsListed = 100;
 
     // In-memory de-bounce of incident alerts (reset on restart — acceptable for an alerting heuristic).
     private readonly Dictionary<string, DateTimeOffset> _lastAlert = new(StringComparer.OrdinalIgnoreCase);
@@ -83,7 +84,9 @@ public class ReportingService(
             TimeOnly.TryParse(settings.DailyTimeUtc, out var sendAt) &&
             TimeOnly.FromDateTime(DateTime.UtcNow) >= sendAt)
         {
-            var content = await BuildDigestAsync(sp, ct);
+            // Capture the "since last report" cutoff from the CURRENT settings (still the previous send
+            // moment) before MarkDigestSentAsync advances it.
+            var content = await BuildDigestAsync(sp, SuppressionReportCutoff(settings), ct);
             await SendAsync(queue, from, to, $"WIN-SMTP-RELAY daily report — {today:yyyy-MM-dd} — {Environment.MachineName}", content, ct);
             await sp.GetRequiredService<IReportingSettingsService>().MarkDigestSentAsync(today, ct);
             logger.LogInformation("Daily report sent to {Recipient}", to);
@@ -161,7 +164,7 @@ public class ReportingService(
         logger.LogWarning("Reporting: 24h bounce rate {Rate:F1}% exceeds {Threshold}% — alert sent", rate, thresholdPercent);
     }
 
-    private async Task<SystemEmailContent> BuildDigestAsync(IServiceProvider sp, CancellationToken ct)
+    private async Task<SystemEmailContent> BuildDigestAsync(IServiceProvider sp, DateTimeOffset newlySuppressedSince, CancellationToken ct)
     {
         var (delivered, bounced, deferred, suppressed) = await CountLast24hAsync(sp, ct);
         var attempts = delivered + bounced + deferred;
@@ -170,6 +173,14 @@ public class ReportingService(
         var queueDepth = await sp.GetRequiredService<IMessageQueue>().GetQueueDepthAsync(ct);
         var db = sp.GetRequiredService<RelayDbContext>();
         var suppressionCount = await db.SuppressionEntries.IgnoreQueryFilters().CountAsync(ct);
+
+        // Addresses added to the suppression list since the previous report (host-wide). Ordered by Id,
+        // which is chronological by construction — avoids an ORDER BY on the DateTimeOffset column.
+        var newlySuppressed = await db.SuppressionEntries.IgnoreQueryFilters().AsNoTracking()
+            .Where(e => e.CreatedUtc >= newlySuppressedSince)
+            .OrderByDescending(e => e.Id)
+            .Select(e => new { e.Address, e.Reason, e.CreatedUtc })
+            .ToListAsync(ct);
 
         var sb = new StringBuilder();
         sb.AppendLine("Last 24 hours (all tenants):");
@@ -180,6 +191,18 @@ public class ReportingService(
         sb.AppendLine();
         sb.AppendLine($"Queue depth now:       {queueDepth}");
         sb.AppendLine($"Suppression list size: {suppressionCount}");
+        sb.AppendLine();
+
+        sb.AppendLine($"Newly suppressed since last report: {newlySuppressed.Count}");
+        if (newlySuppressed.Count > 0)
+        {
+            var shown = newlySuppressed.Take(MaxNewSuppressionsListed).ToList();
+            var addrWidth = Math.Min(50, shown.Max(e => e.Address.Length));
+            foreach (var e in shown)
+                sb.AppendLine($"  {e.Address.PadRight(addrWidth)}  {e.Reason,-10}  {e.CreatedUtc.UtcDateTime:yyyy-MM-dd HH:mm} UTC");
+            if (newlySuppressed.Count > shown.Count)
+                sb.AppendLine($"  … and {newlySuppressed.Count - shown.Count} more — see the Suppression List page.");
+        }
         sb.AppendLine();
 
         var dnsSettings = await sp.GetRequiredService<IDnsSettingsService>().GetAsync(ct);
@@ -269,6 +292,19 @@ public class ReportingService(
         var bounced = logs.Count(l => l.StatusCode.StartsWith('5')
             && !(l.StatusMessage != null && l.StatusMessage.StartsWith("Suppressed", StringComparison.OrdinalIgnoreCase)));
         return (delivered, bounced, deferred, suppressed);
+    }
+
+    /// <summary>
+    /// Start of the "newly suppressed since the last report" window: the moment the previous daily digest
+    /// was sent (its date at the configured send time, UTC). Falls back to the last 24h on the very first
+    /// report. Deriving it from the previous send moment — rather than a fixed 24h window — means a skipped
+    /// day is still covered: the next report lists everything suppressed since the last one actually went out.
+    /// </summary>
+    private static DateTimeOffset SuppressionReportCutoff(ReportingSettings settings)
+    {
+        if (settings.LastDigestSentDate is { } last && TimeOnly.TryParse(settings.DailyTimeUtc, out var t))
+            return new DateTimeOffset(last.ToDateTime(t), TimeSpan.Zero);
+        return DateTimeOffset.UtcNow.AddHours(-24);
     }
 
     private bool ShouldAlert(string key, TimeSpan cooldown)

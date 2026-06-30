@@ -20,6 +20,9 @@ public static class RetentionProfiles
     /// <param name="DeliveryLogDays">Retention for the delivery audit log.</param>
     /// <param name="StatisticsDays">Retention for daily statistics aggregates.</param>
     /// <param name="SuppressionDays">Retention for suppression entries (0 = keep forever).</param>
+    /// <param name="ResendRetentionDays">Days to keep the body of a partially-delivered message (one with
+    /// undelivered recipients) so an admin can resend it; 0 = no resend grace. Only relevant when
+    /// <paramref name="StripBodyOnDelivery"/> is on (archive profiles keep bodies regardless).</param>
     /// <param name="Basis">Short note on the regulatory basis / intent, shown in the UI.</param>
     public record Profile(
         string Key,
@@ -29,6 +32,7 @@ public static class RetentionProfiles
         int DeliveryLogDays,
         int StatisticsDays,
         int SuppressionDays,
+        int ResendRetentionDays,
         string Basis);
 
     private const int Year = 365;
@@ -37,16 +41,20 @@ public static class RetentionProfiles
     [
         new("Standard", "Standard (GDPR-balanced)",
             StripBodyOnDelivery: true, MessageHistoryDays: 30, DeliveryLogDays: 90, StatisticsDays: 365, SuppressionDays: 0,
+            ResendRetentionDays: 7,
             "Balanced GDPR / Swiss-FADP data-minimisation defaults. Recommended for most deployments."),
         new("PrivacyFirst", "Privacy-first (minimal)",
             StripBodyOnDelivery: true, MessageHistoryDays: 7, DeliveryLogDays: 30, StatisticsDays: 90, SuppressionDays: 0,
+            ResendRetentionDays: 0,
             "Aggressive data-minimisation: short windows, message bodies stripped on delivery."),
         new("Financial", "Financial (MiFID II / SEC-FINRA)",
             StripBodyOnDelivery: false, MessageHistoryDays: 7 * Year, DeliveryLogDays: 7 * Year, StatisticsDays: 7 * Year, SuppressionDays: 0,
+            ResendRetentionDays: 7,
             "Retains communication content long-term. MiFID II: 5 yr (extendable to 7 on regulator request); "
             + "SEC 17a-4 / FINRA: 3 yr minimum (firms often keep longer). NOT a certified WORM archive."),
         new("Healthcare", "Healthcare (HIPAA)",
             StripBodyOnDelivery: false, MessageHistoryDays: 6 * Year, DeliveryLogDays: 6 * Year, StatisticsDays: 7 * Year, SuppressionDays: 0,
+            ResendRetentionDays: 7,
             "HIPAA: 6-yr retention of compliance documentation; clinical 'designated record set' emails may "
             + "need longer under state medical-record law. Verify your jurisdiction."),
     ];

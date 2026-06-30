@@ -38,5 +38,14 @@ public class DataRetentionSettings
     /// <summary>Days to keep suppression-list entries; 0 = keep indefinitely (recommended).</summary>
     public int SuppressionDays { get; set; }
 
+    /// <summary>
+    /// Days to keep the body of a partially-delivered message — one that still has undelivered recipients
+    /// (e.g. a recipient skipped by the suppression list) — so an administrator can resend it. After this
+    /// window the nightly purge drops the body (the metadata row stays until <see cref="MessageHistoryDays"/>).
+    /// 0 disables the resend grace (bodies are stripped on delivery as usual). Only takes effect when
+    /// <see cref="StripBodyOnDelivery"/> is on; archive profiles keep bodies for the full history window anyway.
+    /// </summary>
+    public int ResendRetentionDays { get; set; } = 7;
+
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

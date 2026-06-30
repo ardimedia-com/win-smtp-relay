@@ -6,6 +6,7 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject IActivityFeed Feed
 @inject ICurrentTenant CurrentTenant
+@inject NavigationManager Nav
 @implements IDisposable
 
 <BbBreadcrumb>
@@ -166,6 +167,9 @@ else
                 </div>
             </div>
             <BbDialogFooter>
+                <BbButton Variant="ButtonVariant.Default" @onclick="@(() => Nav.NavigateTo($"/messages/{selected.QueuedMessageId}"))">
+                    <LucideIcon Name="mail" /> View message
+                </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="() => selected = null">Close</BbButton>
             </BbDialogFooter>
         }

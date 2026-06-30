@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IHealthCheckSnapshotService, HealthCheckSnapshotService>();
         services.AddScoped<IMessageFilterService, MessageFilterService>();
         services.AddScoped<ISuppressionService, SuppressionService>();
+        services.AddScoped<IMessageResendService, MessageResendService>();
 
         // Setup readiness (live checklist) for the current tenant
         services.AddScoped<ITenantReadinessService, TenantReadinessService>();

@@ -189,13 +189,21 @@ else
                     <BbSwitch Checked="drStripBody" CheckedChanged="(bool v) => drStripBody = v" id="strip-body" />
                     <label for="strip-body" style="cursor:pointer;">Strip the message body once delivered (keep only metadata)</label>
                 </div>
-                <div class="form-group" style="margin-top:0.75rem;">
-                    <BbLabel For="msg-days">Keep delivered / bounced / failed messages (days)</BbLabel>
-                    <BbInput Id="msg-days" Type="InputType.Number" @bind-Value="drMessageDays" />
+                <div class="form-grid" style="margin-top:0.75rem;">
+                    <div class="form-group">
+                        <BbLabel For="msg-days">Keep delivered / bounced / failed messages (days)</BbLabel>
+                        <BbInput Id="msg-days" Type="InputType.Number" @bind-Value="drMessageDays" />
+                    </div>
+                    <div class="form-group">
+                        <BbLabel For="resend-days">Keep undelivered message bodies for resend (days — 0 = off)</BbLabel>
+                        <BbInput Id="resend-days" Type="InputType.Number" @bind-Value="drResendDays" />
+                    </div>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">
                     In-flight messages (queued / delivering) are never purged. With strip-on-delivery off, full
-                    message bodies are retained for this whole window.
+                    message bodies are retained for this whole window. Resend retention keeps the body of a
+                    partially-delivered message (one with recipients skipped by the suppression list) so you can
+                    resend it from its detail page; after the window the body is dropped, the metadata row stays.
                 </p>
             </div>
 
@@ -430,6 +438,7 @@ else
     private string drMessageDays = "30";
     private string drLogDays = "90";
     private string drSuppressionDays = "0";
+    private string drResendDays = "7";
 
     private string? dnsPublicHostname;
     private string? dnsSendingIps;
@@ -482,6 +491,7 @@ else
         drMessageDays = retention.MessageHistoryDays.ToString();
         drLogDays = retention.DeliveryLogDays.ToString();
         drSuppressionDays = retention.SuppressionDays.ToString();
+        drResendDays = retention.ResendRetentionDays.ToString();
 
         var dns = await sp.GetRequiredService<IDnsSettingsService>().GetAsync();
         dnsPublicHostname = dns.PublicHostname;
@@ -586,11 +596,13 @@ else
         if (!int.TryParse(drLogDays, out var log)) return RetentionProfiles.Custom;
         if (!int.TryParse(statRetentionDays, out var stat)) return RetentionProfiles.Custom;
         if (!int.TryParse(drSuppressionDays, out var sup)) return RetentionProfiles.Custom;
+        if (!int.TryParse(drResendDays, out var resend)) return RetentionProfiles.Custom;
 
         foreach (var p in RetentionProfiles.All)
         {
             if (p.StripBodyOnDelivery == drStripBody && p.MessageHistoryDays == msg
-                && p.DeliveryLogDays == log && p.StatisticsDays == stat && p.SuppressionDays == sup)
+                && p.DeliveryLogDays == log && p.StatisticsDays == stat && p.SuppressionDays == sup
+                && p.ResendRetentionDays == resend)
                 return p.Key;
         }
         return RetentionProfiles.Custom;
@@ -606,6 +618,7 @@ else
         drLogDays = p.DeliveryLogDays.ToString();
         statRetentionDays = p.StatisticsDays.ToString();
         drSuppressionDays = p.SuppressionDays.ToString();
+        drResendDays = p.ResendRetentionDays.ToString();
     }
 
     private List<string> RetentionWarnings
@@ -634,6 +647,7 @@ else
         var msgDays = int.TryParse(drMessageDays, out var md) ? Math.Max(1, md) : 30;
         var logDays = int.TryParse(drLogDays, out var ld) ? Math.Max(DataRetentionSettings.DeliveryLogFloorDays, ld) : 90;
         var supDays = int.TryParse(drSuppressionDays, out var sup) ? Math.Max(0, sup) : 0;
+        var resendDays = int.TryParse(drResendDays, out var rd) ? Math.Max(0, rd) : 7;
 
         // Reflect normalised values before reconciling the profile so the saved Profile matches what's stored.
         statRetentionDays = statDays.ToString();
@@ -641,6 +655,7 @@ else
         drMessageDays = msgDays.ToString();
         drLogDays = logDays.ToString();
         drSuppressionDays = supDays.ToString();
+        drResendDays = resendDays.ToString();
         var profile = MatchProfileKey();
 
         using var scope = ScopeFactory.CreateScope();
@@ -654,7 +669,8 @@ else
                 StripBodyOnDelivery = drStripBody,
                 MessageHistoryDays = msgDays,
                 DeliveryLogDays = logDays,
-                SuppressionDays = supDays
+                SuppressionDays = supDays,
+                ResendRetentionDays = resendDays
             });
 
         var profileName = profile == RetentionProfiles.Custom ? "Custom" : RetentionProfiles.Find(profile)?.Name;

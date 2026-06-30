@@ -25,6 +25,7 @@ public class DataRetentionSettingsService(RelayDbContext db) : IDataRetentionSet
         // a configuration change (secure-by-default).
         settings.DeliveryLogDays = Math.Max(DataRetentionSettings.DeliveryLogFloorDays, input.DeliveryLogDays);
         settings.SuppressionDays = Math.Max(0, input.SuppressionDays);
+        settings.ResendRetentionDays = Math.Max(0, input.ResendRetentionDays);
         settings.UpdatedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         // No cache: consumed by the nightly maintenance task (each cycle) and once per delivered message.

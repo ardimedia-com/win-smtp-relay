@@ -362,6 +362,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 MessageHistoryDays = 30,
                 DeliveryLogDays = 90,
                 SuppressionDays = 0,
+                ResendRetentionDays = 7,
                 UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
         });

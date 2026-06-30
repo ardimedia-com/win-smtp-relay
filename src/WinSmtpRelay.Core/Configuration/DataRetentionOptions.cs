@@ -14,4 +14,5 @@ public class DataRetentionOptions
     public int MessageHistoryDays { get; set; } = 30;
     public int DeliveryLogDays { get; set; } = 90;
     public int SuppressionDays { get; set; }
+    public int ResendRetentionDays { get; set; } = 7;
 }

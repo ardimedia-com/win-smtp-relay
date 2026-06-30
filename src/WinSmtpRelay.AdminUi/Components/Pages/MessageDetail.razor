@@ -1,0 +1,339 @@
+@page "/messages/{Id:long}"
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@inject ITenantScopeFactory ScopeFactory
+@inject NavigationManager Nav
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/queue">Queue</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>Message @Id</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>Message @Id</h1>
+    <p>Delivery detail and resend</p>
+</div>
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[300px] w-full" />
+}
+else if (vm is null)
+{
+    <BbAlert>Message not found (it may have been purged by the retention policy).</BbAlert>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(resendStatus))
+    {
+        <BbAlert Class="mb-1">@resendStatus</BbAlert>
+    }
+
+    <BbCard Class="mb-1">
+        <BbCardHeader><BbCardTitle>Overview</BbCardTitle></BbCardHeader>
+        <BbCardContent>
+            <div class="form-grid">
+                <div><strong class="text-muted">Status</strong><br /><span class="badge-status @GetBadgeCss(vm.Status)">@vm.Status</span></div>
+                <div><strong class="text-muted">Created</strong><br /><LocalTime Utc="@vm.CreatedUtc" /></div>
+                <div><strong class="text-muted">Sender</strong><br />@vm.Sender</div>
+                <div><strong class="text-muted">Size</strong><br />@FormatSize(vm.SizeBytes)</div>
+                <div><strong class="text-muted">Retries</strong><br />@vm.RetryCount</div>
+                <div><strong class="text-muted">Message-ID</strong><br /><span class="mono" style="word-break:break-all;">@vm.MessageId</span></div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(vm.LastError))
+            {
+                <div style="margin-top:0.75rem;"><strong class="text-muted">Last error</strong><br /><span class="mono" style="word-break:break-word;">@vm.LastError</span></div>
+            }
+        </BbCardContent>
+    </BbCard>
+
+    <BbCard Class="mb-1">
+        <BbCardHeader><BbCardTitle>Recipients</BbCardTitle></BbCardHeader>
+        <BbCardContent>
+            <p style="margin:0 0 0.5rem;">
+                @allRecipients.Count total &middot; @(allRecipients.Count - undelivered.Count) delivered &middot;
+                <strong>@undelivered.Count not delivered</strong>
+            </p>
+            @if (undelivered.Count > 0)
+            {
+                <div style="display:flex;flex-wrap:wrap;gap:0.4rem;">
+                    @foreach (var r in undelivered)
+                    {
+                        <span class="badge-status @(IsSuppressed(r) ? "badge-error" : "badge-warning")"
+                              title="@(IsSuppressed(r) ? "On the suppression list" : "Not delivered")">@r</span>
+                    }
+                </div>
+            }
+            else
+            {
+                <p class="text-muted" style="margin:0;">Every recipient was delivered.</p>
+            }
+
+            <div style="margin-top:1rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                <BbButton Variant="ButtonVariant.Default" Disabled="@(!vm.HasBody)" @onclick="OpenResend">
+                    <LucideIcon Name="send" /> Resend…
+                </BbButton>
+                @if (!vm.HasBody)
+                {
+                    <span class="text-muted" style="font-size:0.85rem;">
+                        Resend unavailable — the message body is no longer retained. Increase the resend-retention
+                        window under <a href="/settings?tab=statistics">Settings → Data retention</a> to keep bodies longer.
+                    </span>
+                }
+            </div>
+        </BbCardContent>
+    </BbCard>
+
+    <BbCard>
+        <BbCardHeader><BbCardTitle>Delivery attempts</BbCardTitle></BbCardHeader>
+        <BbCardContent>
+            <BbTable Data="@logs">
+                <BbTableHeader>
+                    <BbTableRow TData="DeliveryLog">
+                        <BbTableHeaderCell TData="DeliveryLog">Time</BbTableHeaderCell>
+                        <BbTableHeaderCell TData="DeliveryLog">Recipient</BbTableHeaderCell>
+                        <BbTableHeaderCell TData="DeliveryLog">Status</BbTableHeaderCell>
+                        <BbTableHeaderCell TData="DeliveryLog">Remote server</BbTableHeaderCell>
+                        <BbTableHeaderCell TData="DeliveryLog">Details</BbTableHeaderCell>
+                    </BbTableRow>
+                </BbTableHeader>
+                <BbTableBody>
+                    @if (logs.Count == 0)
+                    {
+                        <BbTableRow TData="DeliveryLog">
+                            <BbTableCell colspan="5" style="text-align:center;">No delivery attempts recorded.</BbTableCell>
+                        </BbTableRow>
+                    }
+                    @foreach (var log in logs)
+                    {
+                        <BbTableRow Item="@log">
+                            <BbTableCell><LocalTime Utc="@log.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /></BbTableCell>
+                            <BbTableCell>@log.Recipient</BbTableCell>
+                            <BbTableCell><span class="badge-status @GetStatusCss(log.StatusCode)">@log.StatusCode</span></BbTableCell>
+                            <BbTableCell>@(log.RemoteServer ?? "-")</BbTableCell>
+                            <BbTableCell style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@log.StatusMessage">@log.StatusMessage</BbTableCell>
+                        </BbTableRow>
+                    }
+                </BbTableBody>
+            </BbTable>
+        </BbCardContent>
+    </BbCard>
+}
+
+<BbDialog @bind-Open="showResend">
+    <BbDialogContent>
+        <BbDialogHeader>
+            <BbDialogTitle>Resend message</BbDialogTitle>
+            <BbDialogDescription>
+                A fresh copy is queued for the recipients below. One address per line — edit, add, or remove as needed.
+                The original message is left unchanged.
+            </BbDialogDescription>
+        </BbDialogHeader>
+
+        <div class="form-group">
+            <BbLabel For="resend-recipients">Recipients</BbLabel>
+            <textarea id="resend-recipients" rows="5"
+                      style="width:100%;font-family:var(--font-mono,monospace);font-size:0.875rem;padding:0.5rem;border:1px solid var(--border);border-radius:var(--radius,0.375rem);background:var(--background);color:var(--foreground);"
+                      value="@resendRecipients" @oninput="@(e => resendRecipients = e.Value?.ToString() ?? "")"></textarea>
+        </div>
+
+        @if (suppressedInList.Count > 0)
+        {
+            <div style="font-size:0.85rem;color:var(--warning);margin-top:0.25rem;">
+                <p style="display:flex;gap:0.4rem;align-items:flex-start;margin:0 0 0.4rem;">
+                    <LucideIcon Name="triangle-alert" Size="14" />
+                    <span>These recipients are on the suppression list and will be skipped unless you remove them first:</span>
+                </p>
+                @foreach (var addr in suppressedInList)
+                {
+                    <div style="display:flex;gap:0.5rem;align-items:center;margin:0 0 0.3rem 1.4rem;">
+                        <code>@addr</code>
+                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Outline" Disabled="@unsuppressing"
+                                  @onclick="() => UnsuppressAsync(addr)">Remove from suppression list</BbButton>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(resendError))
+        {
+            <BbAlert Class="mt-1">@resendError</BbAlert>
+        }
+
+        <BbDialogFooter>
+            <BbButton Variant="ButtonVariant.Outline" @onclick="() => showResend = false">Cancel</BbButton>
+            <BbButton Variant="ButtonVariant.Default" Disabled="@(resending || ParseRecipients(resendRecipients).Count == 0)" @onclick="DoResendAsync">
+                <LucideIcon Name="send" /> @(resending ? "Resending…" : "Resend")
+            </BbButton>
+        </BbDialogFooter>
+    </BbDialogContent>
+</BbDialog>
+
+@code {
+    [Parameter] public long Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private MessageView? vm;
+    private List<DeliveryLog> logs = [];
+    private IReadOnlyList<string> allRecipients = [];
+    private IReadOnlyList<string> undelivered = [];
+    private Dictionary<string, int> suppressedIdByAddress = new(StringComparer.OrdinalIgnoreCase);
+    private bool isLoading = true;
+
+    private bool showResend;
+    private string resendRecipients = "";
+    private bool resending;
+    private string? resendError;
+    private string? resendStatus;
+    private bool unsuppressing;
+
+    private int currentUserId;
+    private string? currentEmail;
+
+    private List<string> suppressedInList =>
+        [.. ParseRecipients(resendRecipients).Where(IsSuppressed)];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is not null)
+        {
+            var user = (await AuthState).User;
+            int.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out currentUserId);
+            currentEmail = user.Identity?.Name;
+        }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        using var scope = ScopeFactory.CreateScope();
+        var sp = scope.ServiceProvider;
+        var db = sp.GetRequiredService<RelayDbContext>();
+
+        // Project body-presence without loading the (possibly large) body. An empty-blob inequality is used
+        // rather than RawMessage.Length, which EF rewrites to a non-translatable Any() over the binary column.
+        var emptyBody = Array.Empty<byte>();
+        vm = await db.QueuedMessages.AsNoTracking()
+            .Where(m => m.Id == Id)
+            .Select(m => new MessageView(
+                m.Id, m.TenantId, m.MessageId, m.Sender, m.Recipients, m.DeliveredRecipients,
+                m.Status, m.RetryCount, m.LastError, m.CreatedUtc, m.SizeBytes, m.RawMessage != emptyBody))
+            .FirstOrDefaultAsync();
+
+        if (vm is not null)
+        {
+            allRecipients = RecipientList.Split(vm.Recipients);
+            undelivered = RecipientList.Undelivered(vm.Recipients, vm.DeliveredRecipients);
+            logs = await db.DeliveryLogs.AsNoTracking()
+                .Where(l => l.QueuedMessageId == Id)
+                .OrderByDescending(l => l.Id)
+                .ToListAsync();
+            await LoadSuppressedAsync(sp);
+        }
+        isLoading = false;
+    }
+
+    private async Task LoadSuppressedAsync(IServiceProvider sp)
+    {
+        var entries = await sp.GetRequiredService<ISuppressionService>().GetAllAsync();
+        suppressedIdByAddress = entries
+            .GroupBy(e => e.Address, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private bool IsSuppressed(string address) => suppressedIdByAddress.ContainsKey(address.Trim());
+
+    private void OpenResend()
+    {
+        // Pre-fill with the recipients that still need delivering; fall back to all recipients.
+        var prefill = undelivered.Count > 0 ? undelivered : allRecipients;
+        resendRecipients = string.Join('\n', prefill);
+        resendError = null;
+        showResend = true;
+    }
+
+    private async Task UnsuppressAsync(string address)
+    {
+        if (unsuppressing) return;
+        if (!suppressedIdByAddress.TryGetValue(address.Trim(), out var id)) return;
+        unsuppressing = true;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<ISuppressionService>().RemoveAsync(id);
+            await LoadSuppressedAsync(scope.ServiceProvider);
+        }
+        finally { unsuppressing = false; }
+    }
+
+    private async Task DoResendAsync()
+    {
+        if (resending) return;                       // double-submit guard (before the first await)
+        var recipients = ParseRecipients(resendRecipients);
+        if (recipients.Count == 0) { resendError = "Enter at least one recipient address."; return; }
+        resending = true;
+        resendError = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var outcome = await sp.GetRequiredService<IMessageResendService>().ResendAsync(Id, recipients);
+            if (!outcome.Success)
+            {
+                resendError = outcome.Error;
+                return;
+            }
+            await sp.GetRequiredService<IAdminAuditService>().WriteAsync(
+                "message.resend", currentUserId, currentEmail,
+                tenantId: vm?.TenantId,
+                detail: $"Resent message {Id} as queue {outcome.NewMessageId} to {recipients.Count} recipient(s): {string.Join(", ", recipients)}");
+
+            showResend = false;
+            resendStatus = $"Re-queued as message {outcome.NewMessageId} for {recipients.Count} recipient(s). It will be delivered shortly.";
+            await LoadAsync();
+        }
+        finally { resending = false; }
+    }
+
+    private static List<string> ParseRecipients(string? text) =>
+        [.. (text ?? "")
+            .Split(['\n', '\r', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
+
+    private static string GetBadgeCss(MessageStatus status) => status switch
+    {
+        MessageStatus.Delivered => "badge-success",
+        MessageStatus.Delivering or MessageStatus.Queued => "badge-warning",
+        MessageStatus.Failed or MessageStatus.Bounced => "badge-error",
+        MessageStatus.Suppressed => "badge-error",
+        _ => "badge-muted"
+    };
+
+    private static string GetStatusCss(string statusCode) => statusCode switch
+    {
+        "250" => "badge-success",
+        _ when statusCode.StartsWith("5") => "badge-error",
+        _ when statusCode.StartsWith("4") => "badge-warning",
+        _ => "badge-muted"
+    };
+
+    private static string FormatSize(int bytes)
+    {
+        if (bytes is >= 0 and <= 1023) return $"{bytes} B";
+        if (bytes is >= 1024 and <= 1048575) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024):F1} MB";
+    }
+
+    private sealed record MessageView(
+        long Id, int TenantId, string MessageId, string Sender, string Recipients, string? DeliveredRecipients,
+        MessageStatus Status, int RetryCount, string? LastError, DateTimeOffset CreatedUtc, int SizeBytes, bool HasBody);
+}
