@@ -217,10 +217,19 @@
          unattended self-update: it RE-VERIFIES the staged MSI's Authenticode signature + publisher before
          installing as SYSTEM, so the low-privilege relay account (NetworkService) can hand it a verified
          download without ever gaining SYSTEM code-execution. Mirrors HardenInstallDirAcl: deferred type-34
-         CA with [INSTALLFOLDER] in the command. -Force overwrites any prior registration on upgrade. -->
+         CA with [INSTALLFOLDER] in the command (which DOES resolve here, as the Target is formatted at
+         script-generation time). -Force overwrites any prior registration on upgrade.
+
+         IMPORTANT — do NOT use a .NET type literal like [System.IO.File]::ReadAllText(...) in a Formatted
+         field: MSI treats anything in [square brackets] as a property reference, so [System.IO.File] is
+         substituted with the (empty) value of a non-existent property, leaving the broken PowerShell
+         "(::ReadAllText(...))" — a parse error that, with Return="ignore", silently never registers the
+         task. (This was the real cause of "auto-update never installs": UnregisterUpdateTask removed the
+         task on every major upgrade while this CA failed to re-create it.) Use Get-Content -Raw, which has
+         no square brackets to collide with. -->
     <CustomAction Id="RegisterUpdateTask"
                   Directory="System64Folder"
-                  ExeCommand="powershell.exe -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command &quot;Register-ScheduledTask -TaskName 'WinSmtpRelayUpdate' -Xml ([System.IO.File]::ReadAllText('[INSTALLFOLDER]update-task.xml')) -Force&quot;"
+                  ExeCommand="powershell.exe -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command &quot;Register-ScheduledTask -TaskName 'WinSmtpRelayUpdate' -Xml (Get-Content -Raw -LiteralPath '[INSTALLFOLDER]update-task.xml') -Force&quot;"
                   Execute="deferred" Return="ignore" Impersonate="no" />
 
     <!-- Remove the updater task on uninstall. -->

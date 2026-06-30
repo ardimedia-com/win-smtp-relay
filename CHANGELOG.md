@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build62] - 2026-06-30
+
+### Fixed
+
+- **Unattended self-update never installed: the SYSTEM updater task was never registered by the installer.** The `RegisterUpdateTask` custom action ran `[System.IO.File]::ReadAllText(...)` inside an MSI Formatted field, but MSI substitutes anything in `[square brackets]` as a property — so `[System.IO.File]` was replaced with an empty value, leaving the broken PowerShell `(::ReadAllText(...))`, a parse error. With `Return="ignore"` the failure was silent, so `Register-ScheduledTask` never ran and the `WinSmtpRelayUpdate` task was never created. Because the matching `UnregisterUpdateTask` (a static command, no brackets) *did* remove the task during every major upgrade's `RemoveExistingProducts`, the updater task disappeared after the first self-update and never came back — so the relay would download, verify and stage the new MSI and raise event 9100, but nothing consumed it. Fixed by reading the task XML with `Get-Content -Raw` (no square brackets to collide with MSI formatting). Existing installs that already lost the task need it registered once (the next clean install/upgrade with this fix restores it).
+
 ## [1.0.0-beta1-build61] - 2026-06-30
 
 ### Changed
