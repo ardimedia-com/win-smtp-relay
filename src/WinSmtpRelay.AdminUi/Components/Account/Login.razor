@@ -263,10 +263,12 @@ else if (errorMessage is not null)
         [DataType(DataType.Password)]
         public string Password { get; set; } = "";
 
-        // Default to a persistent cookie so the admin stays signed in across browser restarts / idle
-        // periods. Unchecking it falls back to a session cookie (cleared when the browser closes) for
-        // shared machines.
-        public bool RememberMe { get; set; } = true;
+        // Persistence is opt-in: the box ships UNCHECKED, so a persistent ("remember me") cookie is only
+        // issued when the admin deliberately asks for it. Defaulting it on would leave a signed-in session
+        // behind on a shared/untrusted device (this is a product installed in access contexts we don't
+        // control). The 7-day ExpireTimeSpan still gives a long-lived session within an open browser even
+        // when this stays false.
+        public bool RememberMe { get; set; }
 
         // Set by the activated submit button to PasswordAction or MagicLinkAction.
         public string? Action { get; set; }

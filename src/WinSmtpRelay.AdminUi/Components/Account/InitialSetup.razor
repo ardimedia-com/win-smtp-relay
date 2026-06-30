@@ -116,8 +116,9 @@ else
         await Audit.WriteAsync(AdminAuditActions.AdminCreated, user.Id, user.Email, targetUserId: user.Id,
             detail: "first-run host administrator (host + default-tenant membership)");
 
-        // Persistent cookie, consistent with the other sign-in paths (stay signed in across restarts / idle).
-        await SignInManager.SignInAsync(user, isPersistent: true);
+        // Session cookie (not persistent): first-run setup has no "remember me" opt-in, consistent with the
+        // opt-in persistence model (Login.razor).
+        await SignInManager.SignInAsync(user, isPersistent: false);
         Logger.LogWarning("First-run setup created the initial host administrator {Email}", Input.Email);
         Nav.NavigateTo("/");
     }

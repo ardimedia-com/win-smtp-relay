@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build61] - 2026-06-30
+
+### Changed
+
+- **"Keep me signed in" is now opt-in (the box ships unchecked).** The previous release pre-checked it and made the sign-in-link, passkey and first-run logins persistent by default; for a product installed in access contexts the operator can't control (shared or untrusted devices), a persistent session left behind is a real risk, so persistence is now a deliberate choice again. A persistent cookie is issued only when you tick the box on the password login; the sign-in link, passkey and first-run setup use a session cookie. The 7-day session lifetime and the 30-minute idle-resume window are unchanged, so you still stay signed in for a long time within an open browser even without ticking the box.
+
+### Fixed
+
+- **A service restart or in-place update no longer silently signs everyone out.** The ASP.NET Core Data Protection key ring — which encrypts the auth cookie and the sign-in-link / password-reset tokens — was left on the framework default location, where it could be regenerated when the service account profile or install changed, instantly invalidating every issued cookie and token. The keys are now persisted to a dedicated `keys` folder next to the database (encrypted at rest with DPAPI at machine scope) and pinned to a fixed application name, so they survive restarts, updates and a service-account change. This is what makes the 7-day sign-in lifetime actually hold in practice.
+
 ## [1.0.0-beta1-build60] - 2026-06-30
 
 ### Changed

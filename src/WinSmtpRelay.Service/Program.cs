@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using BlazorBlueprint.Components;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
@@ -46,6 +47,20 @@ builder.Services.Configure<DataRetentionOptions>(builder.Configuration.GetSectio
 builder.Services.Configure<DnsOptions>(builder.Configuration.GetSection(DnsOptions.SectionName));
 builder.Services.Configure<HealthCheckOptions>(builder.Configuration.GetSection(HealthCheckOptions.SectionName));
 builder.Services.Configure<UpdateOptions>(builder.Configuration.GetSection(UpdateOptions.SectionName));
+
+// Data Protection key ring: persist the keys to a stable on-disk location (a "keys" folder next to the
+// SQLite DB in the service's working directory, where NetworkService already has write access) and pin the
+// application name. Without this the framework default regenerates the key ring per account-profile / per
+// instance, which silently makes every existing auth cookie AND Identity token (sign-in links, password
+// resets) undecryptable on the next restart — i.e. a restart or in-place update would log everyone out,
+// defeating the long cookie lifetime. Encrypted at rest with DPAPI at LocalMachine scope (matching
+// SecretProtector), so the keys survive a service-account change rather than being locked to one profile.
+var keysDirectory = new DirectoryInfo(Path.Combine(Directory.GetCurrentDirectory(), "keys"));
+keysDirectory.Create();
+builder.Services.AddDataProtection()
+    .SetApplicationName("WinSmtpRelay")
+    .PersistKeysToFileSystem(keysDirectory)
+    .ProtectKeysWithDpapi(protectToLocalMachine: true);
 
 // Storage
 var connectionString = builder.Configuration.GetConnectionString("RelayDb") ?? "Data Source=winsmtprelay.db";
@@ -358,8 +373,9 @@ if (adminUiConfig.Enabled)
             return Results.Unauthorized();
 
         await um.AddOrUpdatePasskeyAsync(user, assertion.Passkey); // persist the updated sign counter
-        // Persistent cookie, consistent with password sign-in (stay signed in across restarts / idle).
-        await sm.SignInAsync(user, isPersistent: true);
+        // Session cookie (not persistent): the passkey flow has no "remember me" opt-in, consistent with the
+        // opt-in persistence model (Login.razor).
+        await sm.SignInAsync(user, isPersistent: false);
         await audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "passkey");
         return Results.Ok();
     }).AllowAnonymous();
