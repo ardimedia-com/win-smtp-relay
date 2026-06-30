@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build59] - 2026-06-30
+
 ### Added
 
 - **Resend a message to recipients that never received it (message detail → Resend).** Every message now has a detail page — open it from the Journal (a delivery row → "View message") or the Queue (the mail icon) — showing its per-recipient delivery outcomes and which recipients were not delivered. From there you can resend the stored copy: the recipient list is pre-filled with the undelivered addresses and is editable, so you can fix a typo, drop a genuinely-dead address, or add one. The original message is left untouched and a fresh copy is queued; if a chosen recipient is still on the suppression list the dialog warns and offers one-click removal so the resend isn't silently skipped. To make this possible, the body of a **partially-delivered** message (one with recipients skipped by the suppression list) is now retained for a configurable window — new **Resend retention (days)** field under Settings → Data retention, default 7 — instead of being stripped on delivery; the nightly purge drops the body after the window (the metadata row stays for the message-history window). Fully-delivered messages are still stripped immediately, and archive/regulated retention profiles keep content as before. Resends are written to the admin audit log.
