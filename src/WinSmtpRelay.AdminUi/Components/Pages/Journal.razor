@@ -1,4 +1,5 @@
 @page "/journal"
+@using Microsoft.AspNetCore.Components.Web.Virtualization
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.Extensions.DependencyInjection
 @using WinSmtpRelay.Core.Interfaces
@@ -7,6 +8,7 @@
 @inject IActivityFeed Feed
 @inject ICurrentTenant CurrentTenant
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 @implements IDisposable
 
 <BbBreadcrumb>
@@ -32,75 +34,51 @@
 </div>
 
 @* A form so Enter in the search box triggers the search (the BbButton stays type="button"). *@
-<form class="search-bar" @onsubmit="LoadLogs" @onsubmit:preventDefault>
+<form class="search-bar" @onsubmit="ApplySearch" @onsubmit:preventDefault>
     <BbInput Type="InputType.Search" @bind-Value="searchTerm" Placeholder="Search by recipient, message ID, or status..." />
-    <BbButton Variant="ButtonVariant.Secondary" @onclick="LoadLogs">
+    <BbButton Variant="ButtonVariant.Secondary" @onclick="ApplySearch">
         <LucideIcon Name="search" />
         Search
     </BbButton>
 </form>
 
-@if (isLoading)
-{
-    <BbSkeleton Class="h-[400px] w-full" />
-}
-else
-{
-    <BbTable Data="@logs">
-        <BbTableHeader>
-            <BbTableRow TData="DeliveryLog">
-                <BbTableHeaderCell TData="DeliveryLog">Time</BbTableHeaderCell>
-                <BbTableHeaderCell TData="DeliveryLog">Msg ID</BbTableHeaderCell>
-                <BbTableHeaderCell TData="DeliveryLog">Recipient</BbTableHeaderCell>
-                <BbTableHeaderCell TData="DeliveryLog">Status</BbTableHeaderCell>
-                <BbTableHeaderCell TData="DeliveryLog">Remote Server</BbTableHeaderCell>
-                <BbTableHeaderCell TData="DeliveryLog">Details</BbTableHeaderCell>
-            </BbTableRow>
-        </BbTableHeader>
-        <BbTableBody>
-            @if (logs.Count == 0)
-            {
-                <BbTableRow TData="DeliveryLog">
-                    <BbTableCell colspan="6" style="text-align:center;">No delivery log entries found.</BbTableCell>
-                </BbTableRow>
-            }
-            @foreach (var log in logs)
-            {
-                <BbTableRow Item="@log" class="log-row-clickable" @onclick="() => selected = log">
-                    <BbTableCell><LocalTime Utc="@log.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /></BbTableCell>
-                    <BbTableCell title="@($"Queue ID: {log.QueuedMessageId}")">@log.QueuedMessageId</BbTableCell>
-                    <BbTableCell>@log.Recipient</BbTableCell>
-                    <BbTableCell><span class="badge-status @GetStatusCss(log.StatusCode)">@log.StatusCode</span></BbTableCell>
-                    <BbTableCell>@(log.RemoteServer ?? "-")</BbTableCell>
-                    <BbTableCell>@Truncate(log.StatusMessage, 60)</BbTableCell>
-                </BbTableRow>
-            }
-        </BbTableBody>
-    </BbTable>
-
-    @if (totalPages > 1)
-    {
-        <div style="margin-top:1rem;">
-            <BbPagination>
-                <BbPaginationContent>
-                    <BbPaginationItem>
-                        <BbPaginationPrevious OnClick="PrevPage" Disabled="@(currentPage <= 1)" />
-                    </BbPaginationItem>
-                    @for (var p = 1; p <= totalPages; p++)
-                    {
-                        var page = p;
-                        <BbPaginationItem>
-                            <BbPaginationLink IsActive="@(page == currentPage)" OnClick="() => GoToPage(page)">@(page)</BbPaginationLink>
-                        </BbPaginationItem>
-                    }
-                    <BbPaginationItem>
-                        <BbPaginationNext OnClick="NextPage" Disabled="@(currentPage >= totalPages)" />
-                    </BbPaginationItem>
-                </BbPaginationContent>
-            </BbPagination>
-        </div>
-    }
-}
+@* Infinite scroll: <Virtualize> renders only the visible rows and pulls the next window from the server
+   via the ItemsProvider as you scroll, so the whole journal is browsable without a page picker. Newest
+   first; scroll down to load older entries. The scroll happens in .app-main and the <thead> stays sticky. *@
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Msg ID</th>
+            <th>Recipient</th>
+            <th>Status</th>
+            <th>Remote Server</th>
+            <th>Details</th>
+        </tr>
+    </thead>
+    <tbody>
+        @* SpacerElement="tr" keeps Virtualize's height-spacer elements valid inside <tbody>. *@
+        <Virtualize @ref="virtualize" TItem="DeliveryLog" ItemsProvider="LoadRows" Context="log"
+                    ItemSize="42" SpacerElement="tr" OverscanCount="6">
+            <ItemContent>
+                <tr class="log-row-clickable" @onclick="() => selected = log">
+                    <td><LocalTime Utc="@log.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /></td>
+                    <td title="@($"Queue ID: {log.QueuedMessageId}")">@log.QueuedMessageId</td>
+                    <td>@log.Recipient</td>
+                    <td><span class="badge-status @GetStatusCss(log.StatusCode)">@log.StatusCode</span></td>
+                    <td>@(log.RemoteServer ?? "-")</td>
+                    <td>@Truncate(log.StatusMessage, 60)</td>
+                </tr>
+            </ItemContent>
+            <Placeholder>
+                <tr><td colspan="6" style="text-align:center;color:var(--muted-foreground);padding:0.75rem;">Loading…</td></tr>
+            </Placeholder>
+            <EmptyContent>
+                <tr><td colspan="6" style="text-align:center;padding:1rem;">No delivery log entries found.</td></tr>
+            </EmptyContent>
+        </Virtualize>
+    </tbody>
+</table>
 
 <BbDialog @bind-Open="showHelp">
     <BbDialogContent>
@@ -126,12 +104,12 @@ else
             <h4 style="margin-top:1rem;">Searching</h4>
             <p>
                 Use the search bar to filter by recipient address, status code, status message, or remote server name.
-                Results are paginated (50 per page).
+                The list loads more entries automatically as you scroll &mdash; there are no pages to click through.
             </p>
             <h4 style="margin-top:1rem;">Live updates</h4>
             <p>
-                While you are on the first page, the journal refreshes automatically as new delivery attempts
-                are recorded. On later pages it stays still so rows don't shift while you read.
+                While you are at the top of the list, the journal refreshes automatically as new delivery attempts
+                are recorded. Once you scroll down into older entries it stays still so rows don't shift while you read.
             </p>
             <h4 style="margin-top:1rem;">Retention</h4>
             <p>
@@ -179,19 +157,16 @@ else
 @code {
     private bool showHelp;
     private DeliveryLog? selected;
-    private List<DeliveryLog> logs = [];
     private string searchTerm = "";
-    private int pageSize = 50;
-    private int currentPage = 1;
-    private int totalCount = 0;
-    private int totalPages => (int)Math.Ceiling((double)totalCount / pageSize);
-    private bool isLoading = true;
+    private Virtualize<DeliveryLog>? virtualize;
+    // StartIndex of the most recent window Virtualize requested. 0 means the newest rows are in view;
+    // used to gate the live refresh so it never shifts the ground under someone reading older history.
+    private int lastStartIndex;
     private bool _disposed;
     private System.Threading.Timer? _refreshDebounceTimer;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        await LoadLogs();
         // Created disarmed, before subscribing, so OnActivity can never see a null timer; re-armed
         // per event via Change(), which is thread-safe (OnActivity runs on the publisher's thread).
         _refreshDebounceTimer = new System.Threading.Timer(async _ =>
@@ -201,9 +176,10 @@ else
             {
                 await InvokeAsync(async () =>
                 {
-                    if (_disposed || currentPage != 1) return;
-                    await FetchLogs(showSkeleton: false);
-                    StateHasChanged();
+                    // Only refresh while the newest rows are on screen; if the user has scrolled down into
+                    // older entries, leave the view stable (RefreshDataAsync would re-query their window).
+                    if (_disposed || virtualize is null || lastStartIndex != 0) return;
+                    await virtualize.RefreshDataAsync();
                 });
             }
             catch { } // the circuit may be tearing down; a missed background refresh is harmless
@@ -211,59 +187,13 @@ else
         Feed.Received += OnActivity;
     }
 
-    private void OnActivity(ActivityEvent e)
-    {
-        if (_disposed) return;
-        // Each delivery attempt writes one journal row; react only to this circuit's tenant scope.
-        if (e.Kind is not ActivityKind.DeliveryAttempt || !CurrentTenant.Owns(e)) return;
-        // Auto-refresh only the first page so a background update can't shift rows while paging.
-        if (currentPage != 1) return;
-        ScheduleRefresh();
-    }
-
     /// <summary>
-    /// Debounces the feed-driven refresh so one message to N recipients (N events) causes one query.
+    /// Virtualize's data source: returns the requested window (newest first) plus the total count so the
+    /// scrollbar reflects the whole journal. Called again as the user scrolls and on RefreshDataAsync.
     /// </summary>
-    private void ScheduleRefresh()
+    private async ValueTask<ItemsProviderResult<DeliveryLog>> LoadRows(ItemsProviderRequest request)
     {
-        try { _refreshDebounceTimer?.Change(TimeSpan.FromMilliseconds(500), Timeout.InfiniteTimeSpan); }
-        catch (ObjectDisposedException) { } // disposed during teardown — a missed refresh is harmless
-    }
-
-    private async Task LoadLogs()
-    {
-        currentPage = 1;
-        await FetchLogs();
-    }
-
-    private async Task GoToPage(int page)
-    {
-        currentPage = page;
-        await FetchLogs();
-    }
-
-    private async Task PrevPage()
-    {
-        if (currentPage > 1)
-        {
-            currentPage--;
-            await FetchLogs();
-        }
-    }
-
-    private async Task NextPage()
-    {
-        if (currentPage < totalPages)
-        {
-            currentPage++;
-            await FetchLogs();
-        }
-    }
-
-    private async Task FetchLogs(bool showSkeleton = true)
-    {
-        // Background refreshes keep the current table visible instead of flashing the skeleton.
-        if (showSkeleton) isLoading = true;
+        lastStartIndex = request.StartIndex;
 
         using var scope = ScopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
@@ -280,17 +210,41 @@ else
                 (l.RemoteServer != null && l.RemoteServer.Contains(term)));
         }
 
-        totalCount = await query.CountAsync();
+        var total = await query.CountAsync(request.CancellationToken);
 
-        var skip = (currentPage - 1) * pageSize;
-
-        logs = await query
+        var items = await query
             .OrderByDescending(l => l.Id)
-            .Skip(skip)
-            .Take(pageSize)
-            .ToListAsync();
+            .Skip(request.StartIndex)
+            .Take(request.Count)
+            .ToListAsync(request.CancellationToken);
 
-        isLoading = false;
+        return new ItemsProviderResult<DeliveryLog>(items, total);
+    }
+
+    private void OnActivity(ActivityEvent e)
+    {
+        if (_disposed) return;
+        // Each delivery attempt writes one journal row; react only to this circuit's tenant scope.
+        if (e.Kind is not ActivityKind.DeliveryAttempt || !CurrentTenant.Owns(e)) return;
+        // The timer callback additionally gates on lastStartIndex so we only refresh when at the top.
+        ScheduleRefresh();
+    }
+
+    /// <summary>
+    /// Debounces the feed-driven refresh so one message to N recipients (N events) causes one query.
+    /// </summary>
+    private void ScheduleRefresh()
+    {
+        try { _refreshDebounceTimer?.Change(TimeSpan.FromMilliseconds(500), Timeout.InfiniteTimeSpan); }
+        catch (ObjectDisposedException) { } // disposed during teardown — a missed refresh is harmless
+    }
+
+    /// <summary>Applies the current search term: jump back to the newest results and re-query.</summary>
+    private async Task ApplySearch()
+    {
+        try { await JS.InvokeVoidAsync("winSmtpRelay.scrollMainToTop"); } catch { /* interop not ready */ }
+        if (virtualize is not null)
+            await virtualize.RefreshDataAsync();
     }
 
     private static string GetStatusCss(string statusCode) => statusCode switch

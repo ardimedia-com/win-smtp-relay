@@ -1,9 +1,11 @@
 @page "/host/audit"
+@using Microsoft.AspNetCore.Components.Web.Virtualization
 @using Microsoft.EntityFrameworkCore
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
+@inject IJSRuntime JS
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -20,7 +22,7 @@
 </div>
 
 <div class="search-bar">
-    <BbNativeSelect TValue="string" @bind-Value="actionFilter" @bind-Value:after="ReloadFirstPage">
+    <BbNativeSelect TValue="string" @bind-Value="actionFilter" @bind-Value:after="OnFilterChanged">
         <option value="">All actions</option>
         @foreach (var a in KnownActions)
         {
@@ -28,58 +30,49 @@
         }
     </BbNativeSelect>
     <div class="search-input-wrapper">
-        <BbInput @bind-Value="search" @bind-Value:after="ReloadFirstPage" Placeholder="Search actor or detail…" />
+        <BbInput @bind-Value="search" @bind-Value:after="OnFilterChanged" Placeholder="Search actor or detail…" />
     </div>
 </div>
 
-@if (isLoading)
-{
-    <BbSkeleton Class="h-[300px] w-full" />
-}
-else
-{
-    <BbTable Data="@rows">
-        <BbTableHeader>
-            <BbTableRow TData="Row">
-                <BbTableHeaderCell TData="Row">When</BbTableHeaderCell>
-                <BbTableHeaderCell TData="Row">Action</BbTableHeaderCell>
-                <BbTableHeaderCell TData="Row">Actor</BbTableHeaderCell>
-                <BbTableHeaderCell TData="Row">Target</BbTableHeaderCell>
-                <BbTableHeaderCell TData="Row">Tenant</BbTableHeaderCell>
-                <BbTableHeaderCell TData="Row">Detail</BbTableHeaderCell>
-            </BbTableRow>
-        </BbTableHeader>
-        <BbTableBody>
-            @if (rows.Count == 0)
-            {
-                <BbTableRow TData="Row"><BbTableCell colspan="6" style="text-align:center;">No audit events</BbTableCell></BbTableRow>
-            }
-            @foreach (var r in rows)
-            {
-                <BbTableRow Item="@r">
-                    <BbTableCell><LocalTime Utc="@r.When" Format="yyyy-MM-dd HH:mm:ss" /></BbTableCell>
-                    <BbTableCell>@Humanize(r.Action)</BbTableCell>
-                    <BbTableCell>@(r.Actor ?? "—")</BbTableCell>
-                    <BbTableCell>@(r.Target ?? "—")</BbTableCell>
-                    <BbTableCell>@(r.TenantId?.ToString() ?? "—")</BbTableCell>
-                    <BbTableCell><span class="text-muted" style="font-size:0.82rem;">@r.Detail</span></BbTableCell>
-                </BbTableRow>
-            }
-        </BbTableBody>
-    </BbTable>
-
-    <div class="flex gap-1 items-center" style="margin-top:0.75rem;">
-        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="PrevPage" Disabled="@(page == 0)">Previous</BbButton>
-        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="NextPage" Disabled="@((page + 1) * PageSize >= total)">Next</BbButton>
-        <span class="text-muted" style="font-size:0.82rem;margin-left:0.5rem;">
-            @(total == 0 ? 0 : page * PageSize + 1)–@(Math.Min((page + 1) * PageSize, total)) of @total
-        </span>
-    </div>
-}
+@* Infinite scroll: <Virtualize> renders only the visible rows and pulls the next window from the server
+   (IAdminAuditService.QueryAsync skip/take) as you scroll — no page picker. Newest first; the <thead>
+   stays sticky and the scroll happens in .app-main. *@
+<table>
+    <thead>
+        <tr>
+            <th>When</th>
+            <th>Action</th>
+            <th>Actor</th>
+            <th>Target</th>
+            <th>Tenant</th>
+            <th>Detail</th>
+        </tr>
+    </thead>
+    <tbody>
+        @* SpacerElement="tr" keeps Virtualize's height-spacer elements valid inside <tbody>. *@
+        <Virtualize @ref="virtualize" TItem="Row" ItemsProvider="LoadRows" Context="r"
+                    ItemSize="42" SpacerElement="tr" OverscanCount="6">
+            <ItemContent>
+                <tr>
+                    <td><LocalTime Utc="@r.When" Format="yyyy-MM-dd HH:mm:ss" /></td>
+                    <td>@Humanize(r.Action)</td>
+                    <td>@(r.Actor ?? "—")</td>
+                    <td>@(r.Target ?? "—")</td>
+                    <td>@(r.TenantId?.ToString() ?? "—")</td>
+                    <td><span class="text-muted" style="font-size:0.82rem;">@r.Detail</span></td>
+                </tr>
+            </ItemContent>
+            <Placeholder>
+                <tr><td colspan="6" style="text-align:center;color:var(--muted-foreground);padding:0.75rem;">Loading…</td></tr>
+            </Placeholder>
+            <EmptyContent>
+                <tr><td colspan="6" style="text-align:center;padding:1rem;">No audit events</td></tr>
+            </EmptyContent>
+        </Virtualize>
+    </tbody>
+</table>
 
 @code {
-    private const int PageSize = 100;
-
     private sealed record Row(DateTimeOffset When, string Action, string? Actor, string? Target, int? TenantId, string? Detail);
 
     private static readonly Dictionary<string, string> KnownActions = new()
@@ -104,34 +97,16 @@ else
 
     private static string Humanize(string action) => KnownActions.TryGetValue(action, out var label) ? label : action;
 
-    private List<Row> rows = [];
-    private bool isLoading = true;
+    private Virtualize<Row>? virtualize;
     private string actionFilter = "";
     private string search = "";
-    private int page;
-    private int total;
 
-    protected override Task OnInitializedAsync() => LoadAsync();
-
-    private async Task ReloadFirstPage()
+    /// <summary>
+    /// Virtualize's data source: returns the requested window (newest first) plus the total count so the
+    /// scrollbar reflects the whole log. Called again as the user scrolls and on a filter change.
+    /// </summary>
+    private async ValueTask<ItemsProviderResult<Row>> LoadRows(ItemsProviderRequest request)
     {
-        page = 0;
-        await LoadAsync();
-    }
-
-    private async Task PrevPage()
-    {
-        if (page > 0) { page--; await LoadAsync(); }
-    }
-
-    private async Task NextPage()
-    {
-        if ((page + 1) * PageSize < total) { page++; await LoadAsync(); }
-    }
-
-    private async Task LoadAsync()
-    {
-        isLoading = true;
         using var scope = ScopeFactory.CreateScope();
         var sp = scope.ServiceProvider;
         var audit = sp.GetRequiredService<IAdminAuditService>();
@@ -141,19 +116,28 @@ else
             string.IsNullOrWhiteSpace(actionFilter) ? null : actionFilter,
             null,
             string.IsNullOrWhiteSpace(search) ? null : search,
-            page * PageSize, PageSize);
-        total = count;
+            request.StartIndex, request.Count);
 
-        // Resolve target emails for the page (the actor email is denormalised on the event already).
+        // Resolve target emails for this window (the actor email is denormalised on the event already).
         var targetIds = events.Where(e => e.TargetUserId is not null).Select(e => e.TargetUserId!.Value).Distinct().ToList();
         var emails = targetIds.Count == 0
             ? new Dictionary<int, string?>()
-            : await um.Users.Where(u => targetIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.Email);
+            : await um.Users.Where(u => targetIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.Email, request.CancellationToken);
 
-        rows = events.Select(e => new Row(
+        var rows = events.Select(e => new Row(
             e.OccurredUtc, e.Action, e.ActorEmail,
             e.TargetUserId is int tid ? (emails.GetValueOrDefault(tid) ?? $"#{tid}") : null,
             e.TenantId, e.Detail)).ToList();
-        isLoading = false;
+
+        return new ItemsProviderResult<Row>(rows, count);
+    }
+
+    /// <summary>A filter (action or search) changed: jump back to the newest results and re-query.</summary>
+    private async Task OnFilterChanged()
+    {
+        try { await JS.InvokeVoidAsync("winSmtpRelay.scrollMainToTop"); } catch { /* interop not ready */ }
+        if (virtualize is not null)
+            await virtualize.RefreshDataAsync();
     }
 }

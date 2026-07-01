@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build64] - 2026-07-01
+
+### Changed
+
+- **The Journal and Audit Log now load endlessly as you scroll instead of using a page picker.** Both long lists dropped the pager (which was only reachable at the very bottom of the page, and on the Journal rendered every page number 1…N) in favour of infinite scroll: only the visible rows are rendered and the next batch is fetched from the server as you scroll down, newest first. The column headers stay pinned at the top while you scroll. On the Journal, new delivery attempts still appear automatically while you are at the top of the list; once you have scrolled down into older entries the view stays put so rows don't shift under you. Searching/filtering jumps back to the newest matches. The Queue and Event Log are bounded working sets (not long histories) and keep their existing behaviour.
+
 ## [1.0.0-beta1-build63] - 2026-07-01
 
 ### Changed
