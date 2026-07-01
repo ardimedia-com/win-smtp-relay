@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build63] - 2026-07-01
+
+### Changed
+
+- **The sidebar and top bar now stay fixed while long lists scroll, and list column headers stay visible.** The admin shell is now exactly the browser-window height: the left navigation and the top bar (sidebar toggle, theme, tenant switcher, account) no longer scroll away — only the page content area below them scrolls. On long lists (Journal, Queue, Event Log, Audit Log, Users, Tenants, …) the table's column headers stick to the top of that scroll area, so you keep the "Time / Status / Recipient / …" labels in view while paging through rows instead of losing them at the top. Navigating to another page resets the content area to the top as before.
+- **The sidebar footer now shows the running version** (e.g. `v1.0.0-beta1-build63`) in place of the static "Admin Panel" label, so the installed build is visible at a glance without opening the Update page.
+
 ## [1.0.0-beta1-build62] - 2026-06-30
 
 ### Fixed

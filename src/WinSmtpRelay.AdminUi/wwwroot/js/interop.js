@@ -11,3 +11,11 @@ window.winSmtpRelay.getTimeZoneName = function () {
 window.winSmtpRelay.getTimeZoneOffsetMinutes = function () {
     return new Date().getTimezoneOffset();
 };
+
+// Reset the scrollable content region to the top. The app shell is a fixed viewport height, so the
+// window itself does not scroll — the inner .app-main does. On navigation we reset it so each page
+// starts at the top (the window-scroll reset the fixed shell used to get for free no longer applies).
+window.winSmtpRelay.scrollMainToTop = function () {
+    var el = document.querySelector('.app-main');
+    if (el) el.scrollTo(0, 0);
+};

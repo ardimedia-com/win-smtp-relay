@@ -142,6 +142,39 @@
     margin-bottom: 0;
 }
 
+/* App shell: fixed sidebar + fixed top header, one scrolling content region.
+   The shell (BbSidebarProvider) is set to h-screen, so it is exactly the viewport height and never grows.
+   The inset is the vertical column [ header | banner | .app-main ]; only .app-main scrolls, which keeps the
+   sidebar and the header pinned no matter how long a list gets. */
+.app-inset {
+    min-height: 0;      /* override the framework's min-h-svh so the column can bound its children */
+    overflow: hidden;   /* clip here; the inner .app-main provides the scroll */
+}
+
+.app-main {
+    flex: 1;
+    min-height: 0;      /* critical: let this flex child shrink below its content so overflow-y engages */
+    overflow-y: auto;
+}
+
+/* Page padding lives on the inner wrapper (not on the scroll container) so a sticky table header can
+   stick flush to the top of the scroll area rather than below a padding gap. */
+.app-main-inner {
+    padding: 2rem;
+}
+
+/* "Scroll from the table header": a data table's column headers stay visible while its rows scroll under
+   them. BbTable renders the <table> directly (no intermediate scroll wrapper), so a sticky header binds to
+   .app-main and sticks just below the fixed app header. The opaque background keeps rows from showing
+   through as they scroll under it. A table inside its own overflow wrapper (e.g. the cert-details table)
+   simply doesn't stick — which is fine for those short, non-list tables. */
+.app-main thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--background);
+}
+
 /* Tables */
 table {
     width: 100%;
@@ -473,6 +506,7 @@ a[class*="button" i] { white-space: nowrap; }
     color: var(--destructive);
     border-bottom: 1px solid color-mix(in srgb, var(--destructive) 30%, transparent);
     font-size: 0.85rem;
+    flex-shrink: 0;  /* stays a fixed banner above the scrolling .app-main, never squeezed */
 }
 .must-change-banner a { color: inherit; font-weight: 600; }
 

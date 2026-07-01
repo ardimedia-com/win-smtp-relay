@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 @using WinSmtpRelay.Core.Interfaces
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -13,7 +14,10 @@
 <PageTitle>WIN-SMTP-RELAY</PageTitle>
 
 <BbTooltipProvider>
-<BbSidebarProvider DefaultOpen="true">
+@* HeightClass="h-screen" pins the whole shell to exactly the viewport height (instead of the default
+   min-h-screen, which grows with content and lets the whole page scroll). With a fixed-height shell the
+   sidebar and the top header stay put and only the page content region (.app-main) scrolls. *@
+<BbSidebarProvider DefaultOpen="true" HeightClass="h-screen">
     <BbSidebar>
         <BbSidebarHeader>
             <BbSidebarHeaderContent>
@@ -255,12 +259,14 @@
         </BbSidebarContent>
 
         <BbSidebarFooter>
-            <span class="text-muted" style="font-size:0.75rem;">Admin Panel</span>
+            @* Explicit @(...) expression: "v@AppVersion" would be misread by Razor as an email address
+               (letter@letter) and rendered literally, so keep the "v" out of the implicit-expression path. *@
+            <span class="text-muted" style="font-size:0.75rem;" title="WIN-SMTP-RELAY version">v@(AppVersion)</span>
         </BbSidebarFooter>
     </BbSidebar>
 
-    <BbSidebarInset>
-        <header style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem 2rem;border-bottom:1px solid var(--border);">
+    <BbSidebarInset Class="app-inset">
+        <header style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem 2rem;border-bottom:1px solid var(--border);flex-shrink:0;">
             <BbSidebarTrigger />
             <ThemeToggle />
             <div style="margin-left:auto;display:flex;align-items:center;gap:1rem;">
@@ -299,22 +305,26 @@
                 }
             </Authorized>
         </AuthorizeView>
-        <main style="flex:1;padding:2rem;overflow-y:auto;">
-            @if (IsHostScope && IsTenantOnlyRoute)
-            {
-                @* Direct-URL guard for per-tenant pages in the global view: the EF tenant filter is off
-                   in host scope, so these pages would render all tenants' rows merged, and a create would
-                   silently land in the Default tenant. The nav already hides them; this covers the URL. *@
-                <div class="page-header">
-                    <h1>Select an organization</h1>
-                    <p>This page manages one organization's configuration. You are in the global (all-tenants)
-                       view — pick an organization in the switcher at the top right, then return here.</p>
-                </div>
-            }
-            else
-            {
-                @Body
-            }
+        @* .app-main is the single vertical scroll region (the sidebar + header above stay fixed). The
+           2rem page padding lives on the inner wrapper so a sticky table header can sit flush at top:0. *@
+        <main class="app-main">
+            <div class="app-main-inner">
+                @if (IsHostScope && IsTenantOnlyRoute)
+                {
+                    @* Direct-URL guard for per-tenant pages in the global view: the EF tenant filter is off
+                       in host scope, so these pages would render all tenants' rows merged, and a create would
+                       silently land in the Default tenant. The nav already hides them; this covers the URL. *@
+                    <div class="page-header">
+                        <h1>Select an organization</h1>
+                        <p>This page manages one organization's configuration. You are in the global (all-tenants)
+                           view — pick an organization in the switcher at the top right, then return here.</p>
+                    </div>
+                }
+                else
+                {
+                    @Body
+                }
+            </div>
         </main>
     </BbSidebarInset>
 </BbSidebarProvider>
@@ -323,6 +333,14 @@
 <BbPortalHost />
 
 @code {
+    // Shown in the sidebar footer (replaces the former static "Admin Panel" label). Read from the
+    // assembly's InformationalVersion — the same clean "1.0.0-beta1-buildNN" string the Update page uses
+    // (git-hash suffix is disabled in Directory.Build.props), so the footer always reflects the running build.
+    private static readonly string AppVersion =
+        typeof(MainLayout).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? typeof(MainLayout).Assembly.GetName().Version?.ToString()
+        ?? "0.0.0";
+
     [CascadingParameter]
     private Task<AuthenticationState>? AuthState { get; set; }
 
@@ -369,6 +387,10 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Fixed-height shell: .app-main scrolls, not the window — reset it to the top on every navigation
+        // so each page opens at the top (subscribe unconditionally, before the auth early-return below).
+        Nav.LocationChanged += OnLocationChanged;
+
         if (AuthState is null)
             return;
 
@@ -393,6 +415,19 @@
             systemEmailUnconfigured = string.IsNullOrWhiteSpace(from);
         }
     }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        // Best-effort: scroll the content region back to the top. Fire-and-forget; a missed reset
+        // (circuit tearing down, JS not yet available during prerender) is harmless.
+        _ = InvokeAsync(async () =>
+        {
+            try { await JS.InvokeVoidAsync("winSmtpRelay.scrollMainToTop"); }
+            catch { /* JS not available (prerender) or circuit disposed — ignore */ }
+        });
+    }
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

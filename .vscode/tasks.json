@@ -1,0 +1,53 @@
+{
+	// Schema 2.0.0 is required for the presentation/isBackground options used by the watch task below.
+	"version": "2.0.0",
+	"tasks": [
+		{
+			// Default build (also the preLaunchTask for the ".NET Core Launch (web)" config). Building the
+			// Service host transitively builds every referenced project (Core/SmtpListener/Delivery/
+			// Security/Storage/AdminApi/AdminUi).
+			"label": "build",
+			"command": "dotnet",
+			"type": "process",
+			"args": [
+				"build",
+				"${workspaceFolder}/src/WinSmtpRelay.Service/WinSmtpRelay.Service.csproj"
+			],
+			"problemMatcher": "$msCompile",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			// Hot-reload dev run in an integrated terminal (Ctrl+Shift+P -> "Tasks: Run Task" ->
+			// "app: dotnet watch"). dotnet watch restarts on C#/Razor changes; hand-written CSS
+			// (wwwroot/css/*.css) and interop.js are static assets served directly — a browser refresh
+			// picks them up, no rebuild needed. This project has no Tailwind/npm step, so unlike some other
+			// Blazor apps there is no CSS watcher to run alongside. Uses the single launchSettings profile,
+			// which sets DOTNET_ENVIRONMENT=Development.
+			"label": "app: dotnet watch",
+			"detail": "Run the relay host via dotnet watch (Development) in an integrated terminal.",
+			"type": "process",
+			"command": "dotnet",
+			"args": [
+				"watch",
+				"--project",
+				"src/WinSmtpRelay.Service/WinSmtpRelay.Service.csproj"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"DOTNET_ENVIRONMENT": "Development"
+				}
+			},
+			"isBackground": true,
+			"problemMatcher": [],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always",
+				"clear": true
+			}
+		}
+	]
+}

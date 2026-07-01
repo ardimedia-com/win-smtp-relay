@@ -1,0 +1,33 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			// F5: build, then run the Windows-service host (Kestrel + Admin UI + SMTP listener) with the
+			// debugger attached. The host binds its own Kestrel endpoints from appsettings (Admin UI on
+			// https://127.0.0.1:8025), so there is no applicationUrl here — serverReadyAction below detects
+			// whatever Kestrel logs. Running the DLL directly bypasses launchSettings.json, so the
+			// Development environment is set explicitly via DOTNET_ENVIRONMENT (this is a generic host, not
+			// a pure web app, so it reads DOTNET_ENVIRONMENT rather than ASPNETCORE_ENVIRONMENT).
+			"name": ".NET Core Launch (web)",
+			"type": "coreclr",
+			"request": "launch",
+			"preLaunchTask": "build",
+			"program": "${workspaceFolder}/src/WinSmtpRelay.Service/bin/Debug/net10.0-windows/WinSmtpRelay.Service.dll",
+			"args": [],
+			"cwd": "${workspaceFolder}/src/WinSmtpRelay.Service",
+			"stopAtEntry": false,
+			"serverReadyAction": {
+				// Open the Development-only plain-HTTP loopback endpoint (127.0.0.1, port = AdminUi:Port + 1,
+				// i.e. 8026 by default) instead of the primary HTTPS one, so the browser doesn't hit the
+				// self-signed-certificate warning on every launch. The port isn't hard-coded — it matches
+				// whatever http loopback Kestrel logs. Remove the "http://127\\.0\\.0\\.1:" prefix from the
+				// pattern to open the first (HTTPS) endpoint instead.
+				"action": "openExternally",
+				"pattern": "\\bNow listening on:\\s+(http://127\\.0\\.0\\.1:\\S+)"
+			},
+			"env": {
+				"DOTNET_ENVIRONMENT": "Development"
+			}
+		}
+	]
+}
