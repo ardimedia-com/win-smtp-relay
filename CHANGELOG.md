@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build65] - 2026-07-06
+
+### Added
+
+- **The Message Journal now shows the sender, like the Queue.** A new Sender column sits next to the
+  recipient (and in the row-detail dialog), and the search bar also matches the sender address. The
+  envelope sender is recorded on each journal entry itself (denormalized from the queued message,
+  migration `AddDeliveryLogSender` with a backfill), so it remains visible after the message is purged
+  by retention; entries written before this change whose message is already gone show "-". The
+  `/api/admin/deliverylogs` response includes the new `sender` field.
+
 ## [1.0.0-beta1-build64] - 2026-07-01
 
 ### Changed

@@ -213,7 +213,7 @@ public static class AdminEndpoints
                 .Skip(offset)
                 .Take(limit)
                 .Select(l => new DeliveryLogSummary(
-                    l.Id, l.QueuedMessageId, l.Recipient, l.StatusCode,
+                    l.Id, l.QueuedMessageId, l.Sender, l.Recipient, l.StatusCode,
                     l.StatusMessage, l.RemoteServer, l.TimestampUtc))
                 .ToListAsync(ct);
 
@@ -692,7 +692,7 @@ public record DomainRouteSummary(
 }
 
 public record DeliveryLogSummary(
-    long Id, long QueuedMessageId, string Recipient, string StatusCode,
+    long Id, long QueuedMessageId, string? Sender, string Recipient, string StatusCode,
     string StatusMessage, string? RemoteServer, DateTimeOffset TimestampUtc);
 
 public record CreateAcceptedDomainRequest(string Domain);

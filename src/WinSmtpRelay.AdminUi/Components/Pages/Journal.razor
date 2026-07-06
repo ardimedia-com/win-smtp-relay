@@ -50,6 +50,7 @@
         <tr>
             <th>Time</th>
             <th>Msg ID</th>
+            <th>Sender</th>
             <th>Recipient</th>
             <th>Status</th>
             <th>Remote Server</th>
@@ -64,6 +65,7 @@
                 <tr class="log-row-clickable" @onclick="() => selected = log">
                     <td><LocalTime Utc="@log.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /></td>
                     <td title="@($"Queue ID: {log.QueuedMessageId}")">@log.QueuedMessageId</td>
+                    <td>@(log.Sender ?? "-")</td>
                     <td>@log.Recipient</td>
                     <td><span class="badge-status @GetStatusCss(log.StatusCode)">@log.StatusCode</span></td>
                     <td>@(log.RemoteServer ?? "-")</td>
@@ -71,10 +73,10 @@
                 </tr>
             </ItemContent>
             <Placeholder>
-                <tr><td colspan="6" style="text-align:center;color:var(--muted-foreground);padding:0.75rem;">Loading…</td></tr>
+                <tr><td colspan="7" style="text-align:center;color:var(--muted-foreground);padding:0.75rem;">Loading…</td></tr>
             </Placeholder>
             <EmptyContent>
-                <tr><td colspan="6" style="text-align:center;padding:1rem;">No delivery log entries found.</td></tr>
+                <tr><td colspan="7" style="text-align:center;padding:1rem;">No delivery log entries found.</td></tr>
             </EmptyContent>
         </Virtualize>
     </tbody>
@@ -96,6 +98,7 @@
             <ul style="padding-left:1.25rem;">
                 <li><strong>Time</strong> &mdash; when the delivery attempt was made, shown in your browser's local time zone (hover for the exact UTC value).</li>
                 <li><strong>Msg ID</strong> &mdash; links back to the queued message by its internal queue ID.</li>
+                <li><strong>Sender</strong> &mdash; the message's envelope sender (recorded on the journal entry, so it survives the message being purged; older entries may show "-").</li>
                 <li><strong>Recipient</strong> &mdash; the email address this attempt targeted.</li>
                 <li><strong>Status</strong> &mdash; the SMTP status code returned by the remote server (250 = success, 4xx = temporary failure, 5xx = permanent failure).</li>
                 <li><strong>Remote Server</strong> &mdash; the MX host or smart host that handled the delivery.</li>
@@ -103,7 +106,7 @@
             </ul>
             <h4 style="margin-top:1rem;">Searching</h4>
             <p>
-                Use the search bar to filter by recipient address, status code, status message, or remote server name.
+                Use the search bar to filter by sender or recipient address, status code, status message, or remote server name.
                 The list loads more entries automatically as you scroll &mdash; there are no pages to click through.
             </p>
             <h4 style="margin-top:1rem;">Live updates</h4>
@@ -135,6 +138,10 @@
                 <BbDialogDescription><LocalTime Utc="@selected.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /> &middot; Msg @selected.QueuedMessageId</BbDialogDescription>
             </BbDialogHeader>
             <div style="font-size:0.875rem;line-height:1.6;max-height:60vh;overflow-y:auto;">
+                <div style="margin-bottom:0.5rem;">
+                    <strong class="text-muted">Sender</strong><br />
+                    <span style="word-break:break-word;">@(selected.Sender ?? "-")</span>
+                </div>
                 <div style="margin-bottom:0.5rem;">
                     <strong class="text-muted">Remote server</strong><br />
                     <span style="word-break:break-word;">@(selected.RemoteServer ?? "-")</span>
@@ -204,6 +211,7 @@
         {
             var term = searchTerm.Trim();
             query = query.Where(l =>
+                (l.Sender != null && l.Sender.Contains(term)) ||
                 l.Recipient.Contains(term) ||
                 l.StatusCode.Contains(term) ||
                 l.StatusMessage.Contains(term) ||

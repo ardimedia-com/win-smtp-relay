@@ -153,6 +153,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.QueuedMessageId);
             entity.HasIndex(e => e.TimestampUtc);
+            entity.Property(e => e.Sender).HasMaxLength(320);
             entity.Property(e => e.Recipient).HasMaxLength(320);
             entity.Property(e => e.StatusCode).HasMaxLength(10);
             entity.Property(e => e.RemoteServer).HasMaxLength(255);
