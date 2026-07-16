@@ -1,6 +1,7 @@
 {
 	"version": "0.2.0",
 	"configurations": [
+	
 		{
 			// F5: build, then run the Windows-service host (Kestrel + Admin UI + SMTP listener) with the
 			// debugger attached. The host binds its own Kestrel endpoints from appsettings (Admin UI on
