@@ -28,4 +28,33 @@ public static class AdminAuditActions
 
     /// <summary>An administrator triggered an unattended software self-update (download + verified install).</summary>
     public const string ServerUpdateStarted = "server.update_started";
+
+    // Security-relevant configuration mutations (owner decision 2026-07-16). Written by the storage
+    // services themselves — the actor comes from the ambient ICurrentActor, so no caller can mutate
+    // policy without leaving a trace. A null actor means the change came from a background/system
+    // scope (e.g. first-run seeding), which is the honest record. Cosmetic settings are not audited.
+
+    public const string IpRuleCreated = "iprule.created";
+    public const string IpRuleUpdated = "iprule.updated";
+    public const string IpRuleDeleted = "iprule.deleted";
+
+    public const string SenderDomainCreated = "senderdomain.created";
+    public const string SenderDomainVerified = "senderdomain.verified";
+    public const string SenderDomainDeleted = "senderdomain.deleted";
+
+    public const string RecipientDomainCreated = "recipientdomain.created";
+    public const string RecipientDomainVerified = "recipientdomain.verified";
+    public const string RecipientDomainDeleted = "recipientdomain.deleted";
+
+    public const string SendConnectorCreated = "sendconnector.created";
+    public const string SendConnectorUpdated = "sendconnector.updated";
+    public const string SendConnectorDeleted = "sendconnector.deleted";
+
+    // The one-click decisions on the Rejections page. These record the operator's DECISION with its
+    // context (which client, which gate refused); the resulting config change is separately audited by
+    // the service that performed it (senderdomain.created / iprule.created).
+    public const string RejectionDomainAccepted = "rejection.domain_accepted";
+    public const string RejectionIpAllowed = "rejection.ip_allowed";
+    public const string RejectionIgnored = "rejection.ignored";
+    public const string RejectionUnignored = "rejection.unignored";
 }

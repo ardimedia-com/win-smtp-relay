@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
@@ -8,7 +9,14 @@ namespace WinSmtpRelay.Storage;
 // The cache serves this data on the SMTP hot path; invalidating HERE (not in each caller) means no
 // caller — UI page, API endpoint, or background job — can forget to and leave stale policy live for
 // up to the cache lifetime. Same convention as IpAccessRuleService.
-public class AcceptedDomainService(RelayDbContext db, IRuntimeConfigCache cache) : IAcceptedDomainService
+// Mutations here change which domains may send/receive — audited at the SERVICE so no caller can
+// change policy without leaving a trace (actor from the ambient ICurrentActor; system scopes audit
+// with a null actor).
+public class AcceptedDomainService(
+    RelayDbContext db,
+    IRuntimeConfigCache cache,
+    ICurrentActor actor,
+    IAdminAuditService audit) : IAcceptedDomainService
 {
     public async Task<IReadOnlyList<AcceptedDomain>> GetAllAsync(CancellationToken ct = default)
     {
@@ -28,6 +36,8 @@ public class AcceptedDomainService(RelayDbContext db, IRuntimeConfigCache cache)
         db.AcceptedDomains.Add(entry);
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.RecipientDomainCreated, actor.UserId, actor.Email,
+            tenantId: entry.TenantId, detail: entry.Domain, ct: ct);
         return entry;
     }
 
@@ -40,12 +50,22 @@ public class AcceptedDomainService(RelayDbContext db, IRuntimeConfigCache cache)
         entry.VerifiedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.RecipientDomainVerified, actor.UserId, actor.Email,
+            tenantId: entry.TenantId, detail: entry.Domain, ct: ct);
     }
 
     public async Task DeleteAsync(int id, CancellationToken ct = default)
     {
-        await db.AcceptedDomains.Where(d => d.Id == id).ExecuteDeleteAsync(ct);
+        // Load-then-delete so the audit row can name the domain that was removed.
+        var entry = await db.AcceptedDomains.FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (entry is null)
+            return;
+
+        db.AcceptedDomains.Remove(entry);
+        await db.SaveChangesAsync(ct);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.RecipientDomainDeleted, actor.UserId, actor.Email,
+            tenantId: entry.TenantId, detail: entry.Domain, ct: ct);
     }
 
     private static string GenerateToken() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));

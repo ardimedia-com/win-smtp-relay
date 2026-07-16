@@ -4,16 +4,21 @@ using WinSmtpRelay.Core.Interfaces;
 namespace WinSmtpRelay.Storage;
 
 /// <summary>
-/// Creates DI scopes that inherit the current scope's tenant. Blazor pages use this instead of
-/// <see cref="IServiceScopeFactory"/> so per-operation DbContext scopes stay tenant-scoped (a raw
-/// child scope would otherwise get a fresh, unset <see cref="ICurrentTenant"/> and see all tenants).
+/// Creates DI scopes that inherit the current scope's ambient context — the tenant AND the acting
+/// admin. Blazor pages use this instead of <see cref="IServiceScopeFactory"/> so per-operation
+/// DbContext scopes stay tenant-scoped and audit rows keep their actor (a raw child scope would
+/// otherwise get a fresh, unset <see cref="ICurrentTenant"/>/<see cref="ICurrentActor"/> — seeing all
+/// tenants and auditing as "system").
 /// </summary>
 public interface ITenantScopeFactory
 {
     IServiceScope CreateScope();
 }
 
-public class TenantScopeFactory(IServiceScopeFactory inner, ICurrentTenant current) : ITenantScopeFactory
+public class TenantScopeFactory(
+    IServiceScopeFactory inner,
+    ICurrentTenant current,
+    ICurrentActor currentActor) : ITenantScopeFactory
 {
     public IServiceScope CreateScope()
     {
@@ -23,6 +28,8 @@ public class TenantScopeFactory(IServiceScopeFactory inner, ICurrentTenant curre
             child.SetHostScope();
         else if (current.TenantId is { } id)
             child.SetTenant(id);
+
+        scope.ServiceProvider.GetRequiredService<ICurrentActor>().Set(currentActor.UserId, currentActor.Email);
         return scope;
     }
 }

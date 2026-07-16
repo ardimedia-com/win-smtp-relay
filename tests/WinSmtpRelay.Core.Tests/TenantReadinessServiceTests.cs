@@ -36,11 +36,11 @@ public class TenantReadinessServiceTests
         current,
         new TenantService(_db, null!),
         new UserService(_db),
-        new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache()),
+        new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
         new DkimDomainService(_db),
-        new SendConnectorService(_db, new NoopRuntimeConfigCache()),
-        new AcceptedDomainService(_db, new NoopRuntimeConfigCache()),
-        new IpAccessRuleService(_db, null!),
+        new SendConnectorService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
+        new AcceptedDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
+        new IpAccessRuleService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
         new MessageFilterService(_db, new NoopRuntimeConfigCache()),
         new ApiKeyService(_db),
         new DnsSettingsService(_db),
@@ -148,7 +148,7 @@ public class TenantReadinessServiceTests
     public async Task SenderDomains_PartiallyVerified_WithEnforcement_ReportsPartial()
     {
         await SetSenderVerificationEnforcementAsync(true);
-        var senders = new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache());
+        var senders = new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db));
         var a = await senders.CreateAsync("acme.com");
         await senders.CreateAsync("acme.net");
         await senders.MarkVerifiedAsync(a.Id);
@@ -167,7 +167,7 @@ public class TenantReadinessServiceTests
     {
         // Enforcement off (default): unverified domains are not rejected, so "verify ownership" is a
         // handled default (shown as Done), not a pending task that nags the operator.
-        var senders = new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache());
+        var senders = new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db));
         var a = await senders.CreateAsync("acme.com");
         await senders.CreateAsync("acme.net");
         await senders.MarkVerifiedAsync(a.Id);
@@ -181,7 +181,7 @@ public class TenantReadinessServiceTests
     [TestCategory("Unit")]
     public async Task SenderDomains_AllVerified_ReportsDone()
     {
-        var senders = new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache());
+        var senders = new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db));
         var a = await senders.CreateAsync("acme.com");
         await senders.MarkVerifiedAsync(a.Id);
 
@@ -228,7 +228,7 @@ public class TenantReadinessServiceTests
     [TestCategory("Unit")]
     public async Task Outbound_IsDone_WhenAnEnabledSendConnectorExists()
     {
-        await new SendConnectorService(_db, new NoopRuntimeConfigCache()).CreateAsync(new SendConnector { Name = "Brevo", IsEnabled = true });
+        await new SendConnectorService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)).CreateAsync(new SendConnector { Name = "Brevo", IsEnabled = true });
 
         var r = await Build(_current).GetAsync();
 
@@ -240,7 +240,7 @@ public class TenantReadinessServiceTests
     public async Task RecommendedRollup_CountsOnlyDoneRecommendedItems()
     {
         await new UserService(_db).CreateUserAsync("alice", "P@ssw0rd!");
-        var senders = new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache());
+        var senders = new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db));
         var a = await senders.CreateAsync("acme.com");
         await senders.MarkVerifiedAsync(a.Id);
 

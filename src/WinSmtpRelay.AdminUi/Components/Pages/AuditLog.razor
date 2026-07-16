@@ -93,6 +93,23 @@
         [AdminAuditActions.MfaRecoveryCodesRegenerated] = "Recovery codes regenerated",
         [AdminAuditActions.PasskeyAdded] = "Passkey added",
         [AdminAuditActions.PasskeyRemoved] = "Passkey removed",
+        [AdminAuditActions.ServerUpdateStarted] = "Server update started",
+        [AdminAuditActions.IpRuleCreated] = "IP rule created",
+        [AdminAuditActions.IpRuleUpdated] = "IP rule updated",
+        [AdminAuditActions.IpRuleDeleted] = "IP rule deleted",
+        [AdminAuditActions.SenderDomainCreated] = "Sender domain added",
+        [AdminAuditActions.SenderDomainVerified] = "Sender domain verified",
+        [AdminAuditActions.SenderDomainDeleted] = "Sender domain deleted",
+        [AdminAuditActions.RecipientDomainCreated] = "Recipient domain added",
+        [AdminAuditActions.RecipientDomainVerified] = "Recipient domain verified",
+        [AdminAuditActions.RecipientDomainDeleted] = "Recipient domain deleted",
+        [AdminAuditActions.SendConnectorCreated] = "Send connector created",
+        [AdminAuditActions.SendConnectorUpdated] = "Send connector updated",
+        [AdminAuditActions.SendConnectorDeleted] = "Send connector deleted",
+        [AdminAuditActions.RejectionDomainAccepted] = "Rejection: domain accepted",
+        [AdminAuditActions.RejectionIpAllowed] = "Rejection: IP allowed",
+        [AdminAuditActions.RejectionIgnored] = "Rejection ignored",
+        [AdminAuditActions.RejectionUnignored] = "Rejection un-ignored",
     };
 
     private static string Humanize(string action) => KnownActions.TryGetValue(action, out var label) ? label : action;

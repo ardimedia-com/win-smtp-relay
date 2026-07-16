@@ -428,23 +428,32 @@ Values chosen while building (open question 2, non-blocking, revisit if they cha
 **5 000** distinct pending keys in memory (excess dropped, and logged — never silently); **2 000** rows
 per trust partition; retention on `DeliveryLogDays`.
 
-## Open questions (non-blocking)
+## Follow-ups, resolved 2026-07-16 (owner decisions)
 
-1. **Reply codes for throttling.** The 4xx/5xx defect above is recorded as a known issue, not fixed:
-   `IMailboxFilter`'s `bool` cannot carry a code, so the response would have to travel some other way
-   (a session property read by a custom command, or a fork of `MailCommand`). Consider whether it
-   belongs upstream (`enhance-libraries-at-source.md`).
-2. **Config mutations are not audited — repo-wide, and this page makes it pointed.** `[Allow IP]` creates
-   a firewall-shaped allow rule from a list row in one click. Nothing is audited, which is *consistent*:
-   `IpAccessRules.razor` and `AcceptedSenderDomains.razor` do not audit either, and `AdminAuditActions`
-   has no config vocabulary at all (its 15 constants are identity/session/server-lifecycle). A
-   confirmation dialog stands in for deliberateness today. Adding `config.*` audit actions is the real
-   fix and needs a naming decision (`naming-discipline.md`), so it was not invented here.
-3. **`AcceptedSenderDomainService` does not invalidate the runtime config cache; its callers must.**
-   `IpAccessRuleService` does it itself, with a comment stating why ("so no caller can forget to and
-   leave stale policy live"). The Rejections page follows the existing convention and invalidates
-   caller-side, but the asymmetry is a trap for the next caller — moving it into the service would end
-   the class of bug (`enhance-libraries-at-source.md`).
+The three items that were open here are all implemented:
+
+1. **Reply codes for throttling — fixed, without forking.** The missed escape hatch: the library's
+   `SmtpResponseException` is **public**, and a throw from `CanAcceptFromAsync`/`CanDeliverToAsync`
+   propagates out of MailCommand/RcptCommand into the session loop's generic catch, which writes the
+   thrown response — the same mechanism every library-internal error reply uses. The three rate-limit
+   gates now throw **451**; an auto-banned IP throws **421 + quit** (a banned client must not keep an
+   open session to probe from). All other gates deliberately keep the uniform 550 — a distinct text per
+   gate would tell every scanner which policy refused it. A marker property on the exception stops the
+   ResponseException hook from double-recording what the gate already recorded. Proven on the wire by
+   `ThrottledSender_GetsA451NotAPermanent550`, which also pinned down a subtlety: a second `MAIL FROM`
+   on one connection never reaches the filter (the state machine answers 501 first), so the retry must
+   be a fresh connection — which is what a real device does.
+2. **Config mutations are audited — at the services, via an ambient actor.** `ICurrentActor` mirrors
+   `ICurrentTenant` through the same three plumbing points (HTTP middleware, Blazor circuit handler,
+   `TenantScopeFactory` clone). The four security-relevant services (IP rules, sender/recipient
+   domains, send connectors) audit their own mutations, so no caller can change policy without a trace;
+   deletes became load-then-delete so the audit row can name what was removed. The Rejections page
+   additionally records the operator's *decision* events (`rejection.domain_accepted` / `ip_allowed` /
+   `ignored` / `unignored`) — one row for what changed, one for why. Scope is deliberate: cosmetic
+   settings are not audited. First-run seeding writes raw DbContext and stays audit-silent.
+3. **Cache invalidation moved into the services.** All five services whose data the runtime config
+   cache serves now invalidate at the source; the thirteen caller-side `Invalidate()` calls and their
+   orphaned injects are gone.
 
 ## Adjacent finding, not part of this feature
 

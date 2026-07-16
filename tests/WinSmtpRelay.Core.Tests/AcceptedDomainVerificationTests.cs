@@ -35,7 +35,7 @@ public class AcceptedDomainVerificationTests
     [TestCategory("Unit")]
     public async Task CreateAsync_GeneratesOwnershipToken_AndStartsUnverified()
     {
-        var svc = new AcceptedDomainService(_db, new NoopRuntimeConfigCache());
+        var svc = new AcceptedDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db));
 
         var created = await svc.CreateAsync("Example.COM");
 
@@ -49,7 +49,7 @@ public class AcceptedDomainVerificationTests
     [TestCategory("Unit")]
     public async Task MarkVerifiedAsync_SetsVerifiedTimestamp()
     {
-        var svc = new AcceptedDomainService(_db, new NoopRuntimeConfigCache());
+        var svc = new AcceptedDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db));
         var created = await svc.CreateAsync("acme.test");
 
         await svc.MarkVerifiedAsync(created.Id);
@@ -63,7 +63,7 @@ public class AcceptedDomainVerificationTests
     [TestCategory("Unit")]
     public async Task MarkVerifiedAsync_UnknownId_IsNoOp()
     {
-        var svc = new AcceptedDomainService(_db, new NoopRuntimeConfigCache());
+        var svc = new AcceptedDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db));
         await svc.MarkVerifiedAsync(99999); // must not throw
         Assert.AreEqual(0, await _db.AcceptedDomains.CountAsync());
     }

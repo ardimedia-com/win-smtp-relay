@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   undone). Acting requires an organization in scope, since both actions create configuration that has to
   belong to one; the page itself is readable host-wide, which is the only place rejections whose tenant
   could not be attributed are visible.
+- **Security-relevant configuration changes are now written to the audit log.** IP access rules,
+  accepted sender/recipient domains (including ownership verification) and send connectors previously
+  changed without leaving any trace — the audit log covered only identity and session events. These
+  mutations are now audited by the storage services themselves, so every path that changes access
+  policy — an admin page, the API, or a background job — records who did it; the acting admin travels
+  ambiently with the request/circuit, and a change made by no human (e.g. system tasks) is honestly
+  recorded with no actor. The one-click actions on the Rejections page additionally record the
+  operator's decision with the rejection context that motivated it, including ignoring/un-ignoring a
+  rejection — silencing a security signal is itself audit-worthy. The Audit Log page filter knows the
+  new event types.
 
 ### Fixed
 
@@ -47,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The message-size rejection logged no client IP.** It ran before the session's remote endpoint was
   read, so it could only report a nameless "message from X rejected" — the one detail needed to find the
   device. Same for the recipient-domain-verification rejection.
+- **Changing accepted domains, routes, connectors or message filters could leave stale policy live on
+  the SMTP listener.** Five configuration services relied on every caller remembering to refresh the
+  runtime config cache after a change; eleven admin pages did, but any other caller (notably the API)
+  would silently keep serving the old policy until the cache expired. The services now refresh the
+  cache themselves, at the source, so no caller can forget.
 
 ## [1.0.0-beta1-build65] - 2026-07-06
 

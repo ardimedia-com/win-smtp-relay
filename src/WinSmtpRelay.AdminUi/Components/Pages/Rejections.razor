@@ -1,11 +1,13 @@
 @page "/rejections"
 @using Microsoft.EntityFrameworkCore
+@using WinSmtpRelay.Core.Authorization
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
 @using WinSmtpRelay.Storage
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminView)]
 @inject ITenantScopeFactory ScopeFactory
 @inject ICurrentTenant CurrentTenant
+@inject ICurrentActor CurrentActor
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -346,6 +348,10 @@ else
             return;
         }
 
+        // The service audits the config change itself (senderdomain.created); this records the operator's
+        // DECISION with the rejection context that motivated it.
+        await AuditAsync(scope, AdminAuditActions.RejectionDomainAccepted, row,
+            $"{row.SenderDomain} accepted for {row.ClientIp} ({row.Reason.Describe()})");
         Succeed($"{row.SenderDomain} is now an accepted sender domain. {row.ClientIp} should be able to send.");
     }
 
@@ -370,6 +376,9 @@ else
             Description = $"Added from Rejections: {row.Reason.Describe()}"
         });
 
+        // The service audits the config change itself (iprule.created); this records the decision.
+        await AuditAsync(scope, AdminAuditActions.RejectionIpAllowed, row,
+            $"{network} allowed ({row.Reason.Describe()})");
         Succeed($"{network} is now allowed. {row.ClientIp} should be able to connect.");
     }
 
@@ -388,9 +397,24 @@ else
 
         tracked.IgnoredUtc = ignoredUtc;
         await db.SaveChangesAsync();
+        // Silencing (or re-enabling) a security signal is itself audit-worthy — it is the action a
+        // compromised or careless admin would use to hide a device being refused.
+        await AuditAsync(scope,
+            ignoredUtc is null ? AdminAuditActions.RejectionUnignored : AdminAuditActions.RejectionIgnored,
+            row, $"{row.ClientIp} ({row.Reason.Describe()})");
         Succeed(ignoredUtc is null
             ? $"{row.ClientIp} will be reported again."
             : $"{row.ClientIp} will keep being counted but no longer reported.");
+    }
+
+    /// <summary>
+    /// Writes a decision event. The actor is the page's circuit-level <see cref="ICurrentActor"/> (set by
+    /// TenantCircuitHandler); the audit service comes from the operation scope so it shares its DbContext.
+    /// </summary>
+    private async Task AuditAsync(IServiceScope scope, string action, RejectedSubmission row, string detail)
+    {
+        await scope.ServiceProvider.GetRequiredService<IAdminAuditService>()
+            .WriteAsync(action, CurrentActor.UserId, CurrentActor.Email, tenantId: row.TenantId, detail: detail);
     }
 
     private async Task UnignoreAsync(RejectedSubmission row)

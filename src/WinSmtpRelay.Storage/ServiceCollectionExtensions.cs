@@ -10,6 +10,8 @@ public static class ServiceCollectionExtensions
     {
         // Ambient tenant for query filtering (set per request/circuit; unset = no filter).
         services.AddScoped<ICurrentTenant, CurrentTenant>();
+        // Ambient acting admin for service-level audit (set alongside the tenant; unset = system).
+        services.AddScoped<ICurrentActor, CurrentActor>();
         services.AddScoped<ITenantScopeFactory, TenantScopeFactory>();
 
         services.AddDbContext<RelayDbContext>(options =>
