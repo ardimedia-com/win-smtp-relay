@@ -182,6 +182,11 @@ public class SmtpRelayServer : BackgroundService
     {
         try
         {
+            // Thrown by RelayMailboxFilter.RejectWith: the gate has already recorded itself, with its own
+            // reason — recording the throw again here would double-count it under a protocol-level reason.
+            if (e.Exception.Properties.ContainsKey(RelayMailboxFilter.RecordedPropertyKey))
+                return;
+
             var replyCode = (int)e.Exception.Response.ReplyCode;
 
             // 421 is session lifecycle, not a refused submission: an idle-command timeout, a cancelled

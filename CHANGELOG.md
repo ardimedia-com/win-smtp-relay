@@ -36,19 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Rate-limited senders now hear "try again later" (451) instead of a permanent 550 that lost their
+  mail.** Every gate in the mailbox filter used to answer a fixed `550` — including the per-IP,
+  per-sender and per-user rate limits. `550` is permanent, so a well-behaved sending server bounced the
+  message rather than retrying later: throttling a legitimate sender lost their mail instead of delaying
+  it. The three rate-limit gates now answer `451` (queue and retry), and an auto-banned IP now gets
+  `421` with the session closed instead of being allowed to keep probing on an open connection. All
+  other gates deliberately keep the uniform `550` — a distinct text per gate would tell every scanner
+  which policy refused it. Verified on the wire by an end-to-end test.
 - **The message-size rejection logged no client IP.** It ran before the session's remote endpoint was
   read, so it could only report a nameless "message from X rejected" — the one detail needed to find the
   device. Same for the recipient-domain-verification rejection.
-
-### Known issues
-
-- **Rate-limited senders are refused permanently instead of being asked to retry.** Every gate in the
-  mailbox filter answers a fixed `550` (the SMTP library maps the filter's boolean onto one constant),
-  including the per-IP, per-sender and per-user rate limits. `550` is permanent, so a well-behaved
-  sending server bounces the message rather than retrying later — throttling a legitimate sender
-  currently loses their mail instead of delaying it. Found while instrumenting the gates; the reject
-  reasons already distinguish temporary from permanent in preparation for the fix, which needs a way to
-  carry a reply code out of the filter. See `design/observable-rejections.md`.
 
 ## [1.0.0-beta1-build65] - 2026-07-06
 

@@ -30,6 +30,7 @@ public class RejectedSubmissionsEndToEndTests
     private const int SyntaxTestPort = 9027;
     private const int PolicyTestPort = 9028;
     private const int FilterTestPort = 9029;
+    private const int ThrottleTestPort = 9030;
 
     /// <summary>
     /// The protocol source: a command the parser cannot read. This class of failure previously produced no
@@ -91,6 +92,56 @@ public class RejectedSubmissionsEndToEndTests
         Assert.AreEqual("example.com", policy.SenderDomain, "the sender domain is what a one-click 'accept this domain' acts on");
         Assert.IsFalse(policy.IsTrustedSource, "the client is outside every configured network");
         Assert.IsNull(policy.LastBuffer, "only a parser failure carries a buffer");
+    }
+
+    /// <summary>
+    /// A throttled sender must hear "try again later", not "go away for good". Every mailbox-filter gate
+    /// used to answer the library's fixed 550 — permanent, so a correct sending MTA BOUNCES the mail
+    /// instead of retrying it, and throttling a legitimate sender lost their message. The fix throws the
+    /// library's own SmtpResponseException out of the filter to carry a 451; this reads the reply code
+    /// off the actual socket, because the claim "the session loop writes the thrown response" comes from
+    /// reading library source, and the reference floats on 11.*.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task ThrottledSender_GetsA451NotAPermanent550()
+    {
+        await using var relay = await RelayUnderTest.StartAsync(ThrottleTestPort, allowedNetworks: ["127.0.0.1/32"]);
+
+        // Floor the per-IP limit so the second MAIL FROM in the same minute trips the gate. The cache
+        // has not served rate settings yet (nothing connected), so no invalidation is needed.
+        await relay.QueryAsync(async db =>
+        {
+            var settings = await db.RateLimitSettings.SingleAsync();
+            settings.MaxConnectionsPerIpPerMinute = 1;
+            return await db.SaveChangesAsync();
+        });
+
+        // Two connections, not two MAIL FROMs in one: after a successful MAIL FROM the state machine
+        // refuses a second one (501, out of sequence) before the filter ever runs — and a real device
+        // opens a fresh connection for its retry anyway.
+        string? firstReply = null, secondReply = null;
+        await relay.TalkAsync(session =>
+        {
+            session.Send("EHLO tester");
+            firstReply = session.Send("MAIL FROM:<device@example.com>");
+        });
+        await relay.TalkAsync(session =>
+        {
+            session.Send("EHLO tester");
+            secondReply = session.Send("MAIL FROM:<device@example.com>");
+        });
+
+        StringAssert.StartsWith(firstReply, "250", "the first message is under the limit");
+        StringAssert.StartsWith(secondReply, "451", $"a throttled sender must be told to retry, got: {secondReply}");
+
+        var rows = await relay.StopAndReadRowsAsync();
+        var throttled = rows.SingleOrDefault(r => r.Reason == RejectReason.IpRateLimitExceeded);
+        Assert.IsNotNull(throttled, $"expected an IpRateLimitExceeded row; got: {Describe(rows)}");
+        Assert.AreEqual(451, throttled.ReplyCode, "the record carries the code the client actually received");
+        Assert.AreEqual(1, throttled.Count,
+            "exactly one record: the gate records the throw itself, and the marker property must stop the "
+            + "ResponseException hook from recording it a second time");
     }
 
     /// <summary>
@@ -229,8 +280,11 @@ public class RejectedSubmissionsEndToEndTests
 
     private sealed class SmtpSession(StreamReader reader, StreamWriter writer)
     {
-        /// <summary>Writes one command and drains its reply (including a multi-line EHLO response).</summary>
-        public void Send(string command)
+        /// <summary>
+        /// Writes one command, drains its reply (including a multi-line EHLO response), and returns the
+        /// final reply line — which starts with the SMTP code the client actually received.
+        /// </summary>
+        public string? Send(string command)
         {
             writer.WriteLine(command);
 
@@ -241,6 +295,8 @@ public class RejectedSubmissionsEndToEndTests
                 if (line.Length < 4 || line[3] != '-')
                     break;
             }
+
+            return line;
         }
     }
 }

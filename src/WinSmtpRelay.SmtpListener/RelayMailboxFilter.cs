@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using SmtpServer;
 using SmtpServer.Mail;
 using SmtpServer.Net;
+using SmtpServer.Protocol;
 using SmtpServer.Storage;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Interfaces;
@@ -24,17 +25,37 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
     private readonly ILogger<RelayMailboxFilter> _logger;
 
     /// <summary>
-    /// The reply code EVERY gate in this class produces. <see cref="IMailboxFilter"/> returns a bool, and
-    /// the library maps <c>false</c> onto the fixed <c>SmtpResponse.MailboxUnavailable</c> (550) —
-    /// see MailCommand/RcptCommand in SmtpServer v11.1.0. The gate's reason cannot travel over the wire,
-    /// which is precisely why it is recorded here instead.
-    /// <para>
-    /// This is also a known defect: 550 is PERMANENT, so the rate-limit gates tell a merely-throttled
-    /// legitimate sender to give up and bounce the message rather than retry later (a 4xx). Fixing that
-    /// needs a way to carry a response out of this filter. See design/observable-rejections.md.
-    /// </para>
+    /// The reply code a plain <c>return false</c> from this class produces. <see cref="IMailboxFilter"/>
+    /// returns a bool, and the library maps <c>false</c> onto the fixed
+    /// <c>SmtpResponse.MailboxUnavailable</c> (550) — see MailCommand/RcptCommand in SmtpServer v11.1.0.
+    /// The gate's reason cannot travel over the wire, which is precisely why it is recorded here instead.
+    /// The permanent gates deliberately stay on this uniform 550: a distinct text per gate would tell
+    /// every scanner which policy refused it (owner decision 2026-07-16).
     /// </summary>
     private const int MailboxFilterReplyCode = 550;
+
+    /// <summary>
+    /// Marks a thrown rejection as already recorded by this filter, so the ResponseException hook in
+    /// SmtpRelayServer (which fires for every thrown SmtpResponseException) does not record it a second
+    /// time under a protocol-level reason.
+    /// </summary>
+    public const string RecordedPropertyKey = "WinSmtpRelay:RejectionRecorded";
+
+    /// <summary>
+    /// A rejection that is expected to clear on its own must NOT be a permanent 550: a correct sending
+    /// MTA treats 550 as final and bounces the message, so throttling a legitimate sender would lose its
+    /// mail instead of delaying it. 451 tells the client to queue and retry later.
+    /// </summary>
+    private static readonly SmtpResponse ThrottledResponse =
+        new(SmtpReplyCode.Aborted, "rate limit exceeded, try again later");
+
+    /// <summary>
+    /// An auto-banned IP gets 421 and the session is CLOSED — a banned client must not sit on an open
+    /// session probing further, and 421 (unlike 550) does not tell it anything beyond "go away for now".
+    /// The ban itself expires after the configured cooldown.
+    /// </summary>
+    private static readonly SmtpResponse BannedResponse =
+        new(SmtpReplyCode.ServiceUnavailable, "service not available, closing transmission channel");
 
     public RelayMailboxFilter(
         IOptions<SmtpListenerOptions> options,
@@ -62,6 +83,28 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
     /// </summary>
     private bool Reject(ISessionContext context, RejectReason reason, string? senderDomain = null, string? detail = null)
     {
+        Record(context, reason, MailboxFilterReplyCode, senderDomain, detail);
+        return false;
+    }
+
+    /// <summary>
+    /// Refuses the submission with a SPECIFIC reply instead of the library's fixed 550, by throwing the
+    /// library's own <see cref="SmtpResponseException"/>. A throw from CanAcceptFromAsync/CanDeliverToAsync
+    /// propagates out of MailCommand/RcptCommand into the session loop's generic catch, which writes THIS
+    /// response to the client — the same mechanism every library-internal error reply uses; no fork, no
+    /// custom command. Verified against SmtpServer v11.1.0 (the reference floats: re-verify on a bump).
+    /// The marker property stops the ResponseException hook from recording the throw a second time.
+    /// </summary>
+    private void RejectWith(ISessionContext context, RejectReason reason, SmtpResponse response, bool quit,
+        string? senderDomain = null, string? detail = null)
+    {
+        Record(context, reason, (int)response.ReplyCode, senderDomain, detail);
+        throw new SmtpResponseException(response, quit,
+            new Dictionary<string, object> { [RecordedPropertyKey] = true });
+    }
+
+    private void Record(ISessionContext context, RejectReason reason, int replyCode, string? senderDomain, string? detail)
+    {
         var clientIp = (context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep)
             ? ep as IPEndPoint
             : null)?.Address.ToString();
@@ -70,8 +113,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         // attribution failing. Such a row is host-level by design; there is no tenant to own it.
         var tenantId = context.Properties.TryGetValue("TenantId", out var tid) && tid is int t ? t : (int?)null;
 
-        _rejectionRecorder.Record(clientIp, reason, MailboxFilterReplyCode, senderDomain, tenantId, detail);
-        return false;
+        _rejectionRecorder.Record(clientIp, reason, replyCode, senderDomain, tenantId, detail);
     }
 
     public override async Task<bool> CanAcceptFromAsync(
@@ -139,17 +181,20 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             return Reject(context, RejectReason.TenantDisabled, senderDomain);
         }
 
-        // Check if IP is auto-banned (failed auth)
+        // Check if IP is auto-banned (failed auth). 421 + session close: a banned client must not keep
+        // an open session to probe from, and the ban expires on its own.
         if (clientIp is not null && _rateLimiter.IsIpBanned(clientIp))
         {
             _logger.LogWarning("Connection from {ClientIp} rejected: IP is auto-banned", clientIp);
-            return Reject(context, RejectReason.IpAutoBanned, senderDomain);
+            RejectWith(context, RejectReason.IpAutoBanned, BannedResponse, quit: true, senderDomain);
         }
 
-        // Check per-IP rate limit (RateLimiter logs the breach itself; recorded here so it is queryable)
+        // Check per-IP rate limit (RateLimiter logs the breach itself; recorded here so it is queryable).
+        // 451, not 550: throttling is temporary, and a permanent answer would make the sender bounce the
+        // mail instead of retrying it.
         if (clientIp is not null && !await _rateLimiter.IsIpAllowedAsync(clientIp, cancellationToken))
         {
-            return Reject(context, RejectReason.IpRateLimitExceeded, senderDomain);
+            RejectWith(context, RejectReason.IpRateLimitExceeded, ThrottledResponse, quit: false, senderDomain);
         }
 
         // Check IP-based relay restrictions. DB-stored IP access rules are authoritative
@@ -179,7 +224,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         // Check per-sender rate limit (RateLimiter logs the breach itself; recorded here so it is queryable)
         if (!await _rateLimiter.IsSenderAllowedAsync(from.AsAddress(), cancellationToken))
         {
-            return Reject(context, RejectReason.SenderRateLimitExceeded, senderDomain);
+            RejectWith(context, RejectReason.SenderRateLimitExceeded, ThrottledResponse, quit: false, senderDomain);
         }
 
         // Check accepted sender domains (from DB cache)
@@ -237,7 +282,8 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             if (user is not null && !_rateLimiter.IsAllowed($"user:{user.Id}", user.RateLimitPerMinute, user.RateLimitPerDay))
             {
                 _logger.LogWarning("Rate limit exceeded for user {User}", authenticatedUser);
-                return Reject(context, RejectReason.UserRateLimitExceeded, senderDomain, $"user {authenticatedUser}");
+                RejectWith(context, RejectReason.UserRateLimitExceeded, ThrottledResponse, quit: false,
+                    senderDomain, $"user {authenticatedUser}");
             }
         }
 
