@@ -1,7 +1,8 @@
 # Design: Observable Rejections
 
-> Status: **Ready to implement** — not yet implemented. Written 2026-07-16, revised and decided
-> 2026-07-16 (see "Decided").
+> Status: **Stage 1 implemented** — recording, self-check finding and daily-report section are in.
+> The one-click onboarding actions ("The idea that makes it a feature") are stage 2 and are NOT built.
+> Written, revised, decided and implemented 2026-07-16.
 >
 > The revision replaced the original mechanism. The first draft claimed a single library hook
 > (`ISessionContext.ResponseException`) observes every rejection. Verified against the SmtpServer
@@ -389,20 +390,50 @@ The four formerly-blocking questions are resolved; their substance lives in the 
 - **Buffer redaction** — AUTH-prefix fail-safe, 512-byte cap, escaping (protocol source, "Consequence"
   section).
 
-Nothing blocks implementation anymore.
+## What stage 1 shipped
+
+| Piece | Where |
+|---|---|
+| Reason model + aggregate row | `Core/Models/RejectedSubmission.cs`, migration `AddRejectedSubmissions` |
+| Hot-path fold + periodic flush + capped, trust-partitioned eviction | `SmtpListener/RejectionRecorder.cs` |
+| Policy source (15 gates → `Reject(...)`) | `SmtpListener/RelayMailboxFilter.cs` |
+| Protocol source (the hook) + reply-code classification | `SmtpListener/SmtpRelayServer.cs` |
+| Buffer redaction | `SmtpListener/RejectionBuffer.cs` |
+| Trust classification | `SmtpListener/IpAccessEvaluator.IsTrustedSource` |
+| 24 h finding + remediation text | `Service/HealthChecks/Checks/RejectedSubmissionsHealthCheck.cs` |
+| Daily-report section | `Service/ReportingService.cs` |
+| Age-based pruning (on `DeliveryLogDays`, by `LastSeenUtc`) | `Storage/RetentionService.cs` |
+| Coverage-map proof, redaction, trust classification | `RejectedSubmissionsEndToEndTests`, `RejectionBufferTests`, `IpAccessEvaluatorTrustedSourceTests` |
+
+Values chosen while building (open question 2, non-blocking, revisit if they chafe): flush every **5 s**;
+**5 000** distinct pending keys in memory (excess dropped, and logged — never silently); **2 000** rows
+per trust partition; retention on `DeliveryLogDays`.
 
 ## Open questions (non-blocking)
 
-1. **Reply codes for throttling.** Fix the 4xx/5xx defect as part of this work, or track it
-   separately? Fixing it means `IMailboxFilter`'s `bool` no longer suffices — the response would have
-   to be carried some other way (a session property read by a custom command, or a fork of
-   `MailCommand`). Consider whether it belongs upstream (`enhance-libraries-at-source.md`).
-2. **Retention and cap values** — what row limit per trust partition, and does retention belong under
-   the existing `DataRetention` profiles or its own setting?
-3. **Attribution-failure surfacing.** Storage is decided (host-level rows, null `TenantId`); still
-   open is who *sees* them — host admins only, or also tenant admins whose allow-networks match the
-   client IP?
-4. **UI placement** — own page, Journal tab, or dashboard card only?
+1. **Reply codes for throttling.** The 4xx/5xx defect above is recorded as a known issue, not fixed:
+   `IMailboxFilter`'s `bool` cannot carry a code, so the response would have to travel some other way
+   (a session property read by a custom command, or a fork of `MailCommand`). Consider whether it
+   belongs upstream (`enhance-libraries-at-source.md`).
+2. **Stage 2 — the one-click actions.** `[Accept domain] [Bind IP to tenant] [Ignore]`. The record now
+   carries everything they need (client IP, sender domain, the exact gate, the tenant); what is missing
+   is the UI and the actions themselves. This is where the feature stops being a report.
+3. **Attribution-failure surfacing.** Storage is decided and built (host-level rows, null `TenantId`);
+   still open is who *sees* them — host admins only, or also tenant admins whose allow-networks match
+   the client IP?
+4. **UI placement** — own page, Journal tab, or dashboard card only? Today the data surfaces only
+   through `/diagnostics` and the daily report.
+
+## Adjacent finding, not part of this feature
+
+The integration suite passed only in whole-suite order. `IdentityDbContext.OnModelCreating` resolves
+`IOptions<IdentityOptions>` from the application service provider and reads `Stores.SchemaVersion` to
+decide whether the model contains the v3 passkey table, so a test host that does not register Identity
+builds a **different model** than the migration snapshot and `MigrateAsync` throws
+`PendingModelChangesWarning`. The suite only worked because `AdminBootstrapTests` (which registers
+Identity) ran first alphabetically and warmed EF's model cache. The new tests register the single option
+they need; `SmtpRelayEndToEndTests` still has the latent order dependency and would fail if run alone
+(e.g. from an IDE).
 
 ## Prior art
 
