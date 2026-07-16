@@ -136,6 +136,13 @@ The hook covers the class an operator least expects and misses the class the fea
 is still worth having — it is the *only* way to see the malformed-envelope case, and it is the only
 source of the raw command buffer — but it is a supplement, not the mechanism.
 
+**This map is now enforced, not just documented.** `RejectedSubmissionsEndToEndTests` drives a real
+listener over a real socket: one test sends a malformed `MAIL FROM` and asserts a `CommandSyntaxError`
+row carrying the raw line (the hook fires), the other trips a policy gate and asserts **exactly one**
+row with the gate's own reason (the hook stayed silent — a second, protocol-classified row would mean
+the premise had changed). Since the package reference floats on `11.*`, those tests are what will say
+so if a future version moves an exit from one column to the other.
+
 ## Consequence: two recording sources, one store
 
 1. **Policy source — `RelayMailboxFilter`.** Each of the 15 gates records its own rejection with a
