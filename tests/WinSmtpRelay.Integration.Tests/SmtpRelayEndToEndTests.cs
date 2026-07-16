@@ -46,6 +46,13 @@ public class SmtpRelayEndToEndTests
             });
 
             builder.Services.AddRelayStorage($"Data Source={dbPath}");
+            // Match the production model: IdentityDbContext reads Stores.SchemaVersion from DI to decide
+            // whether the model has the v3 passkey table, so without this the model differs from the
+            // migration snapshot and MigrateAsync throws PendingModelChangesWarning. Until now this test
+            // only passed when a test that registers Identity happened to run first and warm EF's model
+            // cache — it failed when run alone (e.g. from the IDE).
+            builder.Services.Configure<Microsoft.AspNetCore.Identity.IdentityOptions>(
+                o => o.Stores.SchemaVersion = Microsoft.AspNetCore.Identity.IdentitySchemaVersions.Version3);
             builder.Services.AddSingleton<ILookupClient>(new LookupClient());
             builder.Services.Configure<EmailAuthenticationOptions>(_ => { });
             builder.Services.AddSmtpListener();
@@ -150,6 +157,13 @@ public class SmtpRelayEndToEndTests
             });
 
             builder.Services.AddRelayStorage($"Data Source={dbPath}");
+            // Match the production model: IdentityDbContext reads Stores.SchemaVersion from DI to decide
+            // whether the model has the v3 passkey table, so without this the model differs from the
+            // migration snapshot and MigrateAsync throws PendingModelChangesWarning. Until now this test
+            // only passed when a test that registers Identity happened to run first and warm EF's model
+            // cache — it failed when run alone (e.g. from the IDE).
+            builder.Services.Configure<Microsoft.AspNetCore.Identity.IdentityOptions>(
+                o => o.Stores.SchemaVersion = Microsoft.AspNetCore.Identity.IdentitySchemaVersions.Version3);
             builder.Services.AddSmtpListener();
             builder.Services.AddDeliveryEngine(); // Include delivery worker
             builder.Logging.SetMinimumLevel(LogLevel.Debug);
