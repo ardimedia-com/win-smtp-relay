@@ -21,6 +21,7 @@ public static class HealthCheckRegistration
         services.AddScoped<IHealthCheck, QueueHealthCheck>();
         services.AddScoped<IHealthCheck, SecurityHealthCheck>();
         services.AddScoped<IHealthCheck, RuntimeHealthCheck>();
+        services.AddScoped<IHealthCheck, RejectedSubmissionsHealthCheck>();
 
         services.AddSingleton<IHealthCheckRunner, HealthCheckRunner>();
         return services;

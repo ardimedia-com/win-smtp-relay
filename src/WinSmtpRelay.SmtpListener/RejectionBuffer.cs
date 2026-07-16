@@ -36,6 +36,10 @@ public static class RejectionBuffer
         if (raw is null || raw.Length == 0)
             return null;
 
+        // Truncation is tracked from the RAW length, not the rendered one: an all-printable line is
+        // escaped 1:1, so a 2 KB command would render as exactly MaxLength characters and look complete.
+        // A silently-cut command line is worse than no line at all — it reads as the whole thing.
+        var truncated = raw.Length > MaxLength;
         var line = Escape(raw.AsSpan(0, Math.Min(raw.Length, MaxLength))).TrimStart();
 
         if (line.Length == 0)
@@ -44,9 +48,15 @@ public static class RejectionBuffer
         if (line.StartsWith("AUTH", StringComparison.OrdinalIgnoreCase))
             return RedactAuth(line);
 
-        return line.Length > MaxLength
-            ? string.Concat(line.AsSpan(0, MaxLength), TruncationMarker)
-            : line;
+        // Escaping can still expand a binary line (\xNN is four characters per byte), so cap the
+        // rendered string as well.
+        if (line.Length > MaxLength)
+        {
+            line = line[..MaxLength];
+            truncated = true;
+        }
+
+        return truncated ? line + TruncationMarker : line;
     }
 
     /// <summary>

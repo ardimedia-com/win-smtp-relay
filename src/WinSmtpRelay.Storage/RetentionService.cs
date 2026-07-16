@@ -38,6 +38,16 @@ public class RetentionService(
             .Where(l => l.TimestampUtc < logCutoff)
             .ExecuteDeleteAsync(ct);
 
+        // Refused submissions: the reject-side counterpart of the delivery log, so they observe the same
+        // observability window (DeliveryLogDays) rather than carrying a setting of their own.
+        // Aged out by LastSeenUtc, NOT FirstSeenUtc: a device that has been failing since March is a
+        // current problem, not an old record, and purging it by its start date would delete exactly the
+        // long-running misconfigurations this table exists to surface. (The row count is separately
+        // capped per trust partition by the recorder; this is the age-based half.)
+        var rejectedSubmissions = await db.RejectedSubmissions
+            .Where(r => r.LastSeenUtc < logCutoff)
+            .ExecuteDeleteAsync(ct);
+
         // Suppression list: 0 = keep indefinitely (the recommended default), so only purge when a positive
         // window is configured.
         var suppressions = 0;
@@ -85,12 +95,12 @@ public class RetentionService(
                     .ExecuteUpdateAsync(u => u.SetProperty(m => m.RawMessage, Array.Empty<byte>()), ct);
         }
 
-        if (messages + deliveryLogs + suppressions + resendBodiesStripped > 0)
+        if (messages + deliveryLogs + suppressions + resendBodiesStripped + rejectedSubmissions > 0)
             logger.LogInformation(
                 "Retention purge removed {Messages} message(s), {Logs} delivery-log row(s), {Suppressions} suppression(s), "
-                + "stripped {ResendBodies} resend-grace body/bodies",
-                messages, deliveryLogs, suppressions, resendBodiesStripped);
+                + "{Rejections} rejected-submission row(s), stripped {ResendBodies} resend-grace body/bodies",
+                messages, deliveryLogs, suppressions, rejectedSubmissions, resendBodiesStripped);
 
-        return new RetentionPurgeResult(messages, deliveryLogs, suppressions, resendBodiesStripped);
+        return new RetentionPurgeResult(messages, deliveryLogs, suppressions, resendBodiesStripped, rejectedSubmissions);
     }
 }

@@ -27,6 +27,9 @@ public class ReportingService(
     private const int MinAttemptsForBounceAlert = 20;
     private const int MaxNewSuppressionsListed = 100;
 
+    /// <summary>Cap on refused-submission rows listed in the digest, so one noisy subnet can't swamp the report.</summary>
+    private const int MaxRejectionsListed = 20;
+
     // In-memory de-bounce of incident alerts (reset on restart — acceptable for an alerting heuristic).
     private readonly Dictionary<string, DateTimeOffset> _lastAlert = new(StringComparer.OrdinalIgnoreCase);
 
@@ -228,6 +231,7 @@ public class ReportingService(
             }
         }
 
+        await AppendRejectedSubmissionsSectionAsync(db, sb, ct);
         await AppendHealthSectionAsync(sp, sb, ct);
 
         return new SystemEmailContent
@@ -237,6 +241,57 @@ public class ReportingService(
             MonospaceBlock = sb.ToString(),
             FooterNote = "Sent by WIN-SMTP-RELAY email reporting — configure under Settings → Reporting.",
         };
+    }
+
+    /// <summary>
+    /// Appends refused submissions — the mail that never got in. The rest of this digest reports what the
+    /// relay did with mail it accepted; without this section a device the relay has been refusing for
+    /// months is invisible in the one report the operator actually reads.
+    /// <para>
+    /// Trusted and untrusted are listed separately and deliberately unequally: a refusal from a configured
+    /// network is a device that should be sending and cannot, while refusals from everywhere else are the
+    /// relay doing its job against port-25 noise and are reported as a single number.
+    /// </para>
+    /// </summary>
+    private static async Task AppendRejectedSubmissionsSectionAsync(RelayDbContext db, StringBuilder sb, CancellationToken ct)
+    {
+        var since = DateTimeOffset.UtcNow.AddHours(-24);
+
+        var recent = await db.RejectedSubmissions.AsNoTracking()
+            .Where(r => r.LastSeenUtc >= since)
+            .ToListAsync(ct);
+
+        sb.AppendLine();
+        sb.AppendLine("Refused submissions (last 24 hours):");
+
+        var untrustedRows = recent.Where(r => !r.IsTrustedSource).ToList();
+        var trusted = recent.Where(r => r.IsTrustedSource)
+            .OrderByDescending(r => r.Count)
+            .ToList();
+
+        sb.AppendLine($"  From untrusted sources: {untrustedRows.Sum(r => r.Count)} attempt(s) "
+            + $"from {untrustedRows.Select(r => r.ClientIp).Distinct().Count()} IP(s) — expected; not a problem.");
+
+        if (trusted.Count == 0)
+        {
+            sb.AppendLine("  From configured networks: none.");
+            return;
+        }
+
+        sb.AppendLine($"  From configured networks: {trusted.Sum(r => r.Count)} attempt(s) — these are devices that "
+            + "cannot send:");
+
+        var shown = trusted.Take(MaxRejectionsListed).ToList();
+        foreach (var r in shown)
+        {
+            var who = r.SenderDomain.Length > 0 ? $"{r.ClientIp} as {r.SenderDomain}" : r.ClientIp;
+            var persistent = r.LastSeenUtc - r.FirstSeenUtc > TimeSpan.FromHours(24)
+                ? $", failing for {(int)(r.LastSeenUtc - r.FirstSeenUtc).TotalHours}h"
+                : "";
+            sb.AppendLine($"    {who}: {r.Reason.Describe()} ({r.Count}x{persistent})");
+        }
+        if (trusted.Count > shown.Count)
+            sb.AppendLine($"    … and {trusted.Count - shown.Count} more — see Diagnostics in the admin UI.");
     }
 
     /// <summary>Appends the latest daily self-check summary (Setup &amp; Health) to the digest body.</summary>
