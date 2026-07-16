@@ -39,10 +39,11 @@ public sealed class RejectedSubmissionsHealthCheck(RelayDbContext db) : HealthCh
         var since = now - ActiveWindow;
 
         // LastSeenUtc is a non-nullable DateTimeOffset stored as a fixed-width UTC ISO string, so this
-        // range filter translates on SQLite (see RelayDbContext.ConfigureConventions).
+        // range filter translates on SQLite (see RelayDbContext.ConfigureConventions). The IgnoredUtc
+        // null-check is a plain IS NULL, which translates regardless of the converter.
         var active = await db.RejectedSubmissions
             .AsNoTracking()
-            .Where(r => r.IsTrustedSource && r.LastSeenUtc >= since)
+            .Where(r => r.IsTrustedSource && r.IgnoredUtc == null && r.LastSeenUtc >= since)
             .ToListAsync(ct);
 
         var findings = new List<HealthFinding>();

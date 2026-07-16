@@ -1,0 +1,428 @@
+@page "/rejections"
+@using Microsoft.EntityFrameworkCore
+@using WinSmtpRelay.Core.Interfaces
+@using WinSmtpRelay.Core.Models
+@using WinSmtpRelay.Storage
+@attribute [Authorize(Policy = AuthorizationPolicies.AdminView)]
+@inject ITenantScopeFactory ScopeFactory
+@inject ICurrentTenant CurrentTenant
+@inject IRuntimeConfigCache ConfigCache
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem>
+            <BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink>
+        </BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem>
+            <BbBreadcrumbPage>Rejections</BbBreadcrumbPage>
+        </BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header page-header-row">
+    <div>
+        <h1>Rejections</h1>
+        <p>Submissions the relay refused &mdash; the counterpart of the Journal</p>
+    </div>
+    <div class="flex gap-1 items-center">
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showIgnored = !showIgnored">
+            <LucideIcon Name="@(showIgnored ? "eye-off" : "eye")" /> @(showIgnored ? "Hide ignored" : "Show ignored")
+        </BbButton>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="RefreshAsync">
+            <LucideIcon Name="refresh-cw" /> Refresh
+        </BbButton>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
+            <LucideIcon Name="info" /> About Rejections
+        </BbButton>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(statusMessage))
+{
+    <p class="@(statusIsError ? "text-danger" : "text-muted")">@statusMessage</p>
+}
+
+@if (isLoading)
+{
+    <BbSkeleton Class="h-[300px] w-full" />
+}
+else
+{
+    <h2>From your networks</h2>
+    <p class="text-muted">
+        These clients are inside a network you configured, so they are devices that are expected to send
+        and cannot. Each one is a request waiting to be answered.
+    </p>
+
+    <BbTable Data="@trusted">
+        <BbTableHeader>
+            <BbTableRow TData="RejectedSubmission">
+                <BbTableHeaderCell TData="RejectedSubmission">Client</BbTableHeaderCell>
+                <BbTableHeaderCell TData="RejectedSubmission">Wants to send as</BbTableHeaderCell>
+                <BbTableHeaderCell TData="RejectedSubmission">Rejected because</BbTableHeaderCell>
+                <BbTableHeaderCell TData="RejectedSubmission">Attempts</BbTableHeaderCell>
+                <BbTableHeaderCell TData="RejectedSubmission">Failing for</BbTableHeaderCell>
+                <BbTableHeaderCell TData="RejectedSubmission"></BbTableHeaderCell>
+            </BbTableRow>
+        </BbTableHeader>
+        <BbTableBody>
+            @if (trusted.Count == 0)
+            {
+                <BbTableRow TData="RejectedSubmission">
+                    <BbTableCell colspan="6" style="text-align:center;">
+                        No device in your networks is being refused.
+                    </BbTableCell>
+                </BbTableRow>
+            }
+            @foreach (var row in trusted)
+            {
+                <BbTableRow Item="@row">
+                    <BbTableCell><code>@row.ClientIp</code></BbTableCell>
+                    <BbTableCell>@(row.SenderDomain.Length > 0 ? row.SenderDomain : "—")</BbTableCell>
+                    <BbTableCell>
+                        <span class="badge-status @(row.Reason.IsTemporary() ? "badge-warning" : "badge-destructive")">
+                            @row.Reason.Describe()
+                        </span>
+                        @if (row.IgnoredUtc is not null)
+                        {
+                            <span class="badge-status badge-muted">ignored</span>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(row.LastBuffer))
+                        {
+                            <div class="mono text-muted" style="font-size:0.75rem;">@row.LastBuffer</div>
+                        }
+                    </BbTableCell>
+                    <BbTableCell>@row.Count</BbTableCell>
+                    <BbTableCell>
+                        <span title="@($"First seen {row.FirstSeenUtc.UtcDateTime:yyyy-MM-dd HH:mm} UTC, last {row.LastSeenUtc.UtcDateTime:yyyy-MM-dd HH:mm} UTC")">
+                            @Age(row)
+                        </span>
+                    </BbTableCell>
+                    <BbTableCell>
+                        <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="rowAuth">
+                            @if (CanAct)
+                            {
+                                <div class="list-row-actions">
+                                    @if (row.Reason == RejectReason.SenderDomainNotAccepted && row.SenderDomain.Length > 0)
+                                    {
+                                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Outline" Disabled="@busy"
+                                                  @onclick="() => Ask(row, RejectionAction.AcceptDomain)">
+                                            <LucideIcon Name="check" /> Accept domain
+                                        </BbButton>
+                                    }
+                                    @if (CanAllowIp(row))
+                                    {
+                                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Outline" Disabled="@busy"
+                                                  @onclick="() => Ask(row, RejectionAction.AllowIp)">
+                                            <LucideIcon Name="shield-check" /> Allow IP
+                                        </BbButton>
+                                    }
+                                    @if (row.IgnoredUtc is null)
+                                    {
+                                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Ignore" Disabled="@busy"
+                                                  @onclick="() => Ask(row, RejectionAction.Ignore)">
+                                            <LucideIcon Name="bell-off" />
+                                        </BbButton>
+                                    }
+                                    else
+                                    {
+                                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Stop ignoring" Disabled="@busy"
+                                                  @onclick="() => UnignoreAsync(row)">
+                                            <LucideIcon Name="bell" />
+                                        </BbButton>
+                                    }
+                                </div>
+                            }
+                        </AuthorizeView>
+                    </BbTableCell>
+                </BbTableRow>
+            }
+        </BbTableBody>
+    </BbTable>
+
+    @if (!CanAct)
+    {
+        <p class="text-muted">
+            Select an organization in the switcher to act on these &mdash; accepting a domain or allowing an
+            IP creates configuration that has to belong to a specific tenant.
+        </p>
+    }
+
+    <h2>From elsewhere</h2>
+    <p class="text-muted">
+        Port 25 hears from the whole internet. These are the relay working as designed &mdash; counted so the
+        volume is visible, never reported as a problem.
+    </p>
+    @if (untrusted.Count == 0)
+    {
+        <p>Nothing refused from outside your networks.</p>
+    }
+    else
+    {
+        <p>
+            <strong>@untrusted.Sum(r => r.Count)</strong> attempt(s) from
+            <strong>@untrusted.Select(r => r.ClientIp).Distinct().Count()</strong> IP(s).
+            Most common: @string.Join(", ", untrusted.GroupBy(r => r.Reason)
+                .OrderByDescending(g => g.Sum(r => r.Count))
+                .Take(3)
+                .Select(g => $"{g.Key.Describe()} ({g.Sum(r => r.Count)})"))
+        </p>
+    }
+}
+
+<BbAlertDialog @bind-Open="showConfirm">
+    <BbAlertDialogContent>
+        <BbAlertDialogHeader>
+            <BbAlertDialogTitle>@ConfirmTitle</BbAlertDialogTitle>
+            <BbAlertDialogDescription>@ConfirmDescription</BbAlertDialogDescription>
+        </BbAlertDialogHeader>
+        <BbAlertDialogFooter>
+            <BbAlertDialogCancel>
+                <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
+            </BbAlertDialogCancel>
+            <BbAlertDialogAction>
+                <BbButton Variant="ButtonVariant.Default" Disabled="@busy" @onclick="ConfirmAsync">Confirm</BbButton>
+            </BbAlertDialogAction>
+        </BbAlertDialogFooter>
+    </BbAlertDialogContent>
+</BbAlertDialog>
+
+<BbDialog @bind-Open="showHelp">
+    <BbDialogContent>
+        <BbDialogHeader>
+            <BbDialogTitle>About Rejections</BbDialogTitle>
+            <BbDialogDescription>The mail that never got in</BbDialogDescription>
+        </BbDialogHeader>
+        <div style="font-size:0.875rem;line-height:1.6;">
+            <p>The Journal shows what happened to mail the relay <strong>accepted</strong>. This page shows what it <strong>refused</strong> &mdash; the failure that is otherwise silent on both ends, because the relay only logs a warning and the sending device only reports a generic error and keeps retrying.</p>
+            <p>Rows are aggregated: one line per client, reason and sender domain, with a count. A device retrying every 30 minutes for months is one row, not thousands.</p>
+            <p><strong>From your networks</strong> means the client matched an allow rule (or the <code>AllowedNetworks</code> fallback) &mdash; a device you configured that cannot send. That is worth acting on. Everything else is background noise on port 25 and is only counted.</p>
+            <p><strong>Ignore</strong> keeps counting the rejection but stops it appearing in the daily self-check and report. Nothing is deleted.</p>
+        </div>
+        <BbDialogFooter>
+            <BbDialogClose>
+                <BbButton Variant="ButtonVariant.Outline">Close</BbButton>
+            </BbDialogClose>
+        </BbDialogFooter>
+    </BbDialogContent>
+</BbDialog>
+
+@code {
+    private enum RejectionAction { AcceptDomain, AllowIp, Ignore }
+
+    private List<RejectedSubmission> trusted = [];
+    private List<RejectedSubmission> untrusted = [];
+    private bool isLoading = true;
+    private bool showHelp;
+    private bool showIgnored;
+    private bool showConfirm;
+    private bool busy;
+    private string? statusMessage;
+    private bool statusIsError;
+
+    private RejectedSubmission? target;
+    private RejectionAction action;
+
+    /// <summary>
+    /// Both actions create tenant-owned configuration, and in host scope the DbContext neither filters nor
+    /// stamps the tenant — a create would silently land in the Default tenant. So acting needs a tenant in
+    /// scope; the page itself stays readable in both (host = every tenant's rows, which is how the whole
+    /// Monitor group behaves).
+    /// </summary>
+    private bool CanAct => CurrentTenant.FilterEnabled;
+
+    private string ConfirmTitle => action switch
+    {
+        RejectionAction.AcceptDomain => "Accept this sender domain",
+        RejectionAction.AllowIp => "Allow this IP to connect",
+        _ => "Ignore this rejection"
+    };
+
+    private string ConfirmDescription => action switch
+    {
+        RejectionAction.AcceptDomain =>
+            $"Adds {target?.SenderDomain} to this organization's accepted sender domains, so {target?.ClientIp} "
+            + "can send as it. Ownership verification, if required, still applies afterwards.",
+        RejectionAction.AllowIp =>
+            $"Creates an Allow IP rule for {target?.ClientIp}/32 in this organization. It lets the device connect, "
+            + "and binds it to this tenant when tenant-by-IP binding is enabled. Only do this for a device you "
+            + "recognise — an allow rule is a security decision.",
+        _ =>
+            "The rejection keeps being counted but stops appearing in the daily self-check and report. "
+            + "Nothing is deleted, and you can undo it here."
+    };
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        using var scope = ScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+
+        // RejectedSubmission is deliberately NOT ITenantOwned (a row whose tenant attribution FAILED has
+        // no tenant to own it), so it carries no query filter and the tenant split must be applied by
+        // hand — otherwise a tenant admin would see every other tenant's rows.
+        var query = db.RejectedSubmissions.AsNoTracking();
+        if (CurrentTenant.FilterEnabled)
+            query = query.Where(r => r.TenantId == CurrentTenant.FilterTenantId);
+
+        var rows = await query.ToListAsync();
+
+        trusted = rows
+            .Where(r => r.IsTrustedSource && (showIgnored || r.IgnoredUtc is null))
+            .OrderByDescending(r => r.LastSeenUtc)
+            .ToList();
+        untrusted = rows.Where(r => !r.IsTrustedSource).ToList();
+
+        isLoading = false;
+    }
+
+    private static bool CanAllowIp(RejectedSubmission row) => row.Reason
+        is RejectReason.NotInAllowedNetworks
+        or RejectReason.IpBlocked
+        or RejectReason.OpenRelayDenied
+        or RejectReason.TenantAttributionFailed;
+
+    private static string Age(RejectedSubmission row)
+    {
+        var span = row.LastSeenUtc - row.FirstSeenUtc;
+        if (span < TimeSpan.FromHours(1)) return $"{(int)span.TotalMinutes} min";
+        if (span < TimeSpan.FromHours(24)) return $"{(int)span.TotalHours} h";
+        return $"{(int)span.TotalDays} d";
+    }
+
+    private void Ask(RejectedSubmission row, RejectionAction which)
+    {
+        target = row;
+        action = which;
+        statusMessage = null;
+        showConfirm = true;
+    }
+
+    private async Task ConfirmAsync()
+    {
+        // Re-entrancy guard set before the first await: these actions are not idempotent (accepting a
+        // domain twice throws on the unique index, allowing an IP twice leaves a duplicate rule), and a
+        // second click while the first is in flight would otherwise run the whole handler again.
+        if (busy || target is null) return;
+        busy = true;
+        try
+        {
+            switch (action)
+            {
+                case RejectionAction.AcceptDomain: await AcceptDomainAsync(target); break;
+                case RejectionAction.AllowIp: await AllowIpAsync(target); break;
+                case RejectionAction.Ignore: await SetIgnoredAsync(target, DateTimeOffset.UtcNow); break;
+            }
+            showConfirm = false;
+            await RefreshAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task AcceptDomainAsync(RejectedSubmission row)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
+
+        if (await svc.ExistsAsync(row.SenderDomain))
+        {
+            Fail($"{row.SenderDomain} is already claimed — by another organization, if it is not listed under yours.");
+            return;
+        }
+
+        try
+        {
+            await svc.CreateAsync(row.SenderDomain);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Lost the race against the unique index, or another tenant owns it.
+            Fail(ex.Message);
+            return;
+        }
+
+        // AcceptedSenderDomainService does not invalidate the runtime cache itself (unlike
+        // IpAccessRuleService), so the caller must — otherwise the gate keeps refusing the device for up
+        // to the cache lifetime and the one click looks like it did nothing.
+        ConfigCache.Invalidate();
+        Succeed($"{row.SenderDomain} is now an accepted sender domain. {row.ClientIp} should be able to send.");
+    }
+
+    private async Task AllowIpAsync(RejectedSubmission row)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IIpAccessRuleService>();
+
+        var network = $"{row.ClientIp}/32";
+        var existing = await svc.GetAllAsync();
+        if (existing.Any(r => string.Equals(r.Network, network, StringComparison.OrdinalIgnoreCase)))
+        {
+            Fail($"A rule for {network} already exists in this organization.");
+            return;
+        }
+
+        await svc.CreateAsync(new IpAccessRule
+        {
+            Network = network,
+            Action = IpAccessAction.Allow,
+            SortOrder = existing.Count == 0 ? 0 : existing.Max(r => r.SortOrder) + 1,
+            Description = $"Added from Rejections: {row.Reason.Describe()}"
+        });
+
+        // IpAccessRuleService invalidates the runtime cache itself.
+        Succeed($"{network} is now allowed. {row.ClientIp} should be able to connect.");
+    }
+
+    private async Task SetIgnoredAsync(RejectedSubmission row, DateTimeOffset? ignoredUtc)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+
+        // Re-read rather than attaching the AsNoTracking instance the list is built from.
+        var tracked = await db.RejectedSubmissions.FirstOrDefaultAsync(r => r.Id == row.Id);
+        if (tracked is null)
+        {
+            Fail("That rejection is no longer there — it may have aged out.");
+            return;
+        }
+
+        tracked.IgnoredUtc = ignoredUtc;
+        await db.SaveChangesAsync();
+        Succeed(ignoredUtc is null
+            ? $"{row.ClientIp} will be reported again."
+            : $"{row.ClientIp} will keep being counted but no longer reported.");
+    }
+
+    private async Task UnignoreAsync(RejectedSubmission row)
+    {
+        if (busy) return;
+        busy = true;
+        try
+        {
+            await SetIgnoredAsync(row, null);
+            await RefreshAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void Succeed(string message)
+    {
+        statusMessage = message;
+        statusIsError = false;
+    }
+
+    private void Fail(string message)
+    {
+        statusMessage = message;
+        statusIsError = true;
+    }
+}

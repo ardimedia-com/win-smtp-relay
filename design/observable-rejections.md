@@ -1,8 +1,7 @@
 # Design: Observable Rejections
 
-> Status: **Stage 1 implemented** — recording, self-check finding and daily-report section are in.
-> The one-click onboarding actions ("The idea that makes it a feature") are stage 2 and are NOT built.
-> Written, revised, decided and implemented 2026-07-16.
+> Status: **Implemented** — recording, self-check finding, daily-report section, the Rejections page and
+> the one-click actions are all in. Written, revised, decided and implemented 2026-07-16.
 >
 > The revision replaced the original mechanism. The first draft claimed a single library hook
 > (`ISessionContext.ResponseException`) observes every rejection. Verified against the SmtpServer
@@ -390,11 +389,11 @@ The four formerly-blocking questions are resolved; their substance lives in the 
 - **Buffer redaction** — AUTH-prefix fail-safe, 512-byte cap, escaping (protocol source, "Consequence"
   section).
 
-## What stage 1 shipped
+## What shipped
 
 | Piece | Where |
 |---|---|
-| Reason model + aggregate row | `Core/Models/RejectedSubmission.cs`, migration `AddRejectedSubmissions` |
+| Reason model + aggregate row | `Core/Models/RejectedSubmission.cs`, migrations `AddRejectedSubmissions`, `AddRejectedSubmissionIgnored` |
 | Hot-path fold + periodic flush + capped, trust-partitioned eviction | `SmtpListener/RejectionRecorder.cs` |
 | Policy source (15 gates → `Reject(...)`) | `SmtpListener/RelayMailboxFilter.cs` |
 | Protocol source (the hook) + reply-code classification | `SmtpListener/SmtpRelayServer.cs` |
@@ -403,7 +402,27 @@ The four formerly-blocking questions are resolved; their substance lives in the 
 | 24 h finding + remediation text | `Service/HealthChecks/Checks/RejectedSubmissionsHealthCheck.cs` |
 | Daily-report section | `Service/ReportingService.cs` |
 | Age-based pruning (on `DeliveryLogDays`, by `LastSeenUtc`) | `Storage/RetentionService.cs` |
+| The page + one-click actions | `AdminUi/Components/Pages/Rejections.razor`, nav in `MainLayout.razor` |
 | Coverage-map proof, redaction, trust classification | `RejectedSubmissionsEndToEndTests`, `RejectionBufferTests`, `IpAccessEvaluatorTrustedSourceTests` |
+
+**UI placement (was open question 4): the Monitor group, next to the Journal.** That group is already
+defined as "meaningful in any scope — host = aggregate across all tenants, tenant = scoped", which is
+exactly this table's semantics, and the design's own problem statement is the asymmetry between accepted
+and refused mail. Refused mail belongs beside accepted mail, not in a diagnostics corner.
+
+Two consequences of the row NOT being `ITenantOwned`, both handled in the page and worth remembering
+before anyone writes a second reader:
+
+- **There is no query filter**, so the tenant split is applied by hand. Forgetting it shows every tenant
+  their neighbours' rejections.
+- **In host scope the DbContext neither filters nor stamps**, so a create would silently land in the
+  Default tenant. The actions therefore require a tenant in scope; the page stays readable without one
+  (and that is the only place the attribution-failure rows — which have no tenant — are visible at all,
+  which settles open question 3 conservatively: host admins only).
+
+`[Ignore]` needed state (`IgnoredUtc`) rather than a delete: the device's next attempt would recreate the
+row, so a deleted rejection is not a dismissed one. Ignoring suppresses the finding and the report but
+keeps counting, so the data is still there when someone asks why a device never sent anything.
 
 Values chosen while building (open question 2, non-blocking, revisit if they chafe): flush every **5 s**;
 **5 000** distinct pending keys in memory (excess dropped, and logged — never silently); **2 000** rows
@@ -415,14 +434,17 @@ per trust partition; retention on `DeliveryLogDays`.
    `IMailboxFilter`'s `bool` cannot carry a code, so the response would have to travel some other way
    (a session property read by a custom command, or a fork of `MailCommand`). Consider whether it
    belongs upstream (`enhance-libraries-at-source.md`).
-2. **Stage 2 — the one-click actions.** `[Accept domain] [Bind IP to tenant] [Ignore]`. The record now
-   carries everything they need (client IP, sender domain, the exact gate, the tenant); what is missing
-   is the UI and the actions themselves. This is where the feature stops being a report.
-3. **Attribution-failure surfacing.** Storage is decided and built (host-level rows, null `TenantId`);
-   still open is who *sees* them — host admins only, or also tenant admins whose allow-networks match
-   the client IP?
-4. **UI placement** — own page, Journal tab, or dashboard card only? Today the data surfaces only
-   through `/diagnostics` and the daily report.
+2. **Config mutations are not audited — repo-wide, and this page makes it pointed.** `[Allow IP]` creates
+   a firewall-shaped allow rule from a list row in one click. Nothing is audited, which is *consistent*:
+   `IpAccessRules.razor` and `AcceptedSenderDomains.razor` do not audit either, and `AdminAuditActions`
+   has no config vocabulary at all (its 15 constants are identity/session/server-lifecycle). A
+   confirmation dialog stands in for deliberateness today. Adding `config.*` audit actions is the real
+   fix and needs a naming decision (`naming-discipline.md`), so it was not invented here.
+3. **`AcceptedSenderDomainService` does not invalidate the runtime config cache; its callers must.**
+   `IpAccessRuleService` does it itself, with a comment stating why ("so no caller can forget to and
+   leave stale policy live"). The Rejections page follows the existing convention and invalidates
+   caller-side, but the asymmetry is a trap for the next caller — moving it into the service would end
+   the class of bug (`enhance-libraries-at-source.md`).
 
 ## Adjacent finding, not part of this feature
 

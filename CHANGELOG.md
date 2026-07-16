@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   add the class that previously produced no log line at all — a device sending a syntactically invalid
   envelope, whose failing command line is stored verbatim (AUTH lines redacted to verb + mechanism, and
   never message bodies) so the defect is readable without reproducing it.
+- **A new Rejections page turns a refused device into an onboarding step instead of an error.** It sits
+  in the Monitor group next to the Journal, because refused mail is the counterpart of accepted mail.
+  Clients from your own networks are listed individually — each row names the client, what it wanted to
+  send as, the exact gate that refused it, how often and for how long — while everything from elsewhere
+  is summarised as a single volume figure. Where the relay already knows the fix, it offers it: **Accept
+  domain** adds the sender domain a device is trying to use, **Allow IP** creates an allow rule for it,
+  and **Ignore** stops a rejection being reported without deleting it (it keeps counting, and can be
+  undone). Acting requires an organization in scope, since both actions create configuration that has to
+  belong to one; the page itself is readable host-wide, which is the only place rejections whose tenant
+  could not be attributed are visible.
 
 ### Fixed
 

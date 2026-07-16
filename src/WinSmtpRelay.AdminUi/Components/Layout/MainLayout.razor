@@ -56,6 +56,15 @@
                             <span>Journal</span>
                         </BbSidebarMenuButton>
                     </BbSidebarMenuItem>
+                    @* The Journal's counterpart: mail that never got in. Deliberately NOT in
+                       TenantOnlyRoutePrefixes — a rejection whose tenant attribution failed has no tenant,
+                       so those rows exist only in the host view. *@
+                    <BbSidebarMenuItem>
+                        <BbSidebarMenuButton Href="rejections">
+                            <LucideIcon Name="mail-x" />
+                            <span>Rejections</span>
+                        </BbSidebarMenuButton>
+                    </BbSidebarMenuItem>
                 </BbSidebarMenu>
             </BbSidebarGroup>
 

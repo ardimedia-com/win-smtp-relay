@@ -211,6 +211,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.HasIndex(e => new { e.ClientIp, e.Reason, e.ReplyCode, e.SenderDomain }).IsUnique();
             entity.HasIndex(e => e.LastSeenUtc);
             entity.HasIndex(e => e.IsTrustedSource);
+            entity.HasIndex(e => e.IgnoredUtc);
             entity.Property(e => e.ClientIp).HasMaxLength(45);
             entity.Property(e => e.SenderDomain).HasMaxLength(255);
             entity.Property(e => e.Detail).HasMaxLength(500);

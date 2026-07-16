@@ -265,7 +265,9 @@ public class ReportingService(
         sb.AppendLine("Refused submissions (last 24 hours):");
 
         var untrustedRows = recent.Where(r => !r.IsTrustedSource).ToList();
-        var trusted = recent.Where(r => r.IsTrustedSource)
+        // An operator who dismissed a rejection has said it is expected; it keeps counting but stops
+        // being reported, otherwise "ignore" would not mean anything.
+        var trusted = recent.Where(r => r.IsTrustedSource && r.IgnoredUtc is null)
             .OrderByDescending(r => r.Count)
             .ToList();
 

@@ -181,6 +181,18 @@ public class RejectedSubmission
     /// </summary>
     public string? LastBuffer { get; set; }
 
+    /// <summary>
+    /// When an operator decided this rejection is expected and should stop being reported, or null.
+    /// <para>
+    /// Dismissing needs a flag rather than a delete: the row would simply be recreated by the device's
+    /// next attempt, so a deleted rejection is not a dismissed one. Counting continues while ignored —
+    /// only the finding and the report are suppressed, so the data is still there when someone asks
+    /// why a device never sent anything. The recorder never clears this, so an ignore stays put while
+    /// the device keeps failing.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? IgnoredUtc { get; set; }
+
     /// <summary>How long a row may be idle before a new occurrence counts as a fresh episode.</summary>
     public static readonly TimeSpan EpisodeResetWindow = TimeSpan.FromHours(48);
 }

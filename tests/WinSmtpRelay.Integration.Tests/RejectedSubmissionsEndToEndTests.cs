@@ -29,6 +29,7 @@ public class RejectedSubmissionsEndToEndTests
 {
     private const int SyntaxTestPort = 9027;
     private const int PolicyTestPort = 9028;
+    private const int FilterTestPort = 9029;
 
     /// <summary>
     /// The protocol source: a command the parser cannot read. This class of failure previously produced no
@@ -90,6 +91,50 @@ public class RejectedSubmissionsEndToEndTests
         Assert.AreEqual("example.com", policy.SenderDomain, "the sender domain is what a one-click 'accept this domain' acts on");
         Assert.IsFalse(policy.IsTrustedSource, "the client is outside every configured network");
         Assert.IsNull(policy.LastBuffer, "only a parser failure carries a buffer");
+    }
+
+    /// <summary>
+    /// Runs the exact predicate the self-check and the Rejections page filter on. It is here rather than in
+    /// a unit test because the risk is EF translation, not logic: <c>IgnoredUtc</c> is a NULLABLE
+    /// DateTimeOffset carrying the SQLite ISO-string converter, and RelayDbContext's own convention note
+    /// warns that comparisons on exactly that shape can fail to translate. A query that cannot translate
+    /// throws only when it executes — so this executes it against real SQLite.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task IgnoringARejection_RemovesItFromTheReportedSetWithoutDeletingIt()
+    {
+        await using var relay = await RelayUnderTest.StartAsync(FilterTestPort, allowedNetworks: ["127.0.0.1/32"]);
+
+        await relay.TalkAsync(session =>
+        {
+            session.Send("EHLO tester");
+            session.Send("MAIL FROM:<broken@@@example.com");
+        });
+        await relay.StopAndReadRowsAsync(); // stopping flushes the aggregate
+
+        var since = DateTimeOffset.UtcNow.AddHours(-24);
+
+        var reported = await relay.QueryAsync(db => db.RejectedSubmissions.AsNoTracking()
+            .Where(r => r.IsTrustedSource && r.IgnoredUtc == null && r.LastSeenUtc >= since)
+            .ToListAsync());
+        Assert.AreEqual(1, reported.Count, "a rejection from a configured network is reported");
+        Assert.IsTrue(reported[0].IsTrustedSource, "127.0.0.1 is inside the configured allow-list");
+
+        await relay.QueryAsync(async db =>
+        {
+            var row = await db.RejectedSubmissions.FirstAsync();
+            row.IgnoredUtc = DateTimeOffset.UtcNow;
+            return await db.SaveChangesAsync();
+        });
+
+        var afterIgnore = await relay.QueryAsync(db => db.RejectedSubmissions.AsNoTracking()
+            .Where(r => r.IsTrustedSource && r.IgnoredUtc == null && r.LastSeenUtc >= since)
+            .ToListAsync());
+        Assert.AreEqual(0, afterIgnore.Count, "an ignored rejection stops being reported");
+
+        var all = await relay.QueryAsync(db => db.RejectedSubmissions.AsNoTracking().ToListAsync());
+        Assert.AreEqual(1, all.Count, "ignoring must not delete the row — it keeps counting, it just stops nagging");
     }
 
     private static string Describe(IReadOnlyList<RejectedSubmission> rows) =>
@@ -164,10 +209,14 @@ public class RejectedSubmissionsEndToEndTests
         public async Task<IReadOnlyList<RejectedSubmission>> StopAndReadRowsAsync()
         {
             await _host.StopAsync();
+            return await QueryAsync(db => db.RejectedSubmissions.AsNoTracking().ToListAsync());
+        }
 
+        /// <summary>Runs a query against the relay's own database, on its own scope.</summary>
+        public async Task<T> QueryAsync<T>(Func<RelayDbContext, Task<T>> query)
+        {
             using var scope = _host.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
-            return await db.RejectedSubmissions.AsNoTracking().ToListAsync();
+            return await query(scope.ServiceProvider.GetRequiredService<RelayDbContext>());
         }
 
         public async ValueTask DisposeAsync()
