@@ -6,7 +6,6 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminView)]
 @inject ITenantScopeFactory ScopeFactory
 @inject ICurrentTenant CurrentTenant
-@inject IRuntimeConfigCache ConfigCache
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -347,10 +346,6 @@ else
             return;
         }
 
-        // AcceptedSenderDomainService does not invalidate the runtime cache itself (unlike
-        // IpAccessRuleService), so the caller must — otherwise the gate keeps refusing the device for up
-        // to the cache lifetime and the one click looks like it did nothing.
-        ConfigCache.Invalidate();
         Succeed($"{row.SenderDomain} is now an accepted sender domain. {row.ClientIp} should be able to send.");
     }
 
@@ -375,7 +370,6 @@ else
             Description = $"Added from Rejections: {row.Reason.Describe()}"
         });
 
-        // IpAccessRuleService invalidates the runtime cache itself.
         Succeed($"{network} is now allowed. {row.ClientIp} should be able to connect.");
     }
 

@@ -4,7 +4,6 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
-@inject IRuntimeConfigCache ConfigCache
 @inject IDnsSetupService DnsSetup
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -189,7 +188,6 @@ else
             return;
         }
 
-        ConfigCache.Invalidate();
         // Return to the list after a successful save.
         Nav.NavigateTo("/domains/sender");
     }
@@ -205,7 +203,6 @@ else
         {
             using var scope = ScopeFactory.CreateScope();
             await scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>().MarkVerifiedAsync(Id!.Value);
-            ConfigCache.Invalidate();
             await LoadAsync();
             statusMessage = $"Ownership of {domain} verified";
         }

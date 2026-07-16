@@ -3,7 +3,6 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
-@inject IRuntimeConfigCache ConfigCache
 @inject NavigationManager Nav
 
 <BbBreadcrumb>
@@ -229,7 +228,6 @@
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
         await svc.DeleteHeaderRuleAsync(deleteHeaderId);
-        ConfigCache.Invalidate();
         showDeleteHeader = false;
         await RefreshAsync();
     }
@@ -239,7 +237,6 @@
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
         await svc.DeleteSenderRuleAsync(deleteSenderId);
-        ConfigCache.Invalidate();
         showDeleteSender = false;
         await RefreshAsync();
     }

@@ -4,7 +4,6 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
-@inject IRuntimeConfigCache ConfigCache
 @inject NavigationManager Nav
 
 <BbBreadcrumb>
@@ -137,7 +136,6 @@ else
 
         if (IsNew) await svc.CreateHeaderRuleAsync(entry);
         else await svc.UpdateHeaderRuleAsync(entry);
-        ConfigCache.Invalidate();
         Nav.NavigateTo("/filters?tab=headers");
     }
 

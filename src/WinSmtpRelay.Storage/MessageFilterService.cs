@@ -4,7 +4,10 @@ using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class MessageFilterService(RelayDbContext db) : IMessageFilterService
+// The cache serves this data on the SMTP hot path; invalidating HERE (not in each caller) means no
+// caller — UI page, API endpoint, or background job — can forget to and leave stale policy live for
+// up to the cache lifetime. Same convention as IpAccessRuleService.
+public class MessageFilterService(RelayDbContext db, IRuntimeConfigCache cache) : IMessageFilterService
 {
     // Header rewrites
 
@@ -17,6 +20,7 @@ public class MessageFilterService(RelayDbContext db) : IMessageFilterService
     {
         db.HeaderRewriteEntries.Add(rule);
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
         return rule;
     }
 
@@ -33,11 +37,13 @@ public class MessageFilterService(RelayDbContext db) : IMessageFilterService
         existing.IsEnabled = rule.IsEnabled;
 
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
     }
 
     public async Task DeleteHeaderRuleAsync(int id, CancellationToken ct = default)
     {
         await db.HeaderRewriteEntries.Where(r => r.Id == id).ExecuteDeleteAsync(ct);
+        cache.Invalidate();
     }
 
     // Sender rewrites
@@ -51,6 +57,7 @@ public class MessageFilterService(RelayDbContext db) : IMessageFilterService
     {
         db.SenderRewriteEntries.Add(rule);
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
         return rule;
     }
 
@@ -65,10 +72,12 @@ public class MessageFilterService(RelayDbContext db) : IMessageFilterService
         existing.IsEnabled = rule.IsEnabled;
 
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
     }
 
     public async Task DeleteSenderRuleAsync(int id, CancellationToken ct = default)
     {
         await db.SenderRewriteEntries.Where(r => r.Id == id).ExecuteDeleteAsync(ct);
+        cache.Invalidate();
     }
 }

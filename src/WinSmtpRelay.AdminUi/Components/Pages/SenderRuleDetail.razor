@@ -4,7 +4,6 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
-@inject IRuntimeConfigCache ConfigCache
 @inject NavigationManager Nav
 
 <BbBreadcrumb>
@@ -139,7 +138,6 @@ else
 
         if (IsNew) await svc.CreateSenderRuleAsync(entry);
         else await svc.UpdateSenderRuleAsync(entry);
-        ConfigCache.Invalidate();
         Nav.NavigateTo("/filters?tab=senders");
     }
 

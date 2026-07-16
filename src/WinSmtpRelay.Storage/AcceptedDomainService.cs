@@ -5,7 +5,10 @@ using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class AcceptedDomainService(RelayDbContext db) : IAcceptedDomainService
+// The cache serves this data on the SMTP hot path; invalidating HERE (not in each caller) means no
+// caller — UI page, API endpoint, or background job — can forget to and leave stale policy live for
+// up to the cache lifetime. Same convention as IpAccessRuleService.
+public class AcceptedDomainService(RelayDbContext db, IRuntimeConfigCache cache) : IAcceptedDomainService
 {
     public async Task<IReadOnlyList<AcceptedDomain>> GetAllAsync(CancellationToken ct = default)
     {
@@ -24,6 +27,7 @@ public class AcceptedDomainService(RelayDbContext db) : IAcceptedDomainService
         var entry = new AcceptedDomain { Domain = normalized, VerificationToken = GenerateToken() };
         db.AcceptedDomains.Add(entry);
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
         return entry;
     }
 
@@ -35,11 +39,13 @@ public class AcceptedDomainService(RelayDbContext db) : IAcceptedDomainService
 
         entry.VerifiedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
     }
 
     public async Task DeleteAsync(int id, CancellationToken ct = default)
     {
         await db.AcceptedDomains.Where(d => d.Id == id).ExecuteDeleteAsync(ct);
+        cache.Invalidate();
     }
 
     private static string GenerateToken() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));

@@ -4,7 +4,10 @@ using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class DomainRouteService(RelayDbContext db) : IDomainRouteService
+// The cache serves this data on the SMTP hot path; invalidating HERE (not in each caller) means no
+// caller — UI page, API endpoint, or background job — can forget to and leave stale policy live for
+// up to the cache lifetime. Same convention as IpAccessRuleService.
+public class DomainRouteService(RelayDbContext db, IRuntimeConfigCache cache) : IDomainRouteService
 {
     public async Task<IReadOnlyList<DomainRoute>> GetAllAsync(CancellationToken ct = default)
     {
@@ -20,6 +23,7 @@ public class DomainRouteService(RelayDbContext db) : IDomainRouteService
         await EnsureConnectorInScopeAsync(route.SendConnectorId, ct);
         db.DomainRoutes.Add(route);
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
         return route;
     }
 
@@ -34,6 +38,7 @@ public class DomainRouteService(RelayDbContext db) : IDomainRouteService
         existing.SortOrder = route.SortOrder;
 
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
     }
 
     // A route must reference a send connector visible in the current tenant scope, so a tenant can't
@@ -48,5 +53,6 @@ public class DomainRouteService(RelayDbContext db) : IDomainRouteService
     public async Task DeleteAsync(int id, CancellationToken ct = default)
     {
         await db.DomainRoutes.Where(r => r.Id == id).ExecuteDeleteAsync(ct);
+        cache.Invalidate();
     }
 }

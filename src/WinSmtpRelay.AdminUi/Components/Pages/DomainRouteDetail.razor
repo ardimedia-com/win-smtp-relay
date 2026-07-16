@@ -4,7 +4,6 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
-@inject IRuntimeConfigCache ConfigCache
 @inject NavigationManager Nav
 
 <BbBreadcrumb>
@@ -124,7 +123,6 @@ else
 
         if (IsNew) await svc.CreateAsync(route);
         else await svc.UpdateAsync(route);
-        ConfigCache.Invalidate();
         Nav.NavigateTo("/connectors/send?tab=routes");
     }
 

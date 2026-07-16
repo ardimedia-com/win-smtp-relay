@@ -3,7 +3,6 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
-@inject IRuntimeConfigCache ConfigCache
 @inject IDnsSetupService DnsSetup
 @inject NavigationManager Nav
 
@@ -151,7 +150,6 @@ else
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
         await svc.DeleteAsync(deleteTargetId);
-        ConfigCache.Invalidate();
         showDeleteConfirm = false;
         await RefreshAsync();
     }

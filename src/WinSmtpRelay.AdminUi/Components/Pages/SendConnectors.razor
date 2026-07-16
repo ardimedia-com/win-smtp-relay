@@ -3,7 +3,6 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
-@inject IRuntimeConfigCache ConfigCache
 @inject NavigationManager Nav
 
 <BbBreadcrumb>
@@ -243,7 +242,6 @@
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<ISendConnectorService>();
         await svc.DeleteAsync(deleteTargetId);
-        ConfigCache.Invalidate();
         statusMessage = "Connector deleted";
         showDeleteConfirm = false;
         await RefreshAsync();
@@ -254,7 +252,6 @@
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<IDomainRouteService>();
         await svc.DeleteAsync(deleteRouteId);
-        ConfigCache.Invalidate();
         statusMessage = "Route deleted";
         showDeleteRouteConfirm = false;
         await RefreshAsync();

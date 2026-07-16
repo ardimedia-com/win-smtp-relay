@@ -4,7 +4,10 @@ using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class SendConnectorService(RelayDbContext db) : ISendConnectorService
+// The cache serves this data on the SMTP hot path; invalidating HERE (not in each caller) means no
+// caller — UI page, API endpoint, or background job — can forget to and leave stale policy live for
+// up to the cache lifetime. Same convention as IpAccessRuleService.
+public class SendConnectorService(RelayDbContext db, IRuntimeConfigCache cache) : ISendConnectorService
 {
     public async Task<IReadOnlyList<SendConnector>> GetAllAsync(CancellationToken ct = default)
     {
@@ -25,6 +28,7 @@ public class SendConnectorService(RelayDbContext db) : ISendConnectorService
     {
         db.SendConnectors.Add(connector);
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
         return connector;
     }
 
@@ -48,10 +52,12 @@ public class SendConnectorService(RelayDbContext db) : ISendConnectorService
         existing.IsEnabled = connector.IsEnabled;
 
         await db.SaveChangesAsync(ct);
+        cache.Invalidate();
     }
 
     public async Task DeleteAsync(int id, CancellationToken ct = default)
     {
         await db.SendConnectors.Where(c => c.Id == id).ExecuteDeleteAsync(ct);
+        cache.Invalidate();
     }
 }

@@ -4,7 +4,6 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
-@inject IRuntimeConfigCache ConfigCache
 @inject NavigationManager Nav
 
 <BbBreadcrumb>
@@ -228,7 +227,6 @@ else
         else
             await svc.UpdateAsync(connector);
 
-        ConfigCache.Invalidate();
         Nav.NavigateTo("/connectors/send");
     }
 
