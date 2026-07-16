@@ -21,6 +21,10 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
     public DbSet<HealthCheckSnapshot> HealthCheckSnapshots => Set<HealthCheckSnapshot>();
     public DbSet<HealthCheckFinding> HealthCheckFindings => Set<HealthCheckFinding>();
 
+    // Refused submissions, aggregated per (client IP, reason, reply code, sender domain).
+    // Not tenant-owned: a tenant-attribution failure has no tenant to own the row.
+    public DbSet<RejectedSubmission> RejectedSubmissions => Set<RejectedSubmission>();
+
     // Multi-tenancy + admin auth
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
@@ -193,6 +197,30 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.Property(e => e.Title).HasMaxLength(300);
             entity.Property(e => e.Target).HasMaxLength(320);
             entity.Property(e => e.Severity).HasConversion<int>();
+        });
+
+        // Refused submissions: one aggregated row per distinct rejection. Deliberately NOT ITenantOwned
+        // (a null TenantId is a host-level row, produced whenever tenant attribution is what failed), so
+        // it is excluded from the tenant query filter and queried explicitly — the AdminMembership pattern.
+        modelBuilder.Entity<RejectedSubmission>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            // The aggregation key. SenderDomain is non-nullable ("" = unknown) so this index actually
+            // enforces it: ANSI/SQLite treat NULLs as DISTINCT in a unique index, so a nullable column
+            // would let every protocol-level reject insert a fresh row and defeat the aggregation.
+            entity.HasIndex(e => new { e.ClientIp, e.Reason, e.ReplyCode, e.SenderDomain }).IsUnique();
+            entity.HasIndex(e => e.LastSeenUtc);
+            entity.HasIndex(e => e.IsTrustedSource);
+            entity.Property(e => e.ClientIp).HasMaxLength(45);
+            entity.Property(e => e.SenderDomain).HasMaxLength(255);
+            entity.Property(e => e.Detail).HasMaxLength(500);
+            entity.Property(e => e.LastBuffer).HasMaxLength(600);
+            entity.Property(e => e.Reason).HasConversion<int>();
+            // Deleting a tenant removes its rows; host-level rows (null TenantId) are unaffected.
+            entity.HasOne<Tenant>()
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Configuration entities

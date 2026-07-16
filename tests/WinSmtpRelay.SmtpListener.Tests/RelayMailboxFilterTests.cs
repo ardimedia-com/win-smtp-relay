@@ -27,7 +27,10 @@ public class RelayMailboxFilterTests
     private const string HostedDomain = "hosted.example.com";
     private const string BackupMxDomain = "backup.example.org";
 
-    private static RelayMailboxFilter CreateFilter(StubRuntimeConfigCache cache, SmtpListenerOptions? options = null)
+    private static RelayMailboxFilter CreateFilter(
+        StubRuntimeConfigCache cache,
+        SmtpListenerOptions? options = null,
+        IRejectionRecorder? recorder = null)
     {
         var dns = Substitute.For<ILookupClient>();
         var spf = new SpfValidator(dns, NullLogger<SpfValidator>.Instance);
@@ -45,7 +48,28 @@ public class RelayMailboxFilterTests
             rateLimiter,
             cache,
             scopeFactory,
+            recorder ?? new RecordingRejectionRecorder(),
             NullLogger<RelayMailboxFilter>.Instance);
+    }
+
+    /// <summary>
+    /// Captures what the filter recorded, so a test can assert the REASON a submission was refused and
+    /// not merely that it was. The reason is the whole point of the record: every gate answers the same
+    /// 550 on the wire, so a bool return proves nothing about which gate fired.
+    /// </summary>
+    private sealed class RecordingRejectionRecorder : IRejectionRecorder
+    {
+        public List<(string? ClientIp, RejectReason Reason, int ReplyCode, string? SenderDomain, int? TenantId, string? Detail)> Recorded { get; } = [];
+
+        public void Record(
+            string? clientIp,
+            RejectReason reason,
+            int replyCode,
+            string? senderDomain = null,
+            int? tenantId = null,
+            string? detail = null,
+            string? rawBuffer = null)
+            => Recorded.Add((clientIp, reason, replyCode, senderDomain, tenantId, detail));
     }
 
     /// <summary>

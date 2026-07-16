@@ -23,6 +23,7 @@ public class SmtpRelayServer : BackgroundService
     private readonly CertificateLoader _certificateLoader;
     private readonly IUserAuthenticator _userAuthenticator;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IRejectionRecorder _rejectionRecorder;
     private readonly ILogger<SmtpRelayServer> _logger;
 
     public SmtpRelayServer(
@@ -32,6 +33,7 @@ public class SmtpRelayServer : BackgroundService
         CertificateLoader certificateLoader,
         IUserAuthenticator userAuthenticator,
         IServiceScopeFactory scopeFactory,
+        IRejectionRecorder rejectionRecorder,
         ILogger<SmtpRelayServer> logger)
     {
         _config = options.Value;
@@ -40,6 +42,7 @@ public class SmtpRelayServer : BackgroundService
         _certificateLoader = certificateLoader;
         _userAuthenticator = userAuthenticator;
         _scopeFactory = scopeFactory;
+        _rejectionRecorder = rejectionRecorder;
         _logger = logger;
     }
 
@@ -134,6 +137,15 @@ public class SmtpRelayServer : BackgroundService
         {
             _logger.LogDebug("SMTP session created from {RemoteEndPoint}",
                 args.Context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep) ? ep : "unknown");
+
+            // Protocol-level rejections. This event fires ONLY for error responses the library raises as
+            // an SmtpResponseException — parser failures, out-of-sequence commands, timeouts. It does NOT
+            // fire for our own policy gates: MailCommand/RcptCommand write SmtpResponse.MailboxUnavailable
+            // straight to the pipe when IMailboxFilter returns false, so no exception is ever thrown and
+            // this handler never sees them. Those are recorded by RelayMailboxFilter itself. Verified
+            // against SmtpServer v11.1.0; re-verify on a version change (the reference floats on 11.*).
+            // See design/observable-rejections.md for the full coverage map.
+            args.Context.ResponseException += OnResponseException;
         };
 
         smtpServer.SessionCompleted += (sender, args) =>
@@ -152,6 +164,71 @@ public class SmtpRelayServer : BackgroundService
             _logger.LogInformation("SMTP listener shutting down");
         }
     }
+
+    /// <summary>
+    /// The key SmtpServer stores the failing command's raw bytes under. It is a PRIVATE const inside
+    /// SmtpServer.SmtpSession, so this is an undocumented internal we are deliberately consuming — the
+    /// raw line is what makes a syntax reject diagnosable rather than merely countable. The reference
+    /// floats on 11.*, so it is read best-effort: if a future version renames or drops it, the record
+    /// simply loses its buffer instead of the handler breaking.
+    /// </summary>
+    private const string SmtpSessionBufferKey = "SmtpSession:Buffer";
+
+    /// <summary>
+    /// Records an error response the SMTP library raised. See the coverage note at the subscription:
+    /// this is the protocol half only — the policy gates never reach here.
+    /// </summary>
+    private void OnResponseException(object? sender, SmtpResponseExceptionEventArgs e)
+    {
+        try
+        {
+            var replyCode = (int)e.Exception.Response.ReplyCode;
+
+            // 421 is session lifecycle, not a refused submission: an idle-command timeout, a cancelled
+            // session, or service shutdown. Recording it would make every TCP/banner health probe and
+            // every port scanner that connects and leaves a permanent row — and a probe from inside the
+            // LAN would be a *trusted* row, i.e. a standing false-positive finding. The one thing that
+            // trains an operator to ignore this feature is a finding that is always there.
+            if (replyCode == 421)
+                return;
+
+            var clientIp = (e.Context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep)
+                ? ep as IPEndPoint
+                : null)?.Address.ToString();
+
+            byte[]? rawBuffer = null;
+            if (e.Exception.Properties.TryGetValue(SmtpSessionBufferKey, out var raw) && raw is byte[] bytes)
+                rawBuffer = bytes;
+
+            var tenantId = e.Context.Properties.TryGetValue("TenantId", out var tid) && tid is int t ? t : (int?)null;
+
+            _rejectionRecorder.Record(
+                clientIp,
+                Classify(replyCode, rawBuffer is not null),
+                replyCode,
+                tenantId: tenantId,
+                detail: e.Exception.Response.Message,
+                rawBuffer: RejectionBuffer.Redact(rawBuffer));
+        }
+        catch (Exception ex)
+        {
+            // Observability must never break a session, and this handler runs inside one.
+            _logger.LogDebug(ex, "Recording a protocol-level rejection failed");
+        }
+    }
+
+    /// <summary>
+    /// Maps a library error response onto a reason. The presence of the raw buffer is the reliable
+    /// discriminator: only the parser's TryMake failure attaches it.
+    /// </summary>
+    private static RejectReason Classify(int replyCode, bool hasBuffer) => (replyCode, hasBuffer) switch
+    {
+        (_, true) => RejectReason.CommandSyntaxError,
+        (553, _) => RejectReason.InvalidMailboxName,
+        (552, _) => RejectReason.MessageTooLarge,
+        (503, _) => RejectReason.CommandSequenceError,
+        _ => RejectReason.ProtocolOther
+    };
 
     /// <summary>
     /// Endpoints come from the enabled, host-level (default-tenant) receive connectors in the

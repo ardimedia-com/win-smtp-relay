@@ -22,6 +22,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RateLimiter>();
         services.AddSingleton<WebhookService>();
         services.AddHttpClient("Webhook");
+
+        // Observable rejections: one instance is both the hot-path aggregate (IRejectionRecorder) and the
+        // background flush (BackgroundService), so both registrations must resolve the SAME object —
+        // hence the singleton plus two forwarding registrations, not three independent ones.
+        services.AddSingleton<RejectionRecorder>();
+        services.AddSingleton<IRejectionRecorder>(sp => sp.GetRequiredService<RejectionRecorder>());
+        services.AddHostedService(sp => sp.GetRequiredService<RejectionRecorder>());
+
         services.AddHostedService<SmtpRelayServer>();
         services.AddHostedService<PickupFolderService>();
 

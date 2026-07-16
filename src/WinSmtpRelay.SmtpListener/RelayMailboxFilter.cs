@@ -8,6 +8,7 @@ using SmtpServer.Net;
 using SmtpServer.Storage;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Interfaces;
+using WinSmtpRelay.Core.Models;
 using WinSmtpRelay.Security;
 
 namespace WinSmtpRelay.SmtpListener;
@@ -19,7 +20,21 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
     private readonly RateLimiter _rateLimiter;
     private readonly IRuntimeConfigCache _configCache;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IRejectionRecorder _rejectionRecorder;
     private readonly ILogger<RelayMailboxFilter> _logger;
+
+    /// <summary>
+    /// The reply code EVERY gate in this class produces. <see cref="IMailboxFilter"/> returns a bool, and
+    /// the library maps <c>false</c> onto the fixed <c>SmtpResponse.MailboxUnavailable</c> (550) —
+    /// see MailCommand/RcptCommand in SmtpServer v11.1.0. The gate's reason cannot travel over the wire,
+    /// which is precisely why it is recorded here instead.
+    /// <para>
+    /// This is also a known defect: 550 is PERMANENT, so the rate-limit gates tell a merely-throttled
+    /// legitimate sender to give up and bounce the message rather than retry later (a 4xx). Fixing that
+    /// needs a way to carry a response out of this filter. See design/observable-rejections.md.
+    /// </para>
+    /// </summary>
+    private const int MailboxFilterReplyCode = 550;
 
     public RelayMailboxFilter(
         IOptions<SmtpListenerOptions> options,
@@ -27,6 +42,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         RateLimiter rateLimiter,
         IRuntimeConfigCache configCache,
         IServiceScopeFactory scopeFactory,
+        IRejectionRecorder rejectionRecorder,
         ILogger<RelayMailboxFilter> logger)
     {
         _options = options.Value;
@@ -34,7 +50,28 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         _rateLimiter = rateLimiter;
         _configCache = configCache;
         _scopeFactory = scopeFactory;
+        _rejectionRecorder = rejectionRecorder;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Refuses the submission AND records why, so every gate stays a one-line <c>return Reject(...)</c>.
+    /// Reads the client IP and tenant from the session rather than taking them as parameters, so a gate
+    /// that runs before those locals exist still produces a complete row. Returns false so callers can
+    /// <c>return Reject(...)</c> directly.
+    /// </summary>
+    private bool Reject(ISessionContext context, RejectReason reason, string? senderDomain = null, string? detail = null)
+    {
+        var clientIp = (context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep)
+            ? ep as IPEndPoint
+            : null)?.Address.ToString();
+
+        // Null until the attribution block below runs — and null for good on the very gate that reports
+        // attribution failing. Such a row is host-level by design; there is no tenant to own it.
+        var tenantId = context.Properties.TryGetValue("TenantId", out var tid) && tid is int t ? t : (int?)null;
+
+        _rejectionRecorder.Record(clientIp, reason, MailboxFilterReplyCode, senderDomain, tenantId, detail);
+        return false;
     }
 
     public override async Task<bool> CanAcceptFromAsync(
@@ -43,16 +80,20 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         int size,
         CancellationToken cancellationToken)
     {
+        // Resolve the client up front: every gate below reports it, including the size check, which used
+        // to run before the endpoint was read and so could only ever log a nameless rejection.
+        var remoteEndPoint = context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep) ? ep as IPEndPoint : null;
+        var clientIp = remoteEndPoint?.Address.ToString();
+        var senderDomain = GetDomainFromAddress(from.AsAddress());
+
         // Check message size limit
         if (size > 0 && size > _options.MaxMessageSizeBytes)
         {
-            _logger.LogWarning("Message from {Sender} rejected: size {Size} exceeds limit {Limit}",
-                from.AsAddress(), size, _options.MaxMessageSizeBytes);
-            return false;
+            _logger.LogWarning("Message from {Sender} ({ClientIp}) rejected: size {Size} exceeds limit {Limit}",
+                from.AsAddress(), clientIp, size, _options.MaxMessageSizeBytes);
+            return Reject(context, RejectReason.MessageTooLarge, senderDomain,
+                $"{size} bytes exceeds the {_options.MaxMessageSizeBytes}-byte limit");
         }
-
-        var remoteEndPoint = context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep) ? ep as IPEndPoint : null;
-        var clientIp = remoteEndPoint?.Address.ToString();
 
         // IP access rules are needed both for strict tenant binding (just below) and the relay access
         // check further down — load once (cached).
@@ -81,7 +122,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             {
                 _logger.LogWarning("Message from {Sender} ({ClientIp}) rejected: unauthenticated tenant attribution failed ({Outcome})",
                     from.AsAddress(), clientIp, outcome);
-                return false;
+                return Reject(context, RejectReason.TenantAttributionFailed, senderDomain, outcome.ToString());
             }
 
             context.Properties["TenantId"] = tenant!.Value;
@@ -95,20 +136,20 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         {
             _logger.LogWarning("Message from {Sender} rejected: tenant {TenantId} is disabled",
                 from.AsAddress(), resolvedTenantId);
-            return false;
+            return Reject(context, RejectReason.TenantDisabled, senderDomain);
         }
 
         // Check if IP is auto-banned (failed auth)
         if (clientIp is not null && _rateLimiter.IsIpBanned(clientIp))
         {
             _logger.LogWarning("Connection from {ClientIp} rejected: IP is auto-banned", clientIp);
-            return false;
+            return Reject(context, RejectReason.IpAutoBanned, senderDomain);
         }
 
-        // Check per-IP rate limit
+        // Check per-IP rate limit (RateLimiter logs the breach itself; recorded here so it is queryable)
         if (clientIp is not null && !await _rateLimiter.IsIpAllowedAsync(clientIp, cancellationToken))
         {
-            return false;
+            return Reject(context, RejectReason.IpRateLimitExceeded, senderDomain);
         }
 
         // Check IP-based relay restrictions. DB-stored IP access rules are authoritative
@@ -123,7 +164,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             if (decision is false)
             {
                 _logger.LogWarning("Relay denied for {ClientIp}: blocked by IP access rules", remoteEndPoint.Address);
-                return false;
+                return Reject(context, RejectReason.IpBlocked, senderDomain);
             }
 
             if (decision is null &&
@@ -131,29 +172,28 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
                 !IpNetworkHelper.IsInAnyNetwork(remoteEndPoint.Address, _options.AllowedNetworks))
             {
                 _logger.LogWarning("Relay denied for {ClientIp}: not in allowed networks", remoteEndPoint.Address);
-                return false;
+                return Reject(context, RejectReason.NotInAllowedNetworks, senderDomain);
             }
         }
 
-        // Check per-sender rate limit
+        // Check per-sender rate limit (RateLimiter logs the breach itself; recorded here so it is queryable)
         if (!await _rateLimiter.IsSenderAllowedAsync(from.AsAddress(), cancellationToken))
         {
-            return false;
+            return Reject(context, RejectReason.SenderRateLimitExceeded, senderDomain);
         }
 
         // Check accepted sender domains (from DB cache)
-        var senderDomainForCheck = GetDomainFromAddress(from.AsAddress());
         var acceptedSenderDomains = await _configCache.GetAcceptedSenderDomainsAsync(cancellationToken);
         if (acceptedSenderDomains.Count > 0)
         {
             var senderDomainAccepted = acceptedSenderDomains.Any(d =>
-                string.Equals(d, senderDomainForCheck, StringComparison.OrdinalIgnoreCase));
+                string.Equals(d, senderDomain, StringComparison.OrdinalIgnoreCase));
 
             if (!senderDomainAccepted)
             {
                 _logger.LogWarning("Sender {Sender} rejected: domain {Domain} not in accepted sender domains",
-                    from.AsAddress(), senderDomainForCheck);
-                return false;
+                    from.AsAddress(), senderDomain);
+                return Reject(context, RejectReason.SenderDomainNotAccepted, senderDomain);
             }
 
             // Optional verification gate: when enabled, an accepted sender domain must also have its
@@ -162,11 +202,11 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             if (emailAuth.RequireSenderDomainVerification)
             {
                 var verified = await _configCache.GetVerifiedSenderDomainsAsync(cancellationToken);
-                if (!verified.Contains(senderDomainForCheck))
+                if (!verified.Contains(senderDomain))
                 {
                     _logger.LogWarning("Sender {Sender} rejected: domain {Domain} ownership not verified (verification required)",
-                        from.AsAddress(), senderDomainForCheck);
-                    return false;
+                        from.AsAddress(), senderDomain);
+                    return Reject(context, RejectReason.SenderDomainNotVerified, senderDomain);
                 }
             }
         }
@@ -189,7 +229,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             if (!IsAllowedSender(user, senderAddress))
             {
                 _logger.LogWarning("User {User} not allowed to send as {Sender}", authenticatedUser, senderAddress);
-                return false;
+                return Reject(context, RejectReason.SendAsDenied, senderDomain, $"user {authenticatedUser}");
             }
 
             // Check rate limit — keyed by the globally-unique user id so two tenants sharing a
@@ -197,14 +237,13 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             if (user is not null && !_rateLimiter.IsAllowed($"user:{user.Id}", user.RateLimitPerMinute, user.RateLimitPerDay))
             {
                 _logger.LogWarning("Rate limit exceeded for user {User}", authenticatedUser);
-                return false;
+                return Reject(context, RejectReason.UserRateLimitExceeded, senderDomain, $"user {authenticatedUser}");
             }
         }
 
         // SPF check (store result in context for later use in SaveAsync)
         if (remoteEndPoint is not null)
         {
-            var senderDomain = GetDomainFromAddress(from.AsAddress());
             var spfResult = await _emailAuth.CheckSpfAsync(remoteEndPoint.Address, senderDomain, cancellationToken);
             context.Properties["SpfResult"] = spfResult;
             context.Properties["EnvelopeFromDomain"] = senderDomain;
@@ -218,7 +257,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
             {
                 _logger.LogWarning("Message from {Sender} rejected: SPF fail from {Ip}",
                     from.AsAddress(), remoteEndPoint.Address);
-                return false;
+                return Reject(context, RejectReason.SpfFail, senderDomain);
             }
         }
 
@@ -232,6 +271,10 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         CancellationToken cancellationToken)
     {
         var recipientDomain = to.Host;
+        // The envelope sender's domain identifies WHO was refused; the recipient is carried in Detail.
+        // (Resolved up front so the verification gate below can report a complete row — it used to run
+        // before the endpoint was read.)
+        var senderDomain = GetDomainFromAddress(from.AsAddress());
 
         // ---- Mail for a domain we HOST (inbound) ----
         // Backup-MX domains are hosted (read live from the runtime config cache).
@@ -258,7 +301,8 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
                 {
                     _logger.LogWarning("Recipient {Recipient} rejected: domain {Domain} ownership not verified (verification required)",
                         to.AsAddress(), recipientDomain);
-                    return false;
+                    return Reject(context, RejectReason.RecipientDomainNotVerified, senderDomain,
+                        $"recipient domain {recipientDomain}");
                 }
             }
             return true;
@@ -287,7 +331,7 @@ public class RelayMailboxFilter : MailboxFilter, IMailboxFilter
         _logger.LogWarning(
             "Relaying denied for {Recipient} from {ClientIp}: relaying to an external domain requires SMTP authentication or an explicit allow-IP rule (open-relay protection)",
             to.AsAddress(), remoteEndPoint?.Address);
-        return false;
+        return Reject(context, RejectReason.OpenRelayDenied, senderDomain, $"recipient domain {recipientDomain}");
     }
 
     private static string? GetAuthenticatedUser(ISessionContext context)

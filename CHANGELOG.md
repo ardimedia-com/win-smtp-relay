@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Refused submissions are now recorded and reportable instead of vanishing into the Event Log.** A
+  relay's worst state is silently not relaying: accepted mail had a journal, per-recipient outcomes,
+  statistics and a daily report, while a rejected submission was only a log warning nobody reads — so a
+  misconfigured device could sit unnoticed for months. Every rejection is now aggregated into a
+  queryable record (`RejectedSubmissions`, migration `AddRejectedSubmissions`) keyed by client IP,
+  reason, reply code and sender domain, with an occurrence count and first/last-seen timestamps — a
+  device retrying every 30 minutes for six months is one row, not 8,000. Rejections are classified by
+  where the client came from: one from a network the operator deliberately configured is a
+  misconfigured known device (a finding), while one from anywhere else is the relay working as designed
+  against port-25 background noise (counted, never alerted). Two sources feed the record: all fifteen
+  policy gates, which now carry a typed `RejectReason`, and the SMTP library's error responses, which
+  add the class that previously produced no log line at all — a device sending a syntactically invalid
+  envelope, whose failing command line is stored verbatim (AUTH lines redacted to verb + mechanism, and
+  never message bodies) so the defect is readable without reproducing it.
+
+### Fixed
+
+- **The message-size rejection logged no client IP.** It ran before the session's remote endpoint was
+  read, so it could only report a nameless "message from X rejected" — the one detail needed to find the
+  device. Same for the recipient-domain-verification rejection.
+
+### Known issues
+
+- **Rate-limited senders are refused permanently instead of being asked to retry.** Every gate in the
+  mailbox filter answers a fixed `550` (the SMTP library maps the filter's boolean onto one constant),
+  including the per-IP, per-sender and per-user rate limits. `550` is permanent, so a well-behaved
+  sending server bounces the message rather than retrying later — throttling a legitimate sender
+  currently loses their mail instead of delaying it. Found while instrumenting the gates; the reject
+  reasons already distinguish temporary from permanent in preparation for the fix, which needs a way to
+  carry a reply code out of the filter. See `design/observable-rejections.md`.
+
 ## [1.0.0-beta1-build65] - 2026-07-06
 
 ### Added

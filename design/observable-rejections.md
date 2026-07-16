@@ -266,9 +266,12 @@ limits (`SmtpListenerOptions.MaxMessageSizeBytes` and `ServerOptions.MaxMessageS
      acts on "IP X wants to send as domain Y" — a row keyed only on `(IP, reason)` cannot power
      `[Accept domain]`, and a device alternating between two sender domains is two different
      requests. The first draft specified the row without the domain while simultaneously promising a
-     feature that needs it. Where no sender is knowable (parser-level rejects), the field is null and
-     the row aggregates on the rest of the key. The same goes for whatever context `[Bind IP to
-     tenant]` needs (the attribution outcome).
+     feature that needs it. Where no sender is knowable (parser-level rejects), the field is **empty,
+     not null**: ANSI/SQLite treat NULLs as distinct in a unique index, so a nullable key column
+     would let every protocol-level reject insert a fresh row and silently defeat the aggregation —
+     and a null-to-`""` value converter cannot paper over it, because EF Core never passes null to a
+     converter. The same goes for whatever context `[Bind IP to tenant]` needs (the attribution
+     outcome).
    - **`FirstSeenUtc` resets after a gap.** "Recurring for > 24 h" is `LastSeen − FirstSeen`; a
      device that was fixed and breaks again weeks later must not inherit its stale `FirstSeenUtc`
      and trigger an instant warning. On upsert, when `now − LastSeenUtc` exceeds a reset window

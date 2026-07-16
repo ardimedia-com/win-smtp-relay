@@ -85,6 +85,41 @@ public static class IpAccessEvaluator
         return staticAllowedNetworks.Any(n => !IsTooBroadForRelay(n) && IpNetworkHelper.IsInNetwork(clientIp, n));
     }
 
+    /// <summary>
+    /// Whether a client is inside a network the operator deliberately configured — the signal/noise
+    /// split for observable rejections. A rejected client from a trusted network is a configured device
+    /// that is misconfigured (a finding, and an onboarding opportunity); a rejected client from anywhere
+    /// else is the relay working as designed against port-25 background noise (counted, never alerted).
+    /// <para>
+    /// Deliberately TENANT-AGNOSTIC, unlike <see cref="EvaluateForTenant"/>: this question is asked at
+    /// points where no tenant exists — a parser-level reject has no envelope at all, and a
+    /// tenant-attribution failure is precisely the case where the tenant is what could not be resolved.
+    /// Matching ANY tenant's allow rule is therefore the only computable definition. It is a
+    /// classification for reporting, never an authorization decision — do not use it as an access gate.
+    /// </para>
+    /// <para>
+    /// Only Allow rules specific enough to authorize relaying count (<see cref="IsTooBroadForRelay"/>),
+    /// so one broad rule such as 0.0.0.0/0 cannot mark the entire internet trusted and flood the
+    /// findings with scanner noise. The static appsettings allow-list is honoured only as a fallback
+    /// when no DB rules exist, mirroring the acceptance gate's precedence (DB rules are authoritative).
+    /// </para>
+    /// </summary>
+    public static bool IsTrustedSource(
+        IPAddress clientIp,
+        IReadOnlyList<IpAccessRule> allRules,
+        IReadOnlyList<string> staticAllowedNetworks)
+    {
+        if (allRules.Count > 0)
+        {
+            return allRules.Any(r =>
+                r.Action == IpAccessAction.Allow &&
+                !IsTooBroadForRelay(r.Network) &&
+                IpNetworkHelper.IsInNetwork(clientIp, r.Network));
+        }
+
+        return staticAllowedNetworks.Any(n => !IsTooBroadForRelay(n) && IpNetworkHelper.IsInNetwork(clientIp, n));
+    }
+
     /// <summary>True for a CIDR covering the entire address space (prefix length 0), e.g. 0.0.0.0/0 or ::/0.</summary>
     public static bool IsAnyNetwork(string cidr)
     {
