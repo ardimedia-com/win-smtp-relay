@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build67] - 2026-07-18
+
+### Changed
+
+- **The daily report email is now wide enough for its own output.** Its preformatted block carries
+  fixed-width tabular lines — health-check findings that repeat a fully-qualified domain run to about 82
+  characters — but the shared card fitted roughly 74, so those lines wrapped mid-sentence and the report
+  read as broken. Rather than widen every system mail, the card layout became opt-in
+  (`SystemEmailContent.WideLayout`): the digest renders at 860px with reduced side padding (~110
+  characters of monospace), while transactional mail such as sign-in links and alerts keeps the narrower
+  640px measure, which suits a few lines of prose better.
+
 ## [1.0.0-beta1-build66] - 2026-07-16
 
 ### Added

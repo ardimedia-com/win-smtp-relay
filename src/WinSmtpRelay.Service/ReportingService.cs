@@ -240,6 +240,9 @@ public class ReportingService(
             Paragraphs = [$"Activity summary as of {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC, host {Environment.MachineName}."],
             MonospaceBlock = sb.ToString(),
             FooterNote = "Sent by WIN-SMTP-RELAY email reporting — configure under Settings → Reporting.",
+            // The digest is the one mail whose block is fixed-width tabular output; at the default card
+            // width its longest lines (health-check findings) wrapped mid-sentence.
+            WideLayout = true,
         };
     }
 

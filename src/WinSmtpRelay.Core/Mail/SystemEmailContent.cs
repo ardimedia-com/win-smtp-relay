@@ -28,4 +28,12 @@ public sealed record SystemEmailContent
 
     /// <summary>Muted footer note ("If you did not request this …"); omitted when null.</summary>
     public string? FooterNote { get; init; }
+
+    /// <summary>
+    /// Renders the HTML card at the wider layout so a fixed-width <see cref="MonospaceBlock"/> fits
+    /// without wrapping. Opt in only for reports whose preformatted block carries long lines (the daily
+    /// digest); transactional one-paragraph mails stay at the narrower default, where a long measure
+    /// reads worse.
+    /// </summary>
+    public bool WideLayout { get; init; }
 }
