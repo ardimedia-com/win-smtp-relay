@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The relay now hosts an MCP server — an AI assistant can troubleshoot and fix it directly.** A
+  streamable-HTTP MCP endpoint at `/mcp` (official MCP C# SDK, stateless mode) exposes fifteen tools
+  as a thin layer over the existing services: diagnose (server status, queue and message metadata,
+  delivery attempts, rejections with reasons, self-check findings, audit search, the whole mail-flow
+  config with secrets omitted) and fix (accept sender/recipient domains, IP allow rules, suppressions,
+  re-queue). It authenticates with the normal API keys; every tool re-applies the exact role policy
+  and capability scope of its REST equivalent, so an MCP session can never do more than the same key
+  could against the API. Raw message bodies and the admin area (tenants, accounts, keys) are
+  deliberately not exposed as tools at all, and every change lands in the audit trail attributed to
+  the key. Unauthenticated `/mcp` requests get a 401 like `/api`, not a login-page redirect.
+- **A new "MCP" page in the navigation (Server group) explains and sets it up:** what an assistant can
+  and cannot do, the recommended least-privilege key (`Host admin` +
+  `diag:read messages:read queue:write config:write` — no bodies, no admin area), a copyable
+  `claude mcp add` command with the server's real URL, a generic JSON config for other MCP clients,
+  and the reachability/certificate caveats.
+
 - **The diagnostics surface is now reachable over the REST API — troubleshooting no longer requires the
   UI.** Four surfaces that existed only as admin pages have endpoints: `GET /api/audit` (filterable,
   paged audit query; host admins, classified under the `diag` scope so a troubleshooting key can answer

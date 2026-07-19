@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Official MCP C# SDK — hosts the streamable-HTTP MCP endpoint inside the admin plane. -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\WinSmtpRelay.Core\WinSmtpRelay.Core.csproj" />
     <ProjectReference Include="..\WinSmtpRelay.Security\WinSmtpRelay.Security.csproj" />
     <ProjectReference Include="..\WinSmtpRelay.Storage\WinSmtpRelay.Storage.csproj" />

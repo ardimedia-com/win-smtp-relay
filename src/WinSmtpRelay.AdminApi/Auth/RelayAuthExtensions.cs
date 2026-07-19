@@ -83,10 +83,11 @@ public static class RelayAuthExtensions
             options.ExpireTimeSpan = TimeSpan.FromDays(7);
             options.SlidingExpiration = true;
 
-            // API clients get status codes, browsers get redirects.
+            // API clients get status codes, browsers get redirects. /mcp is a protocol endpoint like
+            // /api — an MCP client can do nothing with a login-page redirect.
             options.Events.OnRedirectToLogin = ctx =>
             {
-                if (ctx.Request.Path.StartsWithSegments("/api"))
+                if (ctx.Request.Path.StartsWithSegments("/api") || ctx.Request.Path.StartsWithSegments("/mcp"))
                 {
                     ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                     return Task.CompletedTask;
@@ -96,7 +97,7 @@ public static class RelayAuthExtensions
             };
             options.Events.OnRedirectToAccessDenied = ctx =>
             {
-                if (ctx.Request.Path.StartsWithSegments("/api"))
+                if (ctx.Request.Path.StartsWithSegments("/api") || ctx.Request.Path.StartsWithSegments("/mcp"))
                 {
                     ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
                     return Task.CompletedTask;

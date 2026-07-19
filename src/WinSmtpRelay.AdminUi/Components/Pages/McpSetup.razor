@@ -1,0 +1,138 @@
+@page "/mcp-setup"
+@using WinSmtpRelay.Core.Authorization
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
+
+<BbBreadcrumb>
+    <BbBreadcrumbList>
+        <BbBreadcrumbItem><BbBreadcrumbLink Href="/">Home</BbBreadcrumbLink></BbBreadcrumbItem>
+        <BbBreadcrumbSeparator />
+        <BbBreadcrumbItem><BbBreadcrumbPage>MCP</BbBreadcrumbPage></BbBreadcrumbItem>
+    </BbBreadcrumbList>
+</BbBreadcrumb>
+
+<div class="page-header">
+    <h1>MCP — AI assistant access</h1>
+    <p>Connect an AI assistant (Claude Code, or any MCP client) to this relay so it can diagnose problems
+       and apply routine fixes — through the same API keys, permissions and audit trail as everything else.</p>
+</div>
+
+<BbCard>
+    <BbCardHeader>
+        <BbCardTitle>What the assistant can do</BbCardTitle>
+    </BbCardHeader>
+    <BbCardContent>
+        <p>The relay hosts an MCP endpoint at <code class="mono">@McpUrl</code> (streamable HTTP). Its tools are a
+           thin layer over the admin API:</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-top:0.75rem;">
+            <div>
+                <h4 style="margin:0 0 0.35rem;"><LucideIcon Name="stethoscope" /> Diagnose</h4>
+                <ul style="padding-left:1.25rem;margin:0;">
+                    <li>Server status, queue depth, queued messages (metadata only)</li>
+                    <li>Per-recipient delivery attempts and SMTP responses</li>
+                    <li><strong>Rejections</strong> — which device is being refused, by which gate, and why</li>
+                    <li>The daily self-check findings with remediation hints</li>
+                    <li>The audit trail (“who changed what”)</li>
+                    <li>The whole mail-flow configuration in one view (secrets omitted)</li>
+                </ul>
+            </div>
+            <div>
+                <h4 style="margin:0 0 0.35rem;"><LucideIcon Name="wrench" /> Fix</h4>
+                <ul style="padding-left:1.25rem;margin:0;">
+                    <li>Accept a sender or recipient domain</li>
+                    <li>Allow a device's network (IP allow rule)</li>
+                    <li>Add / remove a suppression</li>
+                    <li>Re-queue a failed message after the cause is fixed</li>
+                </ul>
+            </div>
+        </div>
+        <p class="text-muted" style="font-size:0.85rem;margin-top:0.75rem;">
+            Deliberately <strong>not</strong> available over MCP: raw message bodies (customer mail content),
+            and all administration of tenants, admin accounts and API keys. Every change an assistant makes
+            is written to the <a href="/host/audit">Audit Log</a> and marked with an “API key” badge.
+        </p>
+    </BbCardContent>
+</BbCard>
+
+<BbCard>
+    <BbCardHeader>
+        <BbCardTitle>Setup</BbCardTitle>
+    </BbCardHeader>
+    <BbCardContent>
+        <h4 style="margin:0 0 0.35rem;">1. Create an API key</h4>
+        <p style="margin-top:0;">
+            The MCP endpoint authenticates with a normal <a href="/apikeys">API key</a>. Recommended for a
+            troubleshooting assistant: role <strong>Host admin</strong> with the scopes
+            <code class="mono">diag:read messages:read queue:write config:write</code> —
+            it can then read all diagnostics and fix mail-flow configuration, but has no access to message
+            bodies (<code class="mono">messages:body</code> not granted) and none to the
+            <code class="mono">admin</code> area (tenants, accounts, keys). A key without any scopes works
+            too and is strictly read-only.
+        </p>
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/apikeys/new"))">
+            <LucideIcon Name="key-round" /> Create API key
+        </BbButton>
+
+        <h4 style="margin:1.25rem 0 0.35rem;">2. Add the server to Claude Code</h4>
+        <p style="margin-top:0;">On the machine where Claude Code runs (it must be able to reach this admin UI):</p>
+        <div style="display:flex;gap:0.5rem;align-items:flex-start;">
+            <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.6rem 0.8rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.82rem;">@ClaudeCommand</code></pre>
+            <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopyCommandAsync">
+                <LucideIcon Name="copy" />
+            </BbButton>
+        </div>
+        @if (copied)
+        {
+            <span class="text-muted" style="font-size:0.8125rem;">Copied to clipboard — replace the placeholder with your key.</span>
+        }
+
+        <h4 style="margin:1.25rem 0 0.35rem;">3. Other MCP clients</h4>
+        <p style="margin-top:0;">Any client that speaks MCP over streamable HTTP works. Generic configuration:</p>
+        <pre style="overflow-x:auto;background:var(--muted);padding:0.6rem 0.8rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.82rem;">{
+  "mcpServers": {
+    "win-smtp-relay": {
+      "type": "http",
+      "url": "@McpUrl",
+      "headers": { "Authorization": "Bearer wsr_YOUR_KEY_HERE" }
+    }
+  }
+}</code></pre>
+    </BbCardContent>
+</BbCard>
+
+<BbCard>
+    <BbCardHeader>
+        <BbCardTitle>Good to know</BbCardTitle>
+    </BbCardHeader>
+    <BbCardContent>
+        <ul style="padding-left:1.25rem;margin:0;">
+            <li><strong>Reachability:</strong> the admin UI binds to loopback by default. To use MCP from another
+                machine, expose the admin port via the installer's network-access option (or a reverse proxy).</li>
+            <li><strong>Certificate:</strong> with the default self-signed certificate most MCP clients refuse the
+                TLS connection. Install a certificate the client machine trusts on the
+                <a href="/settings/certificate">HTTPS Certificate</a> page (or trust the self-signed one on the
+                client).</li>
+            <li><strong>Least privilege:</strong> scopes only ever restrict a key — grant the assistant exactly
+                what it needs, and revoke the key on the <a href="/apikeys">API Keys</a> page to cut access
+                immediately.</li>
+            <li><strong>Accountability:</strong> tool calls run under the key's identity; every mutation lands in
+                the audit trail with the key's name, distinguishable from human admins at a glance.</li>
+        </ul>
+    </BbCardContent>
+</BbCard>
+
+@code {
+    private bool copied;
+
+    private string McpUrl => $"{Nav.BaseUri}mcp";
+
+    private string ClaudeCommand =>
+        $"claude mcp add --transport http win-smtp-relay {McpUrl} --header \"Authorization: Bearer wsr_YOUR_KEY_HERE\"";
+
+    private async Task CopyCommandAsync()
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", ClaudeCommand);
+        copied = true;
+    }
+}

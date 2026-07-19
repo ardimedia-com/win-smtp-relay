@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.AdminApi;
 using WinSmtpRelay.AdminApi.Auth;
+using WinSmtpRelay.AdminApi.Mcp;
 using WinSmtpRelay.AdminUi.Authentication;
 using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Configuration;
@@ -158,6 +159,10 @@ if (adminUiConfig.Enabled)
     // clients/tools discover the AdminApi surface; the endpoints themselves still require an API key.
     builder.Services.AddOpenApi();
 
+    // MCP server (streamable HTTP at /mcp): lets an AI assistant (e.g. Claude Code) troubleshoot and
+    // fix the relay through the same API keys, scopes and audit trail as the REST API.
+    builder.Services.AddRelayMcp();
+
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents(options =>
         {
@@ -239,6 +244,9 @@ if (adminUiConfig.Enabled)
 
     // Admin REST API (authorized inside MapAdminApi; /api/health is anonymous)
     app.MapAdminApi();
+
+    // MCP endpoint (authenticated; per-tool role + scope checks inside the tools)
+    app.MapRelayMcp();
 
     // Machine-readable OpenAPI document for the REST API at /openapi/v1.json (the API shape only — the
     // endpoints still enforce API-key authentication). Point Scalar/Swagger or a client generator at it.
