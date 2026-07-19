@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build69] - 2026-07-19
+
 ### Fixed
 
 - **Creating or editing an API key no longer crashes the page.** The new scope editor passed an unsupported
