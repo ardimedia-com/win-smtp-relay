@@ -210,9 +210,11 @@ else
     {
         using var scope = ScopeFactory.CreateScope();
         var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
-        await queue.UpdateStatusAsync(id, MessageStatus.Queued);
-        await queue.SetRetryAsync(id, 0, DateTimeOffset.UtcNow);
-        statusMessage = $"Message {id} re-queued for delivery";
+        // RequeueAsync (not the raw status/retry plumbing): the admin operation validates the state
+        // transition and audits the action.
+        statusMessage = await queue.RequeueAsync(id)
+            ? $"Message {id} re-queued for delivery"
+            : $"Message {id} is not in a retryable state";
         await RefreshAsync();
     }
 

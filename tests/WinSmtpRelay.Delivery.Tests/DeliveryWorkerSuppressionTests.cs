@@ -55,7 +55,8 @@ public class DeliveryWorkerSuppressionTests
         // A fresh context per scope (like production); the DI container disposes it with the scope, but
         // the shared connection — and therefore the data — survives.
         services.AddScoped<RelayDbContext>(_ => NewContext());
-        services.AddScoped<IMessageQueue>(sp => new MessageQueue(sp.GetRequiredService<RelayDbContext>()));
+        services.AddScoped<IMessageQueue>(sp => new MessageQueue(sp.GetRequiredService<RelayDbContext>(),
+            new CurrentActor(), new AdminAuditService(sp.GetRequiredService<RelayDbContext>())));
         services.AddScoped<ISuppressionService>(sp => new SuppressionService(sp.GetRequiredService<RelayDbContext>()));
         // Seeded DataRetentionSettings (StripBodyOnDelivery=true, ResendRetentionDays=7) drives the
         // body-retention behaviour exercised below.
@@ -102,7 +103,7 @@ public class DeliveryWorkerSuppressionTests
             Status = MessageStatus.Delivering // the poll loop marks Delivering before ProcessMessageAsync
         };
         await using var ctx = NewContext();
-        await new MessageQueue(ctx).EnqueueAsync(msg);
+        await new MessageQueue(ctx, new CurrentActor(), new AdminAuditService(ctx)).EnqueueAsync(msg);
         return msg;
     }
 

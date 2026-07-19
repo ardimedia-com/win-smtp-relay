@@ -23,5 +23,11 @@ public interface IUserService
     Task<RelayUser?> GetByUsernameAsync(string username, int tenantId, CancellationToken cancellationToken = default);
     Task CreateUserAsync(string username, string password, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RelayUser>> GetAllUsersAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Updates a relay user's enablement, SendAs allow-list and rate limits (the mutable,
+    /// non-credential part) — routed through the service so the change is audited.</summary>
+    Task UpdateUserAsync(int userId, bool isEnabled, string? allowedSenderAddresses,
+        int? rateLimitPerMinute, int? rateLimitPerDay, CancellationToken cancellationToken = default);
+
     Task DeleteUserAsync(int userId, CancellationToken cancellationToken = default);
 }

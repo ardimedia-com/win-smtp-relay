@@ -15,7 +15,16 @@ public class AdminAuditEvent
     /// <summary>The admin who performed the action; null for system/anonymous events.</summary>
     public int? ActorUserId { get; set; }
 
-    /// <summary>The actor's email at the time (denormalised so the trail survives account deletion).</summary>
+    /// <summary>
+    /// The API key that performed the action, when the caller authenticated with one (automation,
+    /// MCP) instead of a signed-in admin. Mutually exclusive with <see cref="ActorUserId"/>; both
+    /// null = system/background. Denormalised alongside <see cref="ActorEmail"/> (which then carries
+    /// the key's name) so the trail survives key deletion.
+    /// </summary>
+    public int? ActorApiKeyId { get; set; }
+
+    /// <summary>The actor's email at the time (denormalised so the trail survives account deletion).
+    /// For an API-key actor this is the key's name.</summary>
     public string? ActorEmail { get; set; }
 
     /// <summary>A stable action key (see <c>AdminAuditActions</c>).</summary>

@@ -1,12 +1,18 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class ApiKeyService(RelayDbContext db) : IApiKeyService
+// Key lifecycle is audited at the SERVICE (like the config services): creating or revoking a
+// credential must leave a trace no matter which caller (UI page, API endpoint) performed it.
+public class ApiKeyService(
+    RelayDbContext db,
+    ICurrentActor actor,
+    IAdminAuditService audit) : IApiKeyService
 {
     private const string Prefix = "wsr_";
     private const int PrefixStoreLength = 12; // "wsr_" + 8 chars, enough to narrow lookups
@@ -21,7 +27,7 @@ public class ApiKeyService(RelayDbContext db) : IApiKeyService
     }
 
     public async Task<(ApiKey Key, string Plaintext)> CreateAsync(
-        int? tenantId, string name, string role, DateTimeOffset? expiresUtc, CancellationToken cancellationToken)
+        int? tenantId, string name, string role, string? scopes, DateTimeOffset? expiresUtc, CancellationToken cancellationToken)
     {
         var plaintext = GenerateKey();
         var entity = new ApiKey
@@ -29,6 +35,7 @@ public class ApiKeyService(RelayDbContext db) : IApiKeyService
             TenantId = tenantId,
             Name = name,
             Role = role,
+            Scopes = ApiKeyScopes.Normalize(ApiKeyScopes.Parse(scopes)),
             KeyPrefix = plaintext[..PrefixStoreLength],
             KeyHash = Hash(plaintext),
             IsEnabled = true,
@@ -38,7 +45,23 @@ public class ApiKeyService(RelayDbContext db) : IApiKeyService
 
         db.ApiKeys.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
+        await audit.WriteAsync(AdminAuditActions.ApiKeyCreated, actor, tenantId: entity.TenantId,
+            detail: $"{entity.Name} ({entity.KeyPrefix}…) role={entity.Role} scopes={entity.Scopes ?? "(read-only)"}",
+            ct: cancellationToken);
         return (entity, plaintext);
+    }
+
+    public async Task UpdateScopesAsync(int id, string? scopes, CancellationToken cancellationToken)
+    {
+        var existing = await db.ApiKeys.FirstOrDefaultAsync(k => k.Id == id, cancellationToken);
+        if (existing is null)
+            return;
+
+        existing.Scopes = ApiKeyScopes.Normalize(ApiKeyScopes.Parse(scopes));
+        await db.SaveChangesAsync(cancellationToken);
+        await audit.WriteAsync(AdminAuditActions.ApiKeyUpdated, actor, tenantId: existing.TenantId,
+            detail: $"{existing.Name} ({existing.KeyPrefix}…) scopes={existing.Scopes ?? "(read-only)"}",
+            ct: cancellationToken);
     }
 
     public async Task<ApiKey?> ValidateAsync(string presentedKey, CancellationToken cancellationToken)
@@ -81,7 +104,15 @@ public class ApiKeyService(RelayDbContext db) : IApiKeyService
 
     public async Task DeleteAsync(int id, CancellationToken cancellationToken)
     {
+        // Load-then-delete so the audit row can name the key that was revoked (the row itself is
+        // hard-deleted; the denormalised detail is what survives).
+        var existing = await db.ApiKeys.AsNoTracking().FirstOrDefaultAsync(k => k.Id == id, cancellationToken);
+        if (existing is null)
+            return;
+
         await db.ApiKeys.Where(k => k.Id == id).ExecuteDeleteAsync(cancellationToken);
+        await audit.WriteAsync(AdminAuditActions.ApiKeyDeleted, actor, tenantId: existing.TenantId,
+            detail: $"{existing.Name} ({existing.KeyPrefix}…) role={existing.Role}", ct: cancellationToken);
     }
 
     private static string GenerateKey()

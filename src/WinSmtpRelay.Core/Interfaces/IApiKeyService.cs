@@ -10,9 +10,15 @@ public interface IApiKeyService
     /// <summary>
     /// Creates a key and returns the stored entity plus the one-time plaintext value.
     /// The plaintext is never persisted and cannot be recovered later.
+    /// <paramref name="scopes"/> is the space-separated capability list (see <c>ApiKeyScopes</c>);
+    /// null/empty = read-only.
     /// </summary>
     Task<(ApiKey Key, string Plaintext)> CreateAsync(
-        int? tenantId, string name, string role, DateTimeOffset? expiresUtc, CancellationToken cancellationToken = default);
+        int? tenantId, string name, string role, string? scopes, DateTimeOffset? expiresUtc, CancellationToken cancellationToken = default);
+
+    /// <summary>Replaces a key's capability scopes (null/empty = read-only). The only mutable part of
+    /// a key — name/role/tenant are fixed at creation; anything else means minting a new key.</summary>
+    Task UpdateScopesAsync(int id, string? scopes, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Validates a presented key. Returns the matching enabled, unexpired key (and updates

@@ -10,6 +10,16 @@ public interface IMessageQueue
     Task<QueuedMessage?> GetByIdAsync(long messageId, CancellationToken cancellationToken = default);
     Task<int> GetQueueDepthAsync(CancellationToken cancellationToken = default);
     Task SetRetryAsync(long messageId, int retryCount, DateTimeOffset nextRetryUtc, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Admin operation: re-queues a Failed/Bounced message for immediate delivery (status → Queued,
+    /// retry counter reset) and audits the action. Returns false when the message doesn't exist or is
+    /// not in a retryable state. Distinct from the delivery worker's own status/retry plumbing
+    /// (<see cref="UpdateStatusAsync"/>/<see cref="SetRetryAsync"/>), which is not an admin action.
+    /// </summary>
+    Task<bool> RequeueAsync(long messageId, CancellationToken cancellationToken = default);
+
+    /// <summary>Admin operation: deletes a queued message (metadata AND body) and audits the action.</summary>
     Task DeleteAsync(long messageId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<QueuedMessage>> GetRecentAsync(int maxCount, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<QueuedMessage>> GetNonDeliveredAsync(int maxCount, CancellationToken cancellationToken = default);

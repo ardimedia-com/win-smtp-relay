@@ -1,10 +1,17 @@
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class MessageQueue(RelayDbContext db) : IMessageQueue
+// The admin operations (RequeueAsync/DeleteAsync) are audited at the SERVICE; the delivery worker's
+// own status plumbing is not an admin action and stays unaudited. In SMTP/worker scopes the ambient
+// actor is unset, so any system-initiated call is honestly recorded with a null actor.
+public class MessageQueue(
+    RelayDbContext db,
+    ICurrentActor actor,
+    IAdminAuditService audit) : IMessageQueue
 {
     public async Task<long> EnqueueAsync(QueuedMessage message, CancellationToken cancellationToken = default)
     {
@@ -69,9 +76,44 @@ public class MessageQueue(RelayDbContext db) : IMessageQueue
                 cancellationToken);
     }
 
+    public async Task<bool> RequeueAsync(long messageId, CancellationToken cancellationToken = default)
+    {
+        // Project metadata only — no need to pull the raw body for a status change.
+        var msg = await db.QueuedMessages.AsNoTracking()
+            .Where(m => m.Id == messageId)
+            .Select(m => new { m.Status, m.Sender, m.Recipients, m.TenantId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (msg is null || msg.Status is not (MessageStatus.Failed or MessageStatus.Bounced))
+            return false;
+
+        await db.QueuedMessages
+            .Where(m => m.Id == messageId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(m => m.Status, MessageStatus.Queued)
+                .SetProperty(m => m.LastError, (string?)null)
+                .SetProperty(m => m.CompletedUtc, (DateTimeOffset?)null)
+                .SetProperty(m => m.RetryCount, 0)
+                .SetProperty(m => m.NextRetryUtc, DateTimeOffset.UtcNow),
+                cancellationToken);
+
+        await audit.WriteAsync(AdminAuditActions.QueueMessageRequeued, actor, tenantId: msg.TenantId,
+            detail: $"#{messageId} {msg.Sender} -> {msg.Recipients}", ct: cancellationToken);
+        return true;
+    }
+
     public async Task DeleteAsync(long messageId, CancellationToken cancellationToken = default)
     {
+        // Project metadata only for the audit detail — the body is about to be deleted anyway.
+        var msg = await db.QueuedMessages.AsNoTracking()
+            .Where(m => m.Id == messageId)
+            .Select(m => new { m.Sender, m.Recipients, m.TenantId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (msg is null)
+            return;
+
         await db.QueuedMessages.Where(m => m.Id == messageId).ExecuteDeleteAsync(cancellationToken);
+        await audit.WriteAsync(AdminAuditActions.QueueMessageDeleted, actor, tenantId: msg.TenantId,
+            detail: $"#{messageId} {msg.Sender} -> {msg.Recipients}", ct: cancellationToken);
     }
 
     public async Task<IReadOnlyList<QueuedMessage>> GetRecentAsync(int maxCount, CancellationToken cancellationToken = default)

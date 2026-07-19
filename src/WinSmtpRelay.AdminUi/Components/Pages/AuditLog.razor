@@ -17,8 +17,8 @@
 
 <div class="page-header">
     <h1>Audit Log</h1>
-    <p>Admin- and security-relevant events: account and membership lifecycle, break-glass, and sign-in.
-       Append-only.</p>
+    <p>Admin- and security-relevant events: account and membership lifecycle, break-glass, sign-in, and
+       every configuration mutation — whether performed by a signed-in admin or an API key. Append-only.</p>
 </div>
 
 <div class="search-bar">
@@ -56,7 +56,18 @@
                 <tr>
                     <td><LocalTime Utc="@r.When" Format="yyyy-MM-dd HH:mm:ss" /></td>
                     <td>@Humanize(r.Action)</td>
-                    <td>@(r.Actor ?? "—")</td>
+                    <td>
+                        @if (r.ActorApiKeyId is not null)
+                        {
+                            @* Programmatic actor (automation/MCP) — visibly distinct from a human admin. *@
+                            <span class="badge-status badge-muted" title="Performed with API key #@r.ActorApiKeyId">API key</span>
+                            <span> @(r.Actor ?? $"#{r.ActorApiKeyId}")</span>
+                        }
+                        else
+                        {
+                            @(r.Actor ?? "—")
+                        }
+                    </td>
                     <td>@(r.Target ?? "—")</td>
                     <td>@(r.TenantId?.ToString() ?? "—")</td>
                     <td><span class="text-muted" style="font-size:0.82rem;">@r.Detail</span></td>
@@ -73,7 +84,7 @@
 </table>
 
 @code {
-    private sealed record Row(DateTimeOffset When, string Action, string? Actor, string? Target, int? TenantId, string? Detail);
+    private sealed record Row(DateTimeOffset When, string Action, string? Actor, int? ActorApiKeyId, string? Target, int? TenantId, string? Detail);
 
     private static readonly Dictionary<string, string> KnownActions = new()
     {
@@ -110,6 +121,34 @@
         [AdminAuditActions.RejectionIpAllowed] = "Rejection: IP allowed",
         [AdminAuditActions.RejectionIgnored] = "Rejection ignored",
         [AdminAuditActions.RejectionUnignored] = "Rejection un-ignored",
+        [AdminAuditActions.ReceiveConnectorCreated] = "Receive connector created",
+        [AdminAuditActions.ReceiveConnectorUpdated] = "Receive connector updated",
+        [AdminAuditActions.ReceiveConnectorDeleted] = "Receive connector deleted",
+        [AdminAuditActions.DkimDomainCreated] = "DKIM domain created",
+        [AdminAuditActions.DkimDomainUpdated] = "DKIM domain updated",
+        [AdminAuditActions.DkimDomainDeleted] = "DKIM domain deleted",
+        [AdminAuditActions.RouteCreated] = "Route created",
+        [AdminAuditActions.RouteUpdated] = "Route updated",
+        [AdminAuditActions.RouteDeleted] = "Route deleted",
+        [AdminAuditActions.RateLimitsUpdated] = "Rate limits updated",
+        [AdminAuditActions.HeaderRuleCreated] = "Header rule created",
+        [AdminAuditActions.HeaderRuleUpdated] = "Header rule updated",
+        [AdminAuditActions.HeaderRuleDeleted] = "Header rule deleted",
+        [AdminAuditActions.SenderRuleCreated] = "Sender rule created",
+        [AdminAuditActions.SenderRuleUpdated] = "Sender rule updated",
+        [AdminAuditActions.SenderRuleDeleted] = "Sender rule deleted",
+        [AdminAuditActions.TenantCreated] = "Tenant created",
+        [AdminAuditActions.TenantUpdated] = "Tenant updated",
+        [AdminAuditActions.TenantDeleted] = "Tenant deleted",
+        [AdminAuditActions.TenantPurged] = "Tenant purged (all data)",
+        [AdminAuditActions.RelayUserCreated] = "Relay user created",
+        [AdminAuditActions.RelayUserUpdated] = "Relay user updated",
+        [AdminAuditActions.RelayUserDeleted] = "Relay user deleted",
+        [AdminAuditActions.ApiKeyCreated] = "API key created",
+        [AdminAuditActions.ApiKeyUpdated] = "API key updated",
+        [AdminAuditActions.ApiKeyDeleted] = "API key revoked",
+        [AdminAuditActions.QueueMessageDeleted] = "Queue message deleted",
+        [AdminAuditActions.QueueMessageRequeued] = "Queue message re-queued",
     };
 
     private static string Humanize(string action) => KnownActions.TryGetValue(action, out var label) ? label : action;
@@ -143,7 +182,7 @@
                 .ToDictionaryAsync(u => u.Id, u => u.Email, request.CancellationToken);
 
         var rows = events.Select(e => new Row(
-            e.OccurredUtc, e.Action, e.ActorEmail,
+            e.OccurredUtc, e.Action, e.ActorEmail, e.ActorApiKeyId,
             e.TargetUserId is int tid ? (emails.GetValueOrDefault(tid) ?? $"#{tid}") : null,
             e.TenantId, e.Detail)).ToList();
 

@@ -1,10 +1,17 @@
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class DkimDomainService(RelayDbContext db) : IDkimDomainService
+// Mutations here change how outbound mail is cryptographically signed — audited at the SERVICE so no
+// caller can swap a signing key without leaving a trace. Audit details name domain/selector only,
+// NEVER the private-key material.
+public class DkimDomainService(
+    RelayDbContext db,
+    ICurrentActor actor,
+    IAdminAuditService audit) : IDkimDomainService
 {
     public async Task<IReadOnlyList<DkimDomain>> GetAllAsync(CancellationToken ct = default)
     {
@@ -29,6 +36,8 @@ public class DkimDomainService(RelayDbContext db) : IDkimDomainService
     {
         db.DkimDomains.Add(dkim);
         await db.SaveChangesAsync(ct);
+        await audit.WriteAsync(AdminAuditActions.DkimDomainCreated, actor, tenantId: dkim.TenantId,
+            detail: $"{dkim.Selector}._domainkey.{dkim.Domain}", ct: ct);
         return dkim;
     }
 
@@ -44,10 +53,20 @@ public class DkimDomainService(RelayDbContext db) : IDkimDomainService
         existing.IsEnabled = dkim.IsEnabled;
 
         await db.SaveChangesAsync(ct);
+        await audit.WriteAsync(AdminAuditActions.DkimDomainUpdated, actor, tenantId: existing.TenantId,
+            detail: $"{existing.Selector}._domainkey.{existing.Domain} enabled={existing.IsEnabled}", ct: ct);
     }
 
     public async Task DeleteAsync(int id, CancellationToken ct = default)
     {
-        await db.DkimDomains.Where(d => d.Id == id).ExecuteDeleteAsync(ct);
+        // Load-then-delete so the audit row can name the domain whose signing config was removed.
+        var existing = await db.DkimDomains.FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (existing is null)
+            return;
+
+        db.DkimDomains.Remove(existing);
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync(AdminAuditActions.DkimDomainDeleted, actor, tenantId: existing.TenantId,
+            detail: $"{existing.Selector}._domainkey.{existing.Domain}", ct: ct);
     }
 }

@@ -6,7 +6,16 @@ namespace WinSmtpRelay.Core.Interfaces;
 public interface IAdminAuditService
 {
     Task WriteAsync(string action, int? actorUserId, string? actorEmail,
-        int? targetUserId = null, int? tenantId = null, string? detail = null, CancellationToken ct = default);
+        int? targetUserId = null, int? tenantId = null, string? detail = null,
+        int? actorApiKeyId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Convenience overload taking the ambient actor whole, so a service can never forget one of the
+    /// three actor fields (user id, API key id, display name) when auditing its own mutation.
+    /// </summary>
+    Task WriteAsync(string action, ICurrentActor actor,
+        int? targetUserId = null, int? tenantId = null, string? detail = null, CancellationToken ct = default)
+        => WriteAsync(action, actor.UserId, actor.Email, targetUserId, tenantId, detail, actor.ApiKeyId, ct);
 
     /// <summary>
     /// Returns a page of audit events (newest first) and the total matching count. Optional filters:

@@ -25,6 +25,12 @@ public class ApiKey
     /// <summary>Role granted to callers using this key. One of <see cref="RelayRoles"/>.</summary>
     public string Role { get; set; } = RelayRoles.TenantViewer;
 
+    /// <summary>
+    /// Space-separated capability scopes (see <see cref="ApiKeyScopes"/>) restricting the key within
+    /// its role. Null/empty = read-only (no write scopes, no body access) — owner decision 2026-07-19.
+    /// </summary>
+    public string? Scopes { get; set; }
+
     public bool IsEnabled { get; set; } = true;
 
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;

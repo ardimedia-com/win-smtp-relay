@@ -228,7 +228,7 @@ No administrator is created automatically. On first start, open the admin UI at 
 
 If an older install still carries the legacy seeded `admin@local` account *and it is the only account*, the service removes it on start so a new administrator must be defined through first-run setup. If you ever lose admin access, re-run the installer (Repair) and tick **Reset administrator access**: on the next start all administrator accounts are removed and first-run setup runs again. To expose the admin UI beyond loopback, use the installer's network-access option (also available later via Repair), or change `AdminUi:BindAddress` deliberately / put it behind a reverse proxy. For HTTPS, the admin UI starts with a self-signed certificate; replace it on the **HTTPS Certificate** page by uploading a PFX or picking a certificate from the Windows certificate store (applied immediately, no restart). Alternatively, `AdminUi:CertificatePath` / `AdminUi:CertificatePassword` can point to a PFX on disk.
 
-For automation, create an API key and pass it as `X-Api-Key: <key>` (or `Authorization: Bearer <key>`). Keys are scoped to a tenant and a role.
+For automation, create an API key and pass it as `X-Api-Key: <key>` (or `Authorization: Bearer <key>`). Keys are scoped to a tenant and a role, and additionally carry **capability scopes** (`diag`, `messages`, `queue`, `config`, `admin` — each `:read` or `:write`, plus the dedicated `messages:body` scope for raw mail content). A key without scopes is **read-only**; write access must be granted per area, so an automation or AI-agent key can be limited to exactly what it needs.
 
 ## Responsible operation
 

@@ -10,11 +10,13 @@ namespace WinSmtpRelay.Storage;
 public class CurrentActor : ICurrentActor
 {
     public int? UserId { get; private set; }
+    public int? ApiKeyId { get; private set; }
     public string? Email { get; private set; }
 
-    public void Set(int? userId, string? email)
+    public void Set(int? userId, string? email, int? apiKeyId = null)
     {
         UserId = userId;
         Email = email;
+        ApiKeyId = apiKeyId;
     }
 }

@@ -1,10 +1,16 @@
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class ReceiveConnectorService(RelayDbContext db) : IReceiveConnectorService
+// Mutations here change the host's listening sockets (ports, TLS, auth requirements) — audited at the
+// SERVICE so no caller can change the listener surface without leaving a trace.
+public class ReceiveConnectorService(
+    RelayDbContext db,
+    ICurrentActor actor,
+    IAdminAuditService audit) : IReceiveConnectorService
 {
     public async Task<IReadOnlyList<ReceiveConnector>> GetAllAsync(CancellationToken ct = default)
     {
@@ -20,6 +26,8 @@ public class ReceiveConnectorService(RelayDbContext db) : IReceiveConnectorServi
     {
         db.ReceiveConnectors.Add(connector);
         await db.SaveChangesAsync(ct);
+        await audit.WriteAsync(AdminAuditActions.ReceiveConnectorCreated, actor,
+            detail: $"{connector.Name} {connector.Address}:{connector.Port}", ct: ct);
         return connector;
     }
 
@@ -39,10 +47,20 @@ public class ReceiveConnectorService(RelayDbContext db) : IReceiveConnectorServi
         existing.IsEnabled = connector.IsEnabled;
 
         await db.SaveChangesAsync(ct);
+        await audit.WriteAsync(AdminAuditActions.ReceiveConnectorUpdated, actor,
+            detail: $"{existing.Name} {existing.Address}:{existing.Port}", ct: ct);
     }
 
     public async Task DeleteAsync(int id, CancellationToken ct = default)
     {
-        await db.ReceiveConnectors.Where(c => c.Id == id).ExecuteDeleteAsync(ct);
+        // Load-then-delete so the audit row can name the connector that was removed.
+        var existing = await db.ReceiveConnectors.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (existing is null)
+            return;
+
+        db.ReceiveConnectors.Remove(existing);
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync(AdminAuditActions.ReceiveConnectorDeleted, actor,
+            detail: $"{existing.Name} {existing.Address}:{existing.Port}", ct: ct);
     }
 }

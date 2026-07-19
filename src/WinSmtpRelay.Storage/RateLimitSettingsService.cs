@@ -1,10 +1,17 @@
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class RateLimitSettingsService(RelayDbContext db, IRuntimeConfigCache cache) : IRateLimitSettingsService
+// Rate limits are an abuse-protection control — audited at the SERVICE so weakening them (e.g. before
+// a spam run) always leaves a trace.
+public class RateLimitSettingsService(
+    RelayDbContext db,
+    IRuntimeConfigCache cache,
+    ICurrentActor actor,
+    IAdminAuditService audit) : IRateLimitSettingsService
 {
     public async Task<RateLimitSettings> GetAsync(CancellationToken ct = default)
     {
@@ -34,5 +41,9 @@ public class RateLimitSettingsService(RelayDbContext db, IRuntimeConfigCache cac
 
         // The SMTP hot path caches these settings — refresh so edits take effect immediately.
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.RateLimitsUpdated, actor,
+            detail: $"conn/ip/min={existing.MaxConnectionsPerIpPerMinute} msg/sender/min={existing.MaxMessagesPerSenderPerMinute} "
+                  + $"msg/sender/day={existing.MaxMessagesPerSenderPerDay} ban@{existing.FailedAuthBanThreshold}x/{existing.FailedAuthBanMinutes}min",
+            ct: ct);
     }
 }

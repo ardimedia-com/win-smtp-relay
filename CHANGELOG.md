@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **API keys now carry capability scopes — the admin API is safe to hand to automation and AI agents.**
+  A key used to be exactly its role, so any key that could fix a filter could also purge a tenant. Keys
+  now carry an explicit scope list over five areas (`diag`, `messages`, `queue`, `config`, `admin`),
+  each as `:read` or `:write` (write implies read within its area). Enforcement is a single fail-closed
+  filter on the `/api` group: an endpoint nobody classified is unreachable with an API key, so a future
+  endpoint cannot silently widen a key's power. Cookie-authenticated admins are unaffected — scopes only
+  ever restrict programmatic callers, never extend them. Scopes are editable on the API-key page (the
+  one mutable part of a key); creating at host scope now mints a working host-level key (previously the
+  form could only produce tenant-role keys, which carry no access without a tenant).
+- **Raw message bodies moved behind their own endpoint, policy and scope.** `GET /api/queue/messages/{id}`
+  returned the full stored message — including the raw body, i.e. customer mail content — to any
+  read-only viewer, while the sibling list endpoint was carefully metadata-only. The detail endpoint now
+  returns metadata plus a `HasBody` flag; the body lives at `GET /api/queue/messages/{id}/body`
+  (`message/rfc822`), requires the Admin role explicitly, and an API key additionally needs the
+  dedicated `messages:body` scope, which no other scope implies — so a diagnostics key can never read
+  customer mail.
+- **API-key actions are now attributable in the audit trail.** An API-key caller's audit rows used to
+  collapse to a null actor with only the key's name as text. Audit events now carry an `ActorApiKeyId`
+  (with the key name denormalised so the trail survives key deletion), and the Audit Log page marks
+  such rows with an "API key" badge — an agent-driven config change is distinguishable from a human's
+  at a glance.
+- **Every mutation reachable through an API key now leaves an audit trace** (owner decision 2026-07-19,
+  superseding the narrower "security-relevant only" list of 2026-07-16): tenants (including the
+  destructive purge-all-data delete, previously traceless), receive connectors, DKIM domains, routes,
+  rate limits, header/sender rewrite rules, relay users, queue message delete/re-queue, and the API-key
+  lifecycle itself (create/scope-change/revoke). Audits are written inside the storage services, so UI
+  and API callers are covered alike.
+
+### Changed
+
+- **BREAKING (API):** A key without scopes is **read-only**. Existing keys carry no scopes, so any
+  automation that writes through the API stops working until its key is given the matching `:write`
+  scopes (or is re-minted) on the API-key page. Chosen deliberately over grandfathering: a forgotten
+  all-powerful key is worse than a one-time scope assignment.
+- **BREAKING (API):** `GET /api/queue/messages/{id}` no longer returns `RawMessage`; consumers that
+  need the body fetch `/body` with the new scope. The retry endpoint now validates state via the same
+  audited operation the UI uses.
+
 ## [1.0.0-beta1-build67] - 2026-07-18
 
 ### Changed

@@ -42,6 +42,7 @@ else
                 <BbTableHeaderCell TData="ApiKey">Name</BbTableHeaderCell>
                 <BbTableHeaderCell TData="ApiKey">Prefix</BbTableHeaderCell>
                 <BbTableHeaderCell TData="ApiKey">Role</BbTableHeaderCell>
+                <BbTableHeaderCell TData="ApiKey">Scopes</BbTableHeaderCell>
                 <BbTableHeaderCell TData="ApiKey">Created</BbTableHeaderCell>
                 <BbTableHeaderCell TData="ApiKey">Last used</BbTableHeaderCell>
                 <BbTableHeaderCell TData="ApiKey"></BbTableHeaderCell>
@@ -51,7 +52,7 @@ else
             @if (keys.Count == 0)
             {
                 <BbTableRow TData="ApiKey">
-                    <BbTableCell colspan="6" style="text-align:center;">No API keys</BbTableCell>
+                    <BbTableCell colspan="7" style="text-align:center;">No API keys</BbTableCell>
                 </BbTableRow>
             }
             @foreach (var k in keys)
@@ -60,6 +61,16 @@ else
                     <BbTableCell>@k.Name</BbTableCell>
                     <BbTableCell><span class="mono">@(k.KeyPrefix)…</span></BbTableCell>
                     <BbTableCell>@k.Role</BbTableCell>
+                    <BbTableCell>
+                        @if (string.IsNullOrEmpty(k.Scopes))
+                        {
+                            <span class="badge-status badge-muted">read-only</span>
+                        }
+                        else
+                        {
+                            <span class="mono" style="font-size:0.78rem;">@k.Scopes</span>
+                        }
+                    </BbTableCell>
                     <BbTableCell><LocalTime Utc="@k.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell><LocalTime Utc="@k.LastUsedUtc" /></BbTableCell>
                     <BbTableCell>

@@ -17,8 +17,13 @@ public interface ICurrentActor
     /// <summary>The acting admin's user id, or null when no human is acting (background/system scope).</summary>
     int? UserId { get; }
 
-    /// <summary>The acting admin's sign-in name/email, for the audit row's readable actor column.</summary>
+    /// <summary>The API key acting, when the caller authenticated with one (automation, MCP) instead
+    /// of a signed-in admin. Mutually exclusive with <see cref="UserId"/>.</summary>
+    int? ApiKeyId { get; }
+
+    /// <summary>The acting admin's sign-in name/email (or the API key's name), for the audit row's
+    /// readable actor column.</summary>
     string? Email { get; }
 
-    void Set(int? userId, string? email);
+    void Set(int? userId, string? email, int? apiKeyId = null);
 }

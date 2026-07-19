@@ -1,11 +1,18 @@
 using System.Net;
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITenantService
+// Tenant lifecycle is audited at the SERVICE (purge in particular destroys ALL tenant data) so no
+// caller — UI page, API endpoint, signup flow — can mutate a tenant without leaving a trace.
+public class TenantService(
+    RelayDbContext db,
+    IRuntimeConfigCache cache,
+    ICurrentActor actor,
+    IAdminAuditService audit) : ITenantService
 {
     public async Task<IReadOnlyList<Tenant>> GetAllAsync(CancellationToken cancellationToken = default)
         => await db.Tenants.AsNoTracking().OrderBy(t => t.Id).ToListAsync(cancellationToken);
@@ -32,6 +39,8 @@ public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITena
         db.Tenants.Add(tenant);
         await db.SaveChangesAsync(cancellationToken);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.TenantCreated, actor, tenantId: tenant.Id,
+            detail: $"{tenant.Name} ({tenant.Slug})", ct: cancellationToken);
         return tenant;
     }
 
@@ -52,6 +61,8 @@ public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITena
         // The SMTP/API path caches the enabled-tenant set; refresh it when that changes.
         if (enabledChanged)
             cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.TenantUpdated, actor, tenantId: tenant.Id,
+            detail: $"{tenant.Name} enabled={tenant.IsEnabled}", ct: cancellationToken);
     }
 
     public async Task SetEgressIpAsync(int id, string? egressIp, CancellationToken cancellationToken = default)
@@ -69,6 +80,8 @@ public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITena
 
         // The delivery hot path caches tenant egress IPs — refresh on change.
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.TenantUpdated, actor, tenantId: tenant.Id,
+            detail: $"{tenant.Name} egress IP={normalized ?? "(cleared)"}", ct: cancellationToken);
     }
 
     public async Task DeleteAsync(int id, CancellationToken cancellationToken = default)
@@ -77,8 +90,11 @@ public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITena
             throw new InvalidOperationException("The default tenant cannot be deleted.");
 
         // FK constraints are Restrict, so this throws if the tenant still owns any data.
+        var name = await db.Tenants.AsNoTracking().Where(t => t.Id == id).Select(t => t.Name).FirstOrDefaultAsync(cancellationToken);
         await db.Tenants.Where(t => t.Id == id).ExecuteDeleteAsync(cancellationToken);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.TenantDeleted, actor, tenantId: id,
+            detail: name, ct: cancellationToken);
     }
 
     public async Task PurgeAndDeleteAsync(int id, CancellationToken cancellationToken = default)
@@ -86,7 +102,8 @@ public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITena
         if (id == TenantDefaults.DefaultTenantId)
             throw new InvalidOperationException("The default tenant cannot be deleted.");
 
-        if (!await db.Tenants.AnyAsync(t => t.Id == id, cancellationToken))
+        var purgedName = await db.Tenants.AsNoTracking().Where(t => t.Id == id).Select(t => t.Name).FirstOrDefaultAsync(cancellationToken);
+        if (purgedName is null)
             return;
 
         // Delete every owned row before the tenant (the tenant FKs are Restrict). IgnoreQueryFilters
@@ -126,6 +143,10 @@ public class TenantService(RelayDbContext db, IRuntimeConfigCache cache) : ITena
 
         await tx.CommitAsync(cancellationToken);
         cache.Invalidate();
+        // Audited AFTER the commit: the audit row must not roll back with a failed purge and claim a
+        // destruction that never happened.
+        await audit.WriteAsync(AdminAuditActions.TenantPurged, actor, tenantId: id,
+            detail: $"{purgedName} (all tenant data destroyed)", ct: cancellationToken);
     }
 
     public static string NormalizeSlug(string slug)

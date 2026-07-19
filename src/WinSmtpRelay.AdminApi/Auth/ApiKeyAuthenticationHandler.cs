@@ -35,7 +35,14 @@ public class ApiKeyAuthenticationHandler(
         {
             new(ClaimTypes.NameIdentifier, $"apikey:{key.Id}"),
             new(ClaimTypes.Name, string.IsNullOrEmpty(key.Name) ? $"apikey:{key.Id}" : key.Name),
+            // Numeric key id for audit attribution (ActorContextResolver) — the NameIdentifier above
+            // is deliberately non-numeric so a key can never be mistaken for an admin user id.
+            new(RelayClaimTypes.ApiKeyId, key.Id.ToString()),
         };
+        // Capability scopes restrict the key within its role (checked by the /api scope filter).
+        // Absent/empty = read-only. Cookie principals never carry this claim.
+        if (!string.IsNullOrWhiteSpace(key.Scopes))
+            claims.Add(new Claim(RelayClaimTypes.ApiKeyScopes, key.Scopes));
         if (key.Role == RelayRoles.HostAdmin)
         {
             // A host-role key is host-scoped (no active tenant) — host-level administration.

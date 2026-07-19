@@ -20,7 +20,7 @@ public class MessageQueueStorageTests
         _db = new RelayDbContext(options, new CurrentTenant());
         _db.Database.OpenConnection();
         _db.Database.EnsureCreated();
-        _queue = new MessageQueue(_db);
+        _queue = new MessageQueue(_db, new CurrentActor(), new AdminAuditService(_db));
     }
 
     [TestCleanup]

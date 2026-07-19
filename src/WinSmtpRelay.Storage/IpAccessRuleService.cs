@@ -26,7 +26,7 @@ public class IpAccessRuleService(
         // IP rules are read on the SMTP hot path (relay access + strict tenant binding); refresh the
         // cache here so no caller (UI, API, or background) can forget to and leave stale policy live.
         cache.Invalidate();
-        await audit.WriteAsync(AdminAuditActions.IpRuleCreated, actor.UserId, actor.Email,
+        await audit.WriteAsync(AdminAuditActions.IpRuleCreated, actor,
             tenantId: rule.TenantId, detail: $"{rule.Action} {rule.Network}", ct: ct);
         return rule;
     }
@@ -43,7 +43,7 @@ public class IpAccessRuleService(
 
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
-        await audit.WriteAsync(AdminAuditActions.IpRuleUpdated, actor.UserId, actor.Email,
+        await audit.WriteAsync(AdminAuditActions.IpRuleUpdated, actor,
             tenantId: existing.TenantId, detail: $"{existing.Action} {existing.Network}", ct: ct);
     }
 
@@ -57,7 +57,7 @@ public class IpAccessRuleService(
         db.IpAccessRules.Remove(existing);
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
-        await audit.WriteAsync(AdminAuditActions.IpRuleDeleted, actor.UserId, actor.Email,
+        await audit.WriteAsync(AdminAuditActions.IpRuleDeleted, actor,
             tenantId: existing.TenantId, detail: $"{existing.Action} {existing.Network}", ct: ct);
     }
 }

@@ -36,7 +36,7 @@ public class SendConnectorService(
         db.SendConnectors.Add(connector);
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
-        await audit.WriteAsync(AdminAuditActions.SendConnectorCreated, actor.UserId, actor.Email,
+        await audit.WriteAsync(AdminAuditActions.SendConnectorCreated, actor,
             tenantId: connector.TenantId, detail: $"{connector.Name} -> {connector.SmartHost}", ct: ct);
         return connector;
     }
@@ -62,7 +62,7 @@ public class SendConnectorService(
 
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
-        await audit.WriteAsync(AdminAuditActions.SendConnectorUpdated, actor.UserId, actor.Email,
+        await audit.WriteAsync(AdminAuditActions.SendConnectorUpdated, actor,
             tenantId: existing.TenantId, detail: $"{existing.Name} -> {existing.SmartHost}", ct: ct);
     }
 
@@ -76,7 +76,7 @@ public class SendConnectorService(
         db.SendConnectors.Remove(existing);
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
-        await audit.WriteAsync(AdminAuditActions.SendConnectorDeleted, actor.UserId, actor.Email,
+        await audit.WriteAsync(AdminAuditActions.SendConnectorDeleted, actor,
             tenantId: existing.TenantId, detail: $"{existing.Name} -> {existing.SmartHost}", ct: ct);
     }
 }

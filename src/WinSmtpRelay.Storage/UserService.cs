@@ -1,10 +1,16 @@
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.Storage;
 
-public class UserService(RelayDbContext db) : IUserService
+// Relay-user lifecycle (SMTP credentials, SendAs allow-list, rate limits) is audited at the SERVICE
+// so no caller can mint or alter a sending credential without leaving a trace.
+public class UserService(
+    RelayDbContext db,
+    ICurrentActor actor,
+    IAdminAuditService audit) : IUserService
 {
     public async Task<bool> ValidateCredentialsAsync(string username, string password, CancellationToken cancellationToken = default)
         => await ValidateAndGetAsync(username, password, cancellationToken) is not null;
@@ -42,13 +48,16 @@ public class UserService(RelayDbContext db) : IUserService
     {
         var hash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
 
-        db.RelayUsers.Add(new RelayUser
+        var user = new RelayUser
         {
             Username = username,
             PasswordHash = hash
-        });
+        };
+        db.RelayUsers.Add(user);
 
         await db.SaveChangesAsync(cancellationToken);
+        await audit.WriteAsync(AdminAuditActions.RelayUserCreated, actor, tenantId: user.TenantId,
+            detail: username, ct: cancellationToken);
     }
 
     public async Task<IReadOnlyList<RelayUser>> GetAllUsersAsync(CancellationToken cancellationToken = default)
@@ -56,8 +65,32 @@ public class UserService(RelayDbContext db) : IUserService
         return await db.RelayUsers.AsNoTracking().ToListAsync(cancellationToken);
     }
 
+    public async Task UpdateUserAsync(int userId, bool isEnabled, string? allowedSenderAddresses,
+        int? rateLimitPerMinute, int? rateLimitPerDay, CancellationToken cancellationToken = default)
+    {
+        var user = await db.RelayUsers.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        if (user is null)
+            return;
+
+        user.IsEnabled = isEnabled;
+        user.AllowedSenderAddresses = allowedSenderAddresses;
+        user.RateLimitPerMinute = rateLimitPerMinute;
+        user.RateLimitPerDay = rateLimitPerDay;
+
+        await db.SaveChangesAsync(cancellationToken);
+        await audit.WriteAsync(AdminAuditActions.RelayUserUpdated, actor, tenantId: user.TenantId,
+            detail: $"{user.Username} enabled={user.IsEnabled}", ct: cancellationToken);
+    }
+
     public async Task DeleteUserAsync(int userId, CancellationToken cancellationToken = default)
     {
+        // Load-then-delete so the audit row can name the user that was removed.
+        var user = await db.RelayUsers.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        if (user is null)
+            return;
+
         await db.RelayUsers.Where(u => u.Id == userId).ExecuteDeleteAsync(cancellationToken);
+        await audit.WriteAsync(AdminAuditActions.RelayUserDeleted, actor, tenantId: user.TenantId,
+            detail: user.Username, ct: cancellationToken);
     }
 }

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.AdminApi.Auth;
 using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -28,6 +29,11 @@ public static class AdminEndpoints
             if (methods is { Count: > 0 } && methods.All(m => m is not ("GET" or "HEAD")))
                 builder.Metadata.Add(new AuthorizeAttribute(AuthorizationPolicies.AdminFull));
         });
+
+        // API-key capability scopes: an additional restriction for programmatic callers, layered on
+        // top of the role policies. Each subgroup below declares its ApiKeyScopes area via
+        // ApiScopeMetadata; the filter fails closed for unclassified endpoints.
+        group.AddEndpointFilter(ApiKeyScopeFilter.InvokeAsync);
 
         MapHealthEndpoints(group);
         MapMetricsEndpoints(group);
@@ -85,7 +91,7 @@ public static class AdminEndpoints
                     ThreadCount = process.Threads.Count
                 }
             });
-        });
+        }).WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Diag));
     }
 
     private static void MapQueueEndpoints(RouteGroupBuilder group)
@@ -96,7 +102,7 @@ public static class AdminEndpoints
         {
             var depth = await q.GetQueueDepthAsync(ct);
             return Results.Ok(new QueueStatusResponse(depth));
-        });
+        }).WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Diag));
 
         queue.MapGet("/messages", async (IMessageQueue q, CancellationToken ct,
             int limit = 50) =>
@@ -105,38 +111,61 @@ public static class AdminEndpoints
             return Results.Ok(messages.Select(m => new MessageSummary(
                 m.Id, m.MessageId, m.Sender, m.Recipients, m.SizeBytes,
                 m.Status, m.RetryCount, m.LastError, m.CreatedUtc, m.NextRetryUtc, m.CompletedUtc)));
-        });
+        }).WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Messages));
 
-        queue.MapGet("/messages/{id:long}", async (long id, IMessageQueue q, CancellationToken ct) =>
+        // Metadata only — like the list endpoint. The raw body (customer mail content) is deliberately
+        // NOT part of this response; it lives behind /body below with its own policy + scope.
+        queue.MapGet("/messages/{id:long}", async (long id, RelayDbContext db, CancellationToken ct) =>
         {
-            var msg = await q.GetByIdAsync(id, ct);
-            return msg is null ? Results.NotFound() : Results.Ok(msg);
-        });
+            var detail = await db.QueuedMessages.AsNoTracking()
+                .Where(m => m.Id == id)
+                // EF/SQLite cannot translate byte[].Length — compare against the empty blob instead.
+                .Select(m => new MessageDetailResponse(
+                    m.Id, m.MessageId, m.Sender, m.Recipients, m.SizeBytes,
+                    m.Status, m.RetryCount, m.LastError, m.CreatedUtc, m.NextRetryUtc, m.CompletedUtc,
+                    m.SourceIp, m.AuthenticatedUser, m.DeliveredRecipients,
+                    m.RawMessage != Array.Empty<byte>()))
+                .FirstOrDefaultAsync(ct);
+            return detail is null ? Results.NotFound() : Results.Ok(detail);
+        }).WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Messages));
 
-        queue.MapPost("/messages/{id:long}/retry", async (long id, IMessageQueue q, CancellationToken ct) =>
+        // The raw message body is the most sensitive data the relay holds (customer mail content).
+        // AdminFull is required explicitly — the group convention only elevates non-GET endpoints —
+        // and an API key additionally needs the explicit messages:body scope (never implied).
+        queue.MapGet("/messages/{id:long}/body", async (long id, RelayDbContext db, CancellationToken ct) =>
         {
-            var msg = await q.GetByIdAsync(id, ct);
-            if (msg is null) return Results.NotFound();
-            if (msg.Status is not (MessageStatus.Failed or MessageStatus.Bounced))
-                return Results.BadRequest(new { Error = "Only failed or bounced messages can be retried" });
+            var body = await db.QueuedMessages.AsNoTracking()
+                .Where(m => m.Id == id)
+                .Select(m => m.RawMessage)
+                .FirstOrDefaultAsync(ct);
+            return body is null or { Length: 0 }
+                ? Results.NotFound()
+                : Results.Bytes(body, "message/rfc822");
+        })
+        .RequireAuthorization(AuthorizationPolicies.AdminFull)
+        .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Messages, explicitScope: ApiKeyScopes.MessagesBody));
 
-            await q.UpdateStatusAsync(id, MessageStatus.Queued, null, ct);
-            await q.SetRetryAsync(id, 0, DateTimeOffset.UtcNow, ct);
-            return Results.Ok(new { Message = "Message re-queued for delivery" });
-        });
-
-        queue.MapDelete("/messages/{id:long}", async (long id, IMessageQueue q, CancellationToken ct) =>
+        queue.MapPost("/messages/{id:long}/retry", async (long id, IMessageQueue q, RelayDbContext db, CancellationToken ct) =>
         {
-            var msg = await q.GetByIdAsync(id, ct);
-            if (msg is null) return Results.NotFound();
+            if (!await db.QueuedMessages.AsNoTracking().AnyAsync(m => m.Id == id, ct))
+                return Results.NotFound();
+            return await q.RequeueAsync(id, ct)
+                ? Results.Ok(new { Message = "Message re-queued for delivery" })
+                : Results.BadRequest(new { Error = "Only failed or bounced messages can be retried" });
+        }).WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Queue));
+
+        queue.MapDelete("/messages/{id:long}", async (long id, IMessageQueue q, RelayDbContext db, CancellationToken ct) =>
+        {
+            if (!await db.QueuedMessages.AsNoTracking().AnyAsync(m => m.Id == id, ct))
+                return Results.NotFound();
             await q.DeleteAsync(id, ct);
             return Results.Ok(new { Message = "Message deleted" });
-        });
+        }).WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Queue));
     }
 
     private static void MapUserEndpoints(RouteGroupBuilder group)
     {
-        var users = group.MapGroup("/users");
+        var users = group.MapGroup("/users").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Admin));
 
         users.MapGet("/", async (IUserService svc, CancellationToken ct) =>
         {
@@ -156,16 +185,14 @@ public static class AdminEndpoints
             return Results.Created($"/api/users/{req.Username}", new { Message = "User created" });
         });
 
-        users.MapPut("/{id:int}", async (int id, UpdateUserRequest req, RelayDbContext db, CancellationToken ct) =>
+        users.MapPut("/{id:int}", async (int id, UpdateUserRequest req, IUserService svc, RelayDbContext db, CancellationToken ct) =>
         {
-            var user = await db.RelayUsers.FirstOrDefaultAsync(u => u.Id == id, ct);
-            if (user is null) return Results.NotFound();
+            if (!await db.RelayUsers.AsNoTracking().AnyAsync(u => u.Id == id, ct))
+                return Results.NotFound();
 
-            user.AllowedSenderAddresses = req.AllowedSenderAddresses;
-            user.RateLimitPerMinute = req.RateLimitPerMinute;
-            user.RateLimitPerDay = req.RateLimitPerDay;
-            user.IsEnabled = req.IsEnabled;
-            await db.SaveChangesAsync(ct);
+            // Through the service (not raw DbContext) so the mutation is audited at the source.
+            await svc.UpdateUserAsync(id, req.IsEnabled, req.AllowedSenderAddresses,
+                req.RateLimitPerMinute, req.RateLimitPerDay, ct);
 
             return Results.Ok(new { Message = "User updated" });
         });
@@ -194,12 +221,13 @@ public static class AdminEndpoints
                 DnsRecord = $"{req.Selector}._domainkey.{req.Domain}",
                 DnsTxtValue = dnsTxt
             });
-        }).RequireAuthorization(AuthorizationPolicies.HostAdmin);
+        }).RequireAuthorization(AuthorizationPolicies.HostAdmin)
+          .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
     }
 
     private static void MapDeliveryLogEndpoints(RouteGroupBuilder group)
     {
-        var logs = group.MapGroup("/deliverylogs");
+        var logs = group.MapGroup("/deliverylogs").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Diag));
 
         logs.MapGet("/", async (RelayDbContext db, CancellationToken ct,
             long? messageId = null, int limit = 50, int offset = 0) =>
@@ -243,12 +271,13 @@ public static class AdminEndpoints
                 OS = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
                 StartedUtc = System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()
             });
-        });
+        }).WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Diag));
     }
     private static void MapTenantEndpoints(RouteGroupBuilder group)
     {
         // Tenant administration is host-only (in addition to the group's baseline authorization).
-        var ep = group.MapGroup("/tenants").RequireAuthorization(AuthorizationPolicies.HostAdmin);
+        var ep = group.MapGroup("/tenants").RequireAuthorization(AuthorizationPolicies.HostAdmin)
+            .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Admin));
 
         ep.MapGet("/", async (ITenantService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
@@ -290,20 +319,23 @@ public static class AdminEndpoints
     private static void MapApiKeyEndpoints(RouteGroupBuilder group)
     {
         // API keys are sensitive — require AdminFull for the whole subgroup (incl. listing).
-        var ep = group.MapGroup("/apikeys").RequireAuthorization(AuthorizationPolicies.AdminFull);
+        var ep = group.MapGroup("/apikeys").RequireAuthorization(AuthorizationPolicies.AdminFull)
+            .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Admin));
 
         ep.MapGet("/", async (IApiKeyService svc, ICurrentTenant tenant, CancellationToken ct) =>
         {
             int? tenantId = tenant.FilterEnabled ? tenant.FilterTenantId : null;
             var keys = await svc.GetAllAsync(tenantId, ct);
             return Results.Ok(keys.Select(k => new ApiKeySummary(
-                k.Id, k.TenantId, k.Name, k.KeyPrefix, k.Role, k.IsEnabled, k.CreatedUtc, k.ExpiresUtc, k.LastUsedUtc)));
+                k.Id, k.TenantId, k.Name, k.KeyPrefix, k.Role, k.Scopes, k.IsEnabled, k.CreatedUtc, k.ExpiresUtc, k.LastUsedUtc)));
         });
 
         ep.MapPost("/", async (CreateApiKeyRequest req, IApiKeyService svc, ICurrentTenant tenant, CancellationToken ct) =>
         {
             if (!RelayRoles.All.Contains(req.Role))
                 return Results.BadRequest(new { Error = "Invalid role" });
+            if (ValidateScopes(req.Scopes) is { } scopeError)
+                return Results.BadRequest(new { Error = scopeError });
 
             int? tenantId;
             if (tenant.FilterEnabled)
@@ -318,8 +350,25 @@ public static class AdminEndpoints
                 tenantId = req.TenantId; // host scope: null = host-level key, or a chosen tenant
             }
 
-            var (key, plaintext) = await svc.CreateAsync(tenantId, req.Name, req.Role, req.ExpiresUtc, ct);
-            return Results.Ok(new CreatedApiKeyResponse(key.Id, key.Name, key.KeyPrefix, key.Role, key.TenantId, plaintext));
+            var (key, plaintext) = await svc.CreateAsync(tenantId, req.Name, req.Role, req.Scopes, req.ExpiresUtc, ct);
+            return Results.Ok(new CreatedApiKeyResponse(key.Id, key.Name, key.KeyPrefix, key.Role, key.Scopes, key.TenantId, plaintext));
+        });
+
+        // Scopes are the only mutable part of a key (see IApiKeyService.UpdateScopesAsync).
+        ep.MapPut("/{id:int}", async (int id, UpdateApiKeyRequest req, IApiKeyService svc, ICurrentTenant tenant, RelayDbContext db, CancellationToken ct) =>
+        {
+            if (ValidateScopes(req.Scopes) is { } scopeError)
+                return Results.BadRequest(new { Error = scopeError });
+
+            var key = await db.ApiKeys.AsNoTracking().FirstOrDefaultAsync(k => k.Id == id, ct);
+            if (key is null)
+                return Results.NotFound();
+            // Out-of-scope keys are invisible to a tenant-scoped admin.
+            if (tenant.FilterEnabled && key.TenantId != tenant.FilterTenantId)
+                return Results.NotFound();
+
+            await svc.UpdateScopesAsync(id, req.Scopes, ct);
+            return Results.Ok(new { Message = "API key scopes updated" });
         });
 
         ep.MapDelete("/{id:int}", async (int id, IApiKeyService svc, ICurrentTenant tenant, RelayDbContext db, CancellationToken ct) =>
@@ -338,7 +387,7 @@ public static class AdminEndpoints
 
     private static void MapStatisticsEndpoints(RouteGroupBuilder group)
     {
-        var stats = group.MapGroup("/statistics");
+        var stats = group.MapGroup("/statistics").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Diag));
 
         stats.MapGet("/live", async (IStatisticsService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetLiveStatisticsAsync(ct)));
@@ -356,7 +405,8 @@ public static class AdminEndpoints
     private static void MapReceiveConnectorEndpoints(RouteGroupBuilder group)
     {
         // Receive connectors define the host's listening sockets — host-level infrastructure.
-        var ep = group.MapGroup("/connectors/receive").RequireAuthorization(AuthorizationPolicies.HostAdmin);
+        var ep = group.MapGroup("/connectors/receive").RequireAuthorization(AuthorizationPolicies.HostAdmin)
+            .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         ep.MapGet("/", async (IReceiveConnectorService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
@@ -383,7 +433,7 @@ public static class AdminEndpoints
 
     private static void MapAcceptedDomainEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/domains/accepted");
+        var ep = group.MapGroup("/domains/accepted").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         ep.MapGet("/", async (IAcceptedDomainService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
@@ -407,7 +457,7 @@ public static class AdminEndpoints
 
     private static void MapAcceptedSenderDomainEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/domains/accepted-sender");
+        var ep = group.MapGroup("/domains/accepted-sender").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         ep.MapGet("/", async (IAcceptedSenderDomainService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
@@ -431,7 +481,7 @@ public static class AdminEndpoints
 
     private static void MapIpAccessRuleEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/ip-rules");
+        var ep = group.MapGroup("/ip-rules").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         ep.MapGet("/", async (IIpAccessRuleService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
@@ -461,7 +511,7 @@ public static class AdminEndpoints
 
     private static void MapSendConnectorEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/connectors/send");
+        var ep = group.MapGroup("/connectors/send").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         ep.MapGet("/", async (ISendConnectorService svc, CancellationToken ct) =>
             Results.Ok((await svc.GetAllAsync(ct)).Select(SendConnectorSummary.From)));
@@ -491,7 +541,7 @@ public static class AdminEndpoints
 
     private static void MapDomainRouteEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/routes");
+        var ep = group.MapGroup("/routes").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         ep.MapGet("/", async (IDomainRouteService svc, CancellationToken ct) =>
             Results.Ok((await svc.GetAllAsync(ct)).Select(DomainRouteSummary.From)));
@@ -523,7 +573,8 @@ public static class AdminEndpoints
     {
         // PrivateKeyPath is an arbitrary host-filesystem path, so per-tenant admins must not manage it
         // (it would let them probe server files or reference another tenant's key) — host admins only.
-        var ep = group.MapGroup("/dkim/domains").RequireAuthorization(AuthorizationPolicies.HostAdmin);
+        var ep = group.MapGroup("/dkim/domains").RequireAuthorization(AuthorizationPolicies.HostAdmin)
+            .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         // The list never returns key material (PrivateKeyPem / PrivateKeyPath): the private key is the only
         // DKIM secret and must not leak over the wire. Project to a summary DTO that exposes only whether a
@@ -558,7 +609,7 @@ public static class AdminEndpoints
 
     private static void MapRateLimitEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/rate-limits");
+        var ep = group.MapGroup("/rate-limits").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         ep.MapGet("/", async (IRateLimitSettingsService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAsync(ct)));
@@ -572,7 +623,7 @@ public static class AdminEndpoints
 
     private static void MapMessageFilterEndpoints(RouteGroupBuilder group)
     {
-        var headers = group.MapGroup("/filters/headers");
+        var headers = group.MapGroup("/filters/headers").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         headers.MapGet("/", async (IMessageFilterService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetHeaderRulesAsync(ct)));
@@ -599,7 +650,7 @@ public static class AdminEndpoints
             return Results.Ok(new { Message = "Header rewrite rule deleted" });
         });
 
-        var senders = group.MapGroup("/filters/senders");
+        var senders = group.MapGroup("/filters/senders").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         senders.MapGet("/", async (IMessageFilterService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetSenderRulesAsync(ct)));
@@ -626,6 +677,17 @@ public static class AdminEndpoints
             return Results.Ok(new { Message = "Sender rewrite rule deleted" });
         });
     }
+
+    /// <summary>Returns an error message when the requested scope string contains an unknown token, or
+    /// null when it is acceptable (null/empty = read-only is always acceptable).</summary>
+    private static string? ValidateScopes(string? scopes)
+    {
+        var unknown = ApiKeyScopes.Parse(scopes).Where(s => !ApiKeyScopes.IsKnown(s)).ToList();
+        return unknown.Count == 0
+            ? null
+            : $"Unknown scope(s): {string.Join(", ", unknown)}. Valid: "
+              + string.Join(", ", ApiKeyScopes.Areas.SelectMany(a => new[] { ApiKeyScopes.Read(a), ApiKeyScopes.Write(a) }).Append(ApiKeyScopes.MessagesBody));
+    }
 }
 
 public record QueueStatusResponse(int Depth);
@@ -634,6 +696,17 @@ public record MessageSummary(
     long Id, string MessageId, string Sender, string Recipients, int SizeBytes,
     MessageStatus Status, int RetryCount, string? LastError,
     DateTimeOffset CreatedUtc, DateTimeOffset? NextRetryUtc, DateTimeOffset? CompletedUtc);
+
+/// <summary>
+/// Metadata-only projection for the message detail endpoint. Deliberately omits the raw body
+/// (customer mail content) — that lives behind <c>/messages/{id}/body</c> with AdminFull + the
+/// explicit <c>messages:body</c> API-key scope; <see cref="HasBody"/> only signals its existence.
+/// </summary>
+public record MessageDetailResponse(
+    long Id, string MessageId, string Sender, string Recipients, int SizeBytes,
+    MessageStatus Status, int RetryCount, string? LastError,
+    DateTimeOffset CreatedUtc, DateTimeOffset? NextRetryUtc, DateTimeOffset? CompletedUtc,
+    string? SourceIp, string? AuthenticatedUser, string? DeliveredRecipients, bool HasBody);
 
 public record UserSummary(
     int Id, string Username, bool IsEnabled, string? AllowedSenderAddresses,
@@ -701,7 +774,9 @@ public record CreateTenantRequest(string Name, string Slug);
 public record UpdateTenantRequest(string Name, bool IsEnabled);
 
 public record ApiKeySummary(
-    int Id, int? TenantId, string Name, string KeyPrefix, string Role,
+    int Id, int? TenantId, string Name, string KeyPrefix, string Role, string? Scopes,
     bool IsEnabled, DateTimeOffset CreatedUtc, DateTimeOffset? ExpiresUtc, DateTimeOffset? LastUsedUtc);
-public record CreateApiKeyRequest(string Name, string Role, int? TenantId, DateTimeOffset? ExpiresUtc);
-public record CreatedApiKeyResponse(int Id, string Name, string KeyPrefix, string Role, int? TenantId, string Key);
+/// <summary>Scopes: space-separated (see <c>ApiKeyScopes</c>); null/empty = read-only.</summary>
+public record CreateApiKeyRequest(string Name, string Role, int? TenantId, DateTimeOffset? ExpiresUtc, string? Scopes = null);
+public record UpdateApiKeyRequest(string? Scopes);
+public record CreatedApiKeyResponse(int Id, string Name, string KeyPrefix, string Role, string? Scopes, int? TenantId, string Key);

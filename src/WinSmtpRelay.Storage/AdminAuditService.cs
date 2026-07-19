@@ -9,13 +9,15 @@ namespace WinSmtpRelay.Storage;
 public class AdminAuditService(RelayDbContext db) : IAdminAuditService
 {
     public async Task WriteAsync(string action, int? actorUserId, string? actorEmail,
-        int? targetUserId = null, int? tenantId = null, string? detail = null, CancellationToken ct = default)
+        int? targetUserId = null, int? tenantId = null, string? detail = null,
+        int? actorApiKeyId = null, CancellationToken ct = default)
     {
         db.AdminAuditEvents.Add(new AdminAuditEvent
         {
             OccurredUtc = DateTimeOffset.UtcNow,
             Action = action,
             ActorUserId = actorUserId,
+            ActorApiKeyId = actorApiKeyId,
             ActorEmail = actorEmail,
             TargetUserId = targetUserId,
             TenantId = tenantId,

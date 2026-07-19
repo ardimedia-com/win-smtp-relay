@@ -25,4 +25,12 @@ public static class RelayClaimTypes
 
     /// <summary>For a host admin: the tenant they are currently viewing/acting within (the switcher selection). Absent = all tenants.</summary>
     public const string ActiveTenant = "active_tenant";
+
+    /// <summary>The numeric id of the API key the caller authenticated with (API-key scheme only) —
+    /// the audit trail's actor for programmatic callers.</summary>
+    public const string ApiKeyId = "api_key_id";
+
+    /// <summary>The API key's space-separated capability scopes (see <c>ApiKeyScopes</c>). Absent or
+    /// empty = read-only. Only ever emitted by the API-key scheme; cookie principals carry no scopes.</summary>
+    public const string ApiKeyScopes = "api_key_scopes";
 }

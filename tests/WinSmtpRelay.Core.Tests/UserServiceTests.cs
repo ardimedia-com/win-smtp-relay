@@ -19,7 +19,7 @@ public class UserServiceTests
         _db = new RelayDbContext(options, new CurrentTenant());
         _db.Database.OpenConnection();
         _db.Database.EnsureCreated();
-        _sut = new UserService(_db);
+        _sut = new UserService(_db, new CurrentActor(), new AdminAuditService(_db));
     }
 
     [TestCleanup]

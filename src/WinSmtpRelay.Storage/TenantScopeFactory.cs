@@ -29,7 +29,7 @@ public class TenantScopeFactory(
         else if (current.TenantId is { } id)
             child.SetTenant(id);
 
-        scope.ServiceProvider.GetRequiredService<ICurrentActor>().Set(currentActor.UserId, currentActor.Email);
+        scope.ServiceProvider.GetRequiredService<ICurrentActor>().Set(currentActor.UserId, currentActor.Email, currentActor.ApiKeyId);
         return scope;
     }
 }

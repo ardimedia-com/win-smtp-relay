@@ -414,7 +414,7 @@ else
     private async Task AuditAsync(IServiceScope scope, string action, RejectedSubmission row, string detail)
     {
         await scope.ServiceProvider.GetRequiredService<IAdminAuditService>()
-            .WriteAsync(action, CurrentActor.UserId, CurrentActor.Email, tenantId: row.TenantId, detail: detail);
+            .WriteAsync(action, CurrentActor, tenantId: row.TenantId, detail: detail);
     }
 
     private async Task UnignoreAsync(RejectedSubmission row)

@@ -36,7 +36,7 @@ public class AcceptedDomainService(
         db.AcceptedDomains.Add(entry);
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
-        await audit.WriteAsync(AdminAuditActions.RecipientDomainCreated, actor.UserId, actor.Email,
+        await audit.WriteAsync(AdminAuditActions.RecipientDomainCreated, actor,
             tenantId: entry.TenantId, detail: entry.Domain, ct: ct);
         return entry;
     }
@@ -50,7 +50,7 @@ public class AcceptedDomainService(
         entry.VerifiedUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
-        await audit.WriteAsync(AdminAuditActions.RecipientDomainVerified, actor.UserId, actor.Email,
+        await audit.WriteAsync(AdminAuditActions.RecipientDomainVerified, actor,
             tenantId: entry.TenantId, detail: entry.Domain, ct: ct);
     }
 
@@ -64,7 +64,7 @@ public class AcceptedDomainService(
         db.AcceptedDomains.Remove(entry);
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
-        await audit.WriteAsync(AdminAuditActions.RecipientDomainDeleted, actor.UserId, actor.Email,
+        await audit.WriteAsync(AdminAuditActions.RecipientDomainDeleted, actor,
             tenantId: entry.TenantId, detail: entry.Domain, ct: ct);
     }
 

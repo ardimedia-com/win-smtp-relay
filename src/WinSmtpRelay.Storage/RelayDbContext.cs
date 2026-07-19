@@ -102,6 +102,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.Property(e => e.KeyPrefix).HasMaxLength(16);
             entity.Property(e => e.KeyHash).HasMaxLength(64);
             entity.Property(e => e.Role).HasMaxLength(50);
+            entity.Property(e => e.Scopes).HasMaxLength(256);
         });
 
         modelBuilder.Entity<Identity.AdminUser>(entity =>

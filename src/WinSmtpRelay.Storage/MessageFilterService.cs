@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
@@ -7,7 +8,13 @@ namespace WinSmtpRelay.Storage;
 // The cache serves this data on the SMTP hot path; invalidating HERE (not in each caller) means no
 // caller — UI page, API endpoint, or background job — can forget to and leave stale policy live for
 // up to the cache lifetime. Same convention as IpAccessRuleService.
-public class MessageFilterService(RelayDbContext db, IRuntimeConfigCache cache) : IMessageFilterService
+// Rewrite rules silently alter mail in transit — audited at the SERVICE so no caller can plant or
+// remove a rewrite without leaving a trace.
+public class MessageFilterService(
+    RelayDbContext db,
+    IRuntimeConfigCache cache,
+    ICurrentActor actor,
+    IAdminAuditService audit) : IMessageFilterService
 {
     // Header rewrites
 
@@ -21,6 +28,8 @@ public class MessageFilterService(RelayDbContext db, IRuntimeConfigCache cache) 
         db.HeaderRewriteEntries.Add(rule);
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.HeaderRuleCreated, actor, tenantId: rule.TenantId,
+            detail: $"{rule.Action} {rule.HeaderName}", ct: ct);
         return rule;
     }
 
@@ -38,12 +47,21 @@ public class MessageFilterService(RelayDbContext db, IRuntimeConfigCache cache) 
 
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.HeaderRuleUpdated, actor, tenantId: existing.TenantId,
+            detail: $"{existing.Action} {existing.HeaderName} enabled={existing.IsEnabled}", ct: ct);
     }
 
     public async Task DeleteHeaderRuleAsync(int id, CancellationToken ct = default)
     {
+        // Load-then-delete so the audit row can name the rule that was removed.
+        var existing = await db.HeaderRewriteEntries.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (existing is null)
+            return;
+
         await db.HeaderRewriteEntries.Where(r => r.Id == id).ExecuteDeleteAsync(ct);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.HeaderRuleDeleted, actor, tenantId: existing.TenantId,
+            detail: $"{existing.Action} {existing.HeaderName}", ct: ct);
     }
 
     // Sender rewrites
@@ -58,6 +76,8 @@ public class MessageFilterService(RelayDbContext db, IRuntimeConfigCache cache) 
         db.SenderRewriteEntries.Add(rule);
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.SenderRuleCreated, actor, tenantId: rule.TenantId,
+            detail: $"{rule.FromPattern} -> {rule.ToAddress}", ct: ct);
         return rule;
     }
 
@@ -73,11 +93,20 @@ public class MessageFilterService(RelayDbContext db, IRuntimeConfigCache cache) 
 
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.SenderRuleUpdated, actor, tenantId: existing.TenantId,
+            detail: $"{existing.FromPattern} -> {existing.ToAddress} enabled={existing.IsEnabled}", ct: ct);
     }
 
     public async Task DeleteSenderRuleAsync(int id, CancellationToken ct = default)
     {
+        // Load-then-delete so the audit row can name the rule that was removed.
+        var existing = await db.SenderRewriteEntries.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (existing is null)
+            return;
+
         await db.SenderRewriteEntries.Where(r => r.Id == id).ExecuteDeleteAsync(ct);
         cache.Invalidate();
+        await audit.WriteAsync(AdminAuditActions.SenderRuleDeleted, actor, tenantId: existing.TenantId,
+            detail: $"{existing.FromPattern} -> {existing.ToAddress}", ct: ct);
     }
 }

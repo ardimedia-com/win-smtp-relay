@@ -24,6 +24,10 @@ public class AdminApiTests
     private HttpClient _viewerClient = null!; // authenticated as TenantViewer (read-only)
     private string _dbPath = null!;
 
+    /// <summary>Every write scope plus the body scope — the "unrestricted" key for admin tests.</summary>
+    private static readonly string AllWriteScopes =
+        string.Join(' ', ApiKeyScopes.Areas.Select(ApiKeyScopes.Write).Append(ApiKeyScopes.MessagesBody));
+
     [TestInitialize]
     public async Task Setup()
     {
@@ -49,8 +53,10 @@ public class AdminApiTests
                     await roleManager.CreateAsync(new AdminRole(role));
 
             var keys = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
-            (_, hostKey) = await keys.CreateAsync(null, "test-host", RelayRoles.HostAdmin, null, default);
-            (_, viewerKey) = await keys.CreateAsync(TenantDefaults.DefaultTenantId, "test-viewer", RelayRoles.TenantViewer, null, default);
+            // Scope-less keys are read-only, so the host key needs explicit write scopes for the
+            // mutating endpoints under test. The viewer key stays scope-less (= read-only) on purpose.
+            (_, hostKey) = await keys.CreateAsync(null, "test-host", RelayRoles.HostAdmin, AllWriteScopes, null, default);
+            (_, viewerKey) = await keys.CreateAsync(TenantDefaults.DefaultTenantId, "test-viewer", RelayRoles.TenantViewer, null, null, default);
         }
 
         _app.UseAuthentication();
@@ -307,7 +313,7 @@ public class AdminApiTests
         using (var scope = _app.Services.CreateScope())
         {
             var keys = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
-            (_, tenant2Key) = await keys.CreateAsync(2, "tenant2-admin", RelayRoles.TenantAdmin, null, default);
+            (_, tenant2Key) = await keys.CreateAsync(2, "tenant2-admin", RelayRoles.TenantAdmin, AllWriteScopes, null, default);
         }
 
         using var t2 = new HttpClient { BaseAddress = _client.BaseAddress };
@@ -345,7 +351,7 @@ public class AdminApiTests
         using (var scope = _app.Services.CreateScope())
         {
             var keys = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
-            (_, tenant2Key) = await keys.CreateAsync(2, "tenant2-admin", RelayRoles.TenantAdmin, null, default);
+            (_, tenant2Key) = await keys.CreateAsync(2, "tenant2-admin", RelayRoles.TenantAdmin, AllWriteScopes, null, default);
         }
 
         using var t2 = new HttpClient { BaseAddress = _client.BaseAddress };

@@ -34,15 +34,15 @@ public class TenantReadinessServiceTests
 
     private TenantReadinessService Build(ICurrentTenant current) => new(
         current,
-        new TenantService(_db, null!),
-        new UserService(_db),
+        new TenantService(_db, null!, new CurrentActor(), new AdminAuditService(_db)),
+        new UserService(_db, new CurrentActor(), new AdminAuditService(_db)),
         new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
-        new DkimDomainService(_db),
+        new DkimDomainService(_db, new CurrentActor(), new AdminAuditService(_db)),
         new SendConnectorService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
         new AcceptedDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
         new IpAccessRuleService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
-        new MessageFilterService(_db, new NoopRuntimeConfigCache()),
-        new ApiKeyService(_db),
+        new MessageFilterService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
+        new ApiKeyService(_db, new CurrentActor(), new AdminAuditService(_db)),
         new DnsSettingsService(_db),
         new EmailAuthSettingsService(_db, null!),
         new SuppressionService(_db));
@@ -77,7 +77,7 @@ public class TenantReadinessServiceTests
     [TestCategory("Unit")]
     public async Task EnabledUser_MakesTenantAbleToSend()
     {
-        await new UserService(_db).CreateUserAsync("alice", "P@ssw0rd!");
+        await new UserService(_db, new CurrentActor(), new AdminAuditService(_db)).CreateUserAsync("alice", "P@ssw0rd!");
 
         var r = await Build(_current).GetAsync();
 
@@ -89,7 +89,7 @@ public class TenantReadinessServiceTests
     [TestCategory("Unit")]
     public async Task DisabledUser_DoesNotCountTowardCanSend()
     {
-        await new UserService(_db).CreateUserAsync("bob", "P@ssw0rd!");
+        await new UserService(_db, new CurrentActor(), new AdminAuditService(_db)).CreateUserAsync("bob", "P@ssw0rd!");
         var user = await _db.RelayUsers.FirstAsync(u => u.Username == "bob");
         user.IsEnabled = false;
         await _db.SaveChangesAsync();
@@ -239,7 +239,7 @@ public class TenantReadinessServiceTests
     [TestCategory("Unit")]
     public async Task RecommendedRollup_CountsOnlyDoneRecommendedItems()
     {
-        await new UserService(_db).CreateUserAsync("alice", "P@ssw0rd!");
+        await new UserService(_db, new CurrentActor(), new AdminAuditService(_db)).CreateUserAsync("alice", "P@ssw0rd!");
         var senders = new AcceptedSenderDomainService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db));
         var a = await senders.CreateAsync("acme.com");
         await senders.MarkVerifiedAsync(a.Id);
