@@ -18,13 +18,20 @@
 			"cwd": "${workspaceFolder}/src/WinSmtpRelay.Service",
 			"stopAtEntry": false,
 			"serverReadyAction": {
-				// Open the Development-only plain-HTTP loopback endpoint (127.0.0.1, port = AdminUi:Port + 1,
-				// i.e. 8026 by default) instead of the primary HTTPS one, so the browser doesn't hit the
-				// self-signed-certificate warning on every launch. The port isn't hard-coded — it matches
-				// whatever http loopback Kestrel logs. Remove the "http://127\\.0\\.0\\.1:" prefix from the
-				// pattern to open the first (HTTPS) endpoint instead.
+				// When Kestrel logs its first loopback endpoint ("Now listening on: …"), open a browser
+				// there. The pattern matches EITHER scheme, so it fires on whatever the host actually
+				// binds: the primary HTTPS Admin UI (https://127.0.0.1:8025) normally, or the
+				// Development-only plain-HTTP loopback (http://127.0.0.1:8026) if that is enabled — the
+				// port is never hard-coded, it comes from the captured URL. HTTPS triggers the
+				// self-signed-certificate warning once per browser (accept it); to avoid that, enable the
+				// http loopback (it is logged first and would be opened instead).
+				//
+				// uriFormat controls the landing page: "%s" is the captured base URL (the app root, which
+				// redirects to login/first-run setup). Change it to deep-link a page under test, e.g.
+				// "%s/apikeys/new" or "%s/mcp-setup" — the login redirect preserves the target.
 				"action": "openExternally",
-				"pattern": "\\bNow listening on:\\s+(http://127\\.0\\.0\\.1:\\S+)"
+				"pattern": "\\bNow listening on:\\s+(https?://127\\.0\\.0\\.1:\\S+)",
+				"uriFormat": "%s"
 			},
 			"env": {
 				"DOTNET_ENVIRONMENT": "Development"
