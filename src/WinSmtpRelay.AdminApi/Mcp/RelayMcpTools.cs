@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using ModelContextProtocol;
 using ModelContextProtocol.Server;
 using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
@@ -77,7 +78,7 @@ public sealed class RelayMcpTools
                 m.SourceIp, m.AuthenticatedUser, m.DeliveredRecipients,
                 m.RawMessage != Array.Empty<byte>()))
             .FirstOrDefaultAsync(ct);
-        return detail ?? throw new InvalidOperationException($"Message {id} was not found.");
+        return detail ?? throw new McpException($"Message {id} was not found.");
     }
 
     [McpServerTool(Name = "list_delivery_logs"), Description(
@@ -200,7 +201,7 @@ public sealed class RelayMcpTools
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         domain = domain.Trim().ToLowerInvariant();
         if (domain.Length == 0)
-            throw new InvalidOperationException("Domain must not be empty.");
+            throw new McpException("Domain must not be empty.");
         if (await svc.ExistsAsync(domain, ct))
             return new { Message = $"'{domain}' is already an accepted sender domain." };
         var created = await svc.CreateAsync(domain, ct);
@@ -216,7 +217,7 @@ public sealed class RelayMcpTools
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         domain = domain.Trim().ToLowerInvariant();
         if (domain.Length == 0)
-            throw new InvalidOperationException("Domain must not be empty.");
+            throw new McpException("Domain must not be empty.");
         if (await svc.ExistsAsync(domain, ct))
             return new { Message = $"'{domain}' is already an accepted domain." };
         var created = await svc.CreateAsync(domain, ct);
@@ -234,7 +235,7 @@ public sealed class RelayMcpTools
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         network = network.Trim();
         if (network.Length == 0)
-            throw new InvalidOperationException("Network must not be empty.");
+            throw new McpException("Network must not be empty.");
         var created = await svc.CreateAsync(new IpAccessRule
         {
             Network = network,
@@ -255,7 +256,7 @@ public sealed class RelayMcpTools
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         int? tid = tenant.FilterEnabled ? tenant.FilterTenantId : tenantId;
         if (tid is not int resolvedTenant)
-            throw new InvalidOperationException("tenantId is required for a host-scoped key (a suppression belongs to one tenant).");
+            throw new McpException("tenantId is required for a host-scoped key (a suppression belongs to one tenant).");
         await svc.AddAsync(address, SuppressionReason.Manual, note, resolvedTenant, ct);
         return new { Message = $"'{address.Trim().ToLowerInvariant()}' is now suppressed for tenant {resolvedTenant}." };
     }
@@ -269,7 +270,7 @@ public sealed class RelayMcpTools
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         // The tenant query filter hides out-of-scope entries, so this doubles as authorization.
         if (!await db.SuppressionEntries.AsNoTracking().AnyAsync(e => e.Id == id, ct))
-            throw new InvalidOperationException($"Suppression {id} was not found.");
+            throw new McpException($"Suppression {id} was not found.");
         await svc.RemoveAsync(id, ct);
         return new { Message = $"Suppression {id} removed — the address is deliverable again." };
     }
@@ -282,7 +283,7 @@ public sealed class RelayMcpTools
     {
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Queue, write: true);
         if (!await db.QueuedMessages.AsNoTracking().AnyAsync(m => m.Id == id, ct))
-            throw new InvalidOperationException($"Message {id} was not found.");
+            throw new McpException($"Message {id} was not found.");
         return await queue.RequeueAsync(id, ct)
             ? new { Message = $"Message {id} re-queued for delivery." }
             : new { Message = $"Message {id} is not in a retryable state (only Failed/Bounced can be re-queued)." };
@@ -291,14 +292,18 @@ public sealed class RelayMcpTools
     /// <summary>
     /// Applies the same two gates the REST API applies: the role policy (via the registered
     /// authorization handlers, i.e. the consent-based membership model) and — for API-key callers —
-    /// the capability scope. Throws with an actionable message; the SDK surfaces it as a tool error.
+    /// the capability scope. Access denial is an EXPECTED outcome for a scoped assistant, so it throws
+    /// <see cref="McpException"/>: the SDK returns it as a tool error (IsError) with the message passed
+    /// through to the caller, and — unlike a generic exception — does NOT log it at Error level. That
+    /// keeps routine denials out of the log (and out of the daily self-check's new-error alert), and
+    /// lets the assistant read exactly which scope it is missing.
     /// </summary>
     private static async Task RequireAsync(
         IAuthorizationService auth, ClaimsPrincipal user, string policy, string area, bool write = false)
     {
         var result = await auth.AuthorizeAsync(user, policy);
         if (!result.Succeeded)
-            throw new InvalidOperationException($"Access denied: this operation requires the '{policy}' role.");
+            throw new McpException($"Access denied: this operation requires the '{policy}' role.");
 
         if (user.FindFirst(RelayClaimTypes.ApiKeyId) is null)
             return; // cookie admins are governed by role alone (mirrors the /api scope filter)
@@ -308,7 +313,7 @@ public sealed class RelayMcpTools
         if (!allowed)
         {
             var required = write ? ApiKeyScopes.Write(area) : ApiKeyScopes.Read(area);
-            throw new InvalidOperationException(
+            throw new McpException(
                 $"This API key does not carry the required scope '{required}'. "
                 + "A key without scopes is read-only; grant the scope on the API-key page.");
         }

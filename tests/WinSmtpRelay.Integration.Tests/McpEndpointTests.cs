@@ -165,6 +165,9 @@ public class McpEndpointTests
         var result = rpc.GetProperty("result");
         Assert.IsTrue(result.TryGetProperty("isError", out var isError) && isError.GetBoolean(),
             $"a viewer key must not create sender domains: {result}");
+        // The denial is thrown as McpException, so its actionable message reaches the assistant
+        // (a generic exception would be replaced with a generic message and logged at Error).
+        StringAssert.Contains(result.ToString(), "role", StringComparison.OrdinalIgnoreCase);
     }
 
     [TestMethod]

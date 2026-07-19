@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Creating or editing an API key no longer crashes the page.** The new scope editor passed an unsupported
+  `style` attribute to `BbNativeSelect` (which exposes `Class`, not arbitrary attributes), so rendering the
+  New/Edit API-key page threw and terminated the Blazor circuit — making key creation impossible. The select
+  now sits in a fixed-width wrapper instead. (Regression in build68; the API/Razor split meant no automated
+  test rendered the page.)
+- **MCP tools no longer log expected denials as server errors, and the assistant now sees why.** Access
+  denials, missing-scope, not-found and invalid-input were thrown as plain exceptions, which the MCP SDK
+  replaces with a *generic* client message (so the assistant never learned which scope it lacked) and logs at
+  **Error** level with a full stack trace (routine, since a scoped assistant will try tools it can't use —
+  and it would trip the daily self-check's new-error alert). These are now `McpException`s: the actionable
+  message reaches the caller and the SDK does not log them as unhandled. (Regression in build68.)
+
 ## [1.0.0-beta1-build68] - 2026-07-19
 
 ### Added
