@@ -58,6 +58,26 @@ else if (createdSecret is not null)
                         <span class="text-muted" style="font-size:0.8125rem;">Copied to clipboard</span>
                     }
                 </div>
+                <div class="form-group" style="margin-top:0.75rem;">
+                    <BbLabel>Use it</BbLabel>
+                    <p class="text-muted" style="font-size:0.8125rem;margin:0 0 0.35rem;">
+                        REST API: send it as <code>Authorization: Bearer &lt;key&gt;</code> or <code>X-Api-Key: &lt;key&gt;</code>.
+                        For an MCP client (e.g. Claude Code), add the server with the key already filled in:
+                    </p>
+                    <div style="display:flex;gap:0.5rem;align-items:flex-start;">
+                        <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.5rem 0.7rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.8rem;">@McpAddCommand</code></pre>
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopyMcpCommandAsync">
+                            <LucideIcon Name="copy" />
+                        </BbButton>
+                    </div>
+                    @if (mcpCommandCopied)
+                    {
+                        <span class="text-muted" style="font-size:0.8125rem;">Copied to clipboard</span>
+                    }
+                    <p class="text-muted" style="font-size:0.78rem;margin:0.35rem 0 0;">
+                        See the <a href="/mcp-setup">MCP page</a> for what an assistant can do and the recommended scopes.
+                    </p>
+                </div>
             </BbCardContent>
             <BbCardFooter>
                 <BbButton Variant="ButtonVariant.Default" @onclick="GoBack">Done</BbButton>
@@ -76,7 +96,9 @@ else if (IsNew)
                 </div>
                 <div class="form-group">
                     <BbLabel For="role">Role</BbLabel>
-                    <BbNativeSelect TValue="string" Id="role" @bind-Value="newRole">
+                    @* Native <select> so a preset's role change is reflected in the control too. *@
+                    <select class="form-select" id="role" value="@newRole"
+                            @onchange="@(e => newRole = e.Value?.ToString() ?? newRole)">
                         @if (ScopeTenantId is null)
                         {
                             @* Host scope: a tenant-role key without a tenant would carry no memberships
@@ -88,7 +110,37 @@ else if (IsNew)
                             <option value="@RelayRoles.TenantViewer">Viewer (read-only)</option>
                             <option value="@RelayRoles.TenantAdmin">Admin (read/write)</option>
                         }
-                    </BbNativeSelect>
+                    </select>
+                </div>
+                @* Quick-start presets fill the role + scopes below for the two common purposes; you can
+                   still adjust anything before creating. Intent is carried by the preset and the Name —
+                   there is deliberately NO "this key is for MCP/API" flag, because the same key works for
+                   both and a flag that isn't enforced would only pretend to be a boundary. *@
+                <div class="form-group">
+                    <BbLabel>Quick start</BbLabel>
+                    <div class="flex gap-1 items-center" style="flex-wrap:wrap;">
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="@(() => ApplyPreset("mcp"))">
+                            <LucideIcon Name="bot" /> MCP assistant
+                        </BbButton>
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="@(() => ApplyPreset("api"))">
+                            <LucideIcon Name="terminal" /> Standard API
+                        </BbButton>
+                        <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="@(() => ApplyPreset("readonly"))">
+                            <LucideIcon Name="eye" /> Read-only
+                        </BbButton>
+                        @if (appliedPreset is not null)
+                        {
+                            <span class="text-muted" style="font-size:0.8125rem;">@appliedPreset defaults applied — adjust below if needed.</span>
+                        }
+                    </div>
+                    <p class="text-muted" style="font-size:0.8125rem;margin:0.4rem 0 0;">
+                        <strong>MCP assistant</strong>: diagnose + fix mail flow (read diagnostics &amp; messages,
+                        write queue &amp; configuration) — no account access at all, no message bodies.
+                        <strong>Standard API</strong>: the same, plus <em>read</em> access to accounts (list
+                        tenants, users and keys) for provisioning scripts — still no account <em>management</em>
+                        and no bodies. <strong>Read-only</strong> clears every scope. Grant
+                        <code>Administration</code> write or <code>messages:body</code> only deliberately.
+                    </p>
                 </div>
                 @RenderScopeEditor()
             </BbCardContent>
@@ -189,6 +241,7 @@ else if (key is not null)
     private string newName = "";
     private string newRole = RelayRoles.TenantViewer;
     private bool creating;
+    private string? appliedPreset;
 
     // Scope editor state ("none" | "read" | "write" per area, plus the body switch). Shared between
     // the create form and the edit view — scopes are the only mutable part of an existing key.
@@ -220,11 +273,14 @@ else if (key is not null)
                    passing an unmatched attribute like style throws at render), so the three rows align. *@
                 <div style="display:flex;gap:0.75rem;align-items:center;margin-bottom:0.35rem;">
                     <div style="width:11rem;flex-shrink:0;">
-                        <BbNativeSelect TValue="string" Value="@areaAccess[area]" ValueChanged="@((string v) => areaAccess[area] = v)">
+                        @* Native <select> (not BbNativeSelect) so a preset — which sets areaAccess from code —
+                           is reflected in the control; a wrapped select only updates on user interaction. *@
+                        <select class="form-select" value="@areaAccess[area]"
+                                @onchange="@(e => areaAccess[area] = e.Value?.ToString() ?? "none")">
                             <option value="none">No access</option>
                             <option value="read">Read</option>
                             <option value="write">Read + write</option>
-                        </BbNativeSelect>
+                        </select>
                     </div>
                     <div>
                         <div>@row.Label</div>
@@ -233,20 +289,97 @@ else if (key is not null)
                 </div>
             }
             <div style="display:flex;gap:0.75rem;align-items:center;margin-top:0.5rem;">
-                <BbSwitch Checked="bodyScope" CheckedChanged="@((bool v) => bodyScope = v)" id="scope-body" />
-                <div>
+                @* Native checkbox (not BbSwitch) for the same reason as the selects: a preset sets
+                   bodyScope from code, and the control must reflect it. *@
+                <input type="checkbox" id="scope-body" checked="@bodyScope"
+                       @onchange="@(e => bodyScope = e.Value is true)" style="width:1.1rem;height:1.1rem;flex-shrink:0;" />
+                <label for="scope-body">
                     <div>Raw message bodies (<code>messages:body</code>)</div>
                     <div class="text-muted" style="font-size:0.78rem;">Customer mail content — never implied by other scopes. Also requires an Admin/Host role.</div>
-                </div>
+                </label>
             </div>
-            @if (ScopesAreEmpty)
+            @* Loud warnings for the two capabilities that are risky to hand out. *@
+            @if (areaAccess[ApiKeyScopes.Admin] == "write")
             {
-                <p class="text-muted" style="font-size:0.8125rem;margin-top:0.5rem;">
-                    No scopes selected — this key will be <strong>read-only</strong> across all areas.
-                </p>
+                <div class="badge-status badge-warning" style="display:block;padding:0.6rem 0.75rem;line-height:1.45;margin-top:0.6rem;">
+                    <strong>Administration write is powerful.</strong> This key can create and delete tenants,
+                    relay users and other API keys — including minting new keys, which is a privilege-escalation
+                    path. Don't grant it to an MCP assistant or any key you can't fully trust.
+                </div>
             }
+            @if (bodyScope)
+            {
+                <div class="badge-status badge-warning" style="display:block;padding:0.6rem 0.75rem;line-height:1.45;margin-top:0.6rem;">
+                    <strong>Message bodies expose customer mail content.</strong> No MCP tool uses it; grant it
+                    only to a REST client that genuinely needs the raw message, never to an assistant.
+                </div>
+            }
+            @* Plain-language summary of the effective permissions, so the power is visible before saving. *@
+            <div style="margin-top:0.6rem;font-size:0.82rem;">
+                <strong>This key will be able to:</strong>
+                @if (ScopesAreEmpty)
+                {
+                    <span> read everything its role allows and change nothing (read-only).</span>
+                }
+                else
+                {
+                    <ul style="margin:0.25rem 0 0;padding-left:1.25rem;">
+                        <li><strong>Read:</strong> @(ReadLabels.Any() ? string.Join(", ", ReadLabels) : "—")</li>
+                        <li><strong>Write:</strong> @(WriteLabels.Any() ? string.Join(", ", WriteLabels) : "—")</li>
+                        @if (bodyScope)
+                        {
+                            <li><strong>Read raw message bodies</strong> (customer mail content)</li>
+                        }
+                    </ul>
+                }
+            </div>
         </div>
     };
+
+    private IEnumerable<string> ReadLabels => AreaRows.Where(r => areaAccess[r.Area] != "none").Select(r => r.Label);
+    private IEnumerable<string> WriteLabels => AreaRows.Where(r => areaAccess[r.Area] == "write").Select(r => r.Label);
+
+    /// <summary>Prefills the role + scope editor for a common purpose. Only fills the form — the user
+    /// can still change anything before creating.</summary>
+    private void ApplyPreset(string kind)
+    {
+        void Set(string diag, string messages, string queue, string config, string admin, bool body)
+        {
+            areaAccess[ApiKeyScopes.Diag] = diag;
+            areaAccess[ApiKeyScopes.Messages] = messages;
+            areaAccess[ApiKeyScopes.Queue] = queue;
+            areaAccess[ApiKeyScopes.Config] = config;
+            areaAccess[ApiKeyScopes.Admin] = admin;
+            bodyScope = body;
+        }
+
+        switch (kind)
+        {
+            case "mcp":
+                // Diagnose + fix mail flow. No account management, no bodies. (diag/messages have no
+                // write operations, so read is the full grant there.)
+                Set("read", "read", "write", "write", "none", false);
+                appliedPreset = "MCP assistant";
+                break;
+            case "api":
+                // Trusted automation: read everything (incl. LISTING tenants/users/keys via admin:read)
+                // and write mail flow, but NO account management (no admin:write) and no bodies
+                // (owner decision 2026-07-19). admin:read is what distinguishes it from the MCP preset.
+                Set("read", "read", "write", "write", "read", false);
+                appliedPreset = "Standard API";
+                break;
+            default: // "readonly"
+                Set("none", "none", "none", "none", "none", false);
+                appliedPreset = "Read-only";
+                break;
+        }
+
+        // The role must match the scopes' intent: writing needs an admin role, read-only can stay a viewer.
+        if (IsNew)
+            newRole = kind == "readonly"
+                ? (ScopeTenantId is null ? RelayRoles.HostAdmin : RelayRoles.TenantViewer)
+                : (ScopeTenantId is null ? RelayRoles.HostAdmin : RelayRoles.TenantAdmin);
+    }
 
     private bool ScopesAreEmpty => !bodyScope && areaAccess.Values.All(v => v == "none");
 
@@ -277,6 +410,11 @@ else if (key is not null)
     // One-time secret shown after creation; null until a key is created.
     private string? createdSecret;
     private bool copied;
+    private bool mcpCommandCopied;
+
+    private string McpUrl => $"{Nav.BaseUri}mcp";
+    private string McpAddCommand =>
+        $"claude mcp add --transport http win-smtp-relay {McpUrl} --header \"Authorization: Bearer {createdSecret}\"";
 
     // Edit/view state.
     private ApiKey? key;
@@ -355,6 +493,14 @@ else if (key is not null)
             return;
         await JS.InvokeVoidAsync("navigator.clipboard.writeText", createdSecret);
         copied = true;
+    }
+
+    private async Task CopyMcpCommandAsync()
+    {
+        if (createdSecret is null)
+            return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", McpAddCommand);
+        mcpCommandCopied = true;
     }
 
     private async Task ConfirmRevokeAsync()

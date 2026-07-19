@@ -540,6 +540,20 @@ select option {
     color: var(--popover-foreground);
 }
 
+/* Themed native <select>, used where a value is set programmatically (e.g. the API-key scope
+   presets). A native select reflects an externally-set value reliably; a wrapped select component
+   only reacts to user interaction, so the presets would update the model but not the control. */
+.form-select {
+    width: 100%;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--input);
+    border-radius: var(--radius);
+    background: var(--background);
+    color: var(--foreground);
+    font-size: 0.875rem;
+    cursor: pointer;
+}
+
 /* Global (host-wide) nav section — the Host + Server groups, set apart from the per-tenant groups with a
    tinted background so server/host-wide configuration is visually distinct from tenant-scoped items. */
 .sidebar-global {

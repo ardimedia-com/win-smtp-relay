@@ -189,6 +189,16 @@
                                     <span>Host Admins</span>
                                 </BbSidebarMenuButton>
                             </BbSidebarMenuItem>
+                            @* API keys are reachable in tenant scope too (Users & Access), but a HOST-level
+                               key — e.g. the recommended MCP key — can only be minted in the host ("All
+                               tenants") scope, so the entry must exist here as well. The page shows all keys
+                               when host-scoped. *@
+                            <BbSidebarMenuItem>
+                                <BbSidebarMenuButton Href="apikeys">
+                                    <LucideIcon Name="key-round" />
+                                    <span>API Keys</span>
+                                </BbSidebarMenuButton>
+                            </BbSidebarMenuItem>
                             <BbSidebarMenuItem>
                                 <BbSidebarMenuButton Href="tenants">
                                     <LucideIcon Name="building-2" />

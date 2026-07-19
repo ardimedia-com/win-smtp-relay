@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Creating an API key now has quick-start presets and shows the effective permissions.** The New
+  API-key page offers three one-click presets that fill the role and scopes — **MCP assistant** (read
+  diagnostics & messages, write queue & configuration), **Standard API** (the same, plus read-only
+  listing of tenants/users/keys for provisioning scripts), and **Read-only** — with a live,
+  plain-language summary ("this key will be able to: read …, write …") so the effective power is visible
+  before saving, and loud warnings on the two risky grants: `Administration` write (can mint keys and
+  manage tenants/users — a privilege-escalation path) and `messages:body` (exposes customer mail content).
+- **The one-time secret screen now shows a ready `claude mcp add` command with the key filled in**, so
+  connecting an assistant to the relay's MCP endpoint is copy-and-paste.
+- **"API Keys" is now reachable in the host ("All tenants") scope** (Host navigation group). A host-level
+  key — including the recommended MCP key — can only be minted in host scope, but the menu entry existed
+  only under a tenant, so host keys were effectively unreachable from the navigation.
+
+### Fixed
+
+- **The API-key scope controls now reflect a preset immediately.** They were wrapped select/switch
+  components that update only on user interaction, so clicking a preset changed the underlying scopes
+  (and the created key would have been correct) while the dropdowns still read "No access". They are now
+  native, themed controls that reflect a programmatically-set value.
+
 ## [1.0.0-beta1-build69] - 2026-07-19
 
 ### Fixed
