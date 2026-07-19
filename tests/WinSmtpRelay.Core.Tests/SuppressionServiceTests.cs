@@ -35,7 +35,7 @@ public class SuppressionServiceTests
     [TestCategory("Unit")]
     public async Task Add_ThenIsSuppressed_TrueAndNormalized()
     {
-        var svc = new SuppressionService(_db);
+        var svc = new SuppressionService(_db, new CurrentActor(), new AdminAuditService(_db));
         await svc.AddAsync("User@Example.com", SuppressionReason.HardBounce, "550 mailbox unavailable", TenantDefaults.DefaultTenantId);
 
         Assert.IsTrue(await svc.IsSuppressedAsync("user@example.com", TenantDefaults.DefaultTenantId));
@@ -47,7 +47,7 @@ public class SuppressionServiceTests
     [TestCategory("Unit")]
     public async Task NotSuppressed_ForUnknownAddress()
     {
-        var svc = new SuppressionService(_db);
+        var svc = new SuppressionService(_db, new CurrentActor(), new AdminAuditService(_db));
         Assert.IsFalse(await svc.IsSuppressedAsync("nobody@example.com", TenantDefaults.DefaultTenantId));
     }
 
@@ -55,7 +55,7 @@ public class SuppressionServiceTests
     [TestCategory("Unit")]
     public async Task Add_IsIdempotent()
     {
-        var svc = new SuppressionService(_db);
+        var svc = new SuppressionService(_db, new CurrentActor(), new AdminAuditService(_db));
         await svc.AddAsync("a@example.com", SuppressionReason.HardBounce, "first", TenantDefaults.DefaultTenantId);
         await svc.AddAsync("a@example.com", SuppressionReason.Manual, "second", TenantDefaults.DefaultTenantId);
 
@@ -67,7 +67,7 @@ public class SuppressionServiceTests
     [TestCategory("Unit")]
     public async Task Suppression_IsScopedToTenant()
     {
-        var svc = new SuppressionService(_db);
+        var svc = new SuppressionService(_db, new CurrentActor(), new AdminAuditService(_db));
         await svc.AddAsync("x@example.com", SuppressionReason.HardBounce, null, TenantDefaults.DefaultTenantId);
 
         Assert.IsTrue(await svc.IsSuppressedAsync("x@example.com", TenantDefaults.DefaultTenantId));
@@ -78,7 +78,7 @@ public class SuppressionServiceTests
     [TestCategory("Unit")]
     public async Task Remove_ReenablesDelivery()
     {
-        var svc = new SuppressionService(_db);
+        var svc = new SuppressionService(_db, new CurrentActor(), new AdminAuditService(_db));
         await svc.AddAsync("y@example.com", SuppressionReason.HardBounce, null, TenantDefaults.DefaultTenantId);
         var entry = (await svc.GetAllAsync()).Single();
 

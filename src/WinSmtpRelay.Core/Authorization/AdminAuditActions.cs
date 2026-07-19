@@ -102,4 +102,9 @@ public static class AdminAuditActions
     // Admin queue operations on individual messages (delete is destructive; requeue re-triggers delivery).
     public const string QueueMessageDeleted = "queue.message_deleted";
     public const string QueueMessageRequeued = "queue.message_requeued";
+
+    // Suppression-list changes alter who the relay will deliver to. Added rows may come from the
+    // automatic sources (hard bounce / complaint) and then carry the honest null actor.
+    public const string SuppressionAdded = "suppression.added";
+    public const string SuppressionRemoved = "suppression.removed";
 }

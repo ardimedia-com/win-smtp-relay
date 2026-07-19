@@ -57,7 +57,8 @@ public class DeliveryWorkerSuppressionTests
         services.AddScoped<RelayDbContext>(_ => NewContext());
         services.AddScoped<IMessageQueue>(sp => new MessageQueue(sp.GetRequiredService<RelayDbContext>(),
             new CurrentActor(), new AdminAuditService(sp.GetRequiredService<RelayDbContext>())));
-        services.AddScoped<ISuppressionService>(sp => new SuppressionService(sp.GetRequiredService<RelayDbContext>()));
+        services.AddScoped<ISuppressionService>(sp => new SuppressionService(sp.GetRequiredService<RelayDbContext>(),
+            new CurrentActor(), new AdminAuditService(sp.GetRequiredService<RelayDbContext>())));
         // Seeded DataRetentionSettings (StripBodyOnDelivery=true, ResendRetentionDays=7) drives the
         // body-retention behaviour exercised below.
         services.AddScoped<IDataRetentionSettingsService>(sp => new DataRetentionSettingsService(sp.GetRequiredService<RelayDbContext>()));
@@ -110,7 +111,7 @@ public class DeliveryWorkerSuppressionTests
     private async Task SuppressAsync(string address, SuppressionReason reason)
     {
         await using var ctx = NewContext();
-        await new SuppressionService(ctx).AddAsync(address, reason, null, Tenant);
+        await new SuppressionService(ctx, new CurrentActor(), new AdminAuditService(ctx)).AddAsync(address, reason, null, Tenant);
     }
 
     private async Task<MessageStatus> StatusOfAsync(long id)
@@ -198,7 +199,7 @@ public class DeliveryWorkerSuppressionTests
         await worker.ProcessMessageAsync(message, CancellationToken.None);
 
         await using var ctx = NewContext();
-        var suppression = new SuppressionService(ctx);
+        var suppression = new SuppressionService(ctx, new CurrentActor(), new AdminAuditService(ctx));
         Assert.IsTrue(await suppression.IsSuppressedAsync("dead@example.com", Tenant),
             "a 5xx-failed recipient must be auto-added to the suppression list");
 
@@ -240,7 +241,7 @@ public class DeliveryWorkerSuppressionTests
         await worker.ProcessMessageAsync(message, CancellationToken.None);
 
         await using var ctx = NewContext();
-        var suppression = new SuppressionService(ctx);
+        var suppression = new SuppressionService(ctx, new CurrentActor(), new AdminAuditService(ctx));
         Assert.IsFalse(await suppression.IsSuppressedAsync("valid@example.com", Tenant),
             "a transaction-wide 5xx must NOT auto-suppress a co-recipient");
         Assert.IsFalse(await suppression.IsSuppressedAsync("alsovalid@example.com", Tenant),

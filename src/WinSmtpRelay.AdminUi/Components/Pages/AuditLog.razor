@@ -149,6 +149,8 @@
         [AdminAuditActions.ApiKeyDeleted] = "API key revoked",
         [AdminAuditActions.QueueMessageDeleted] = "Queue message deleted",
         [AdminAuditActions.QueueMessageRequeued] = "Queue message re-queued",
+        [AdminAuditActions.SuppressionAdded] = "Suppression added",
+        [AdminAuditActions.SuppressionRemoved] = "Suppression removed",
     };
 
     private static string Humanize(string action) => KnownActions.TryGetValue(action, out var label) ? label : action;

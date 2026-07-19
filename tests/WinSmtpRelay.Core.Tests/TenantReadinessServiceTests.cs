@@ -45,7 +45,7 @@ public class TenantReadinessServiceTests
         new ApiKeyService(_db, new CurrentActor(), new AdminAuditService(_db)),
         new DnsSettingsService(_db),
         new EmailAuthSettingsService(_db, null!),
-        new SuppressionService(_db));
+        new SuppressionService(_db, new CurrentActor(), new AdminAuditService(_db)));
 
     private static SetupItem Item(TenantReadiness r, string key) => r.Items.Single(i => i.Key == key);
 

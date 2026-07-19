@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The diagnostics surface is now reachable over the REST API — troubleshooting no longer requires the
+  UI.** Four surfaces that existed only as admin pages have endpoints: `GET /api/audit` (filterable,
+  paged audit query; host admins, classified under the `diag` scope so a troubleshooting key can answer
+  "who changed what" without the `admin` area's write powers), `GET /api/health/checks/latest` and
+  `/history` (the daily self-check snapshots with findings and remediation hints), `/api/suppressions`
+  (list/add/remove; adding is always `Manual`, host scope must name the tenant), and
+  `GET /api/rejections` (the aggregated refused submissions with reason descriptions and the redacted
+  failing command line; ignored rows hidden unless `includeIgnored=true`; tenant-split applied like the
+  UI page). The Rejections one-click decisions (accept domain / allow IP / ignore) deliberately stay
+  UI-only for now.
+- **Suppression-list changes are audited** (`suppression.added` / `suppression.removed`), written in the
+  storage service so the UI, the API, and the automatic sources (hard bounce / complaint, recorded with
+  the honest null actor) all leave a trace — removing a suppression makes an address deliverable again,
+  which is exactly the kind of change one wants to find in the trail.
+
 - **API keys now carry capability scopes — the admin API is safe to hand to automation and AI agents.**
   A key used to be exactly its role, so any key that could fix a filter could also purge a tenant. Keys
   now carry an explicit scope list over five areas (`diag`, `messages`, `queue`, `config`, `admin`),

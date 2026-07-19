@@ -46,6 +46,12 @@ public static class AdminEndpoints
         MapTenantEndpoints(group);
         MapApiKeyEndpoints(group);
 
+        // Diagnostics endpoints (troubleshooting surface for automation/MCP)
+        MapAuditEndpoints(group);
+        MapHealthCheckEndpoints(group);
+        MapSuppressionEndpoints(group);
+        MapRejectionEndpoints(group);
+
         // Configuration endpoints
         MapReceiveConnectorEndpoints(group);
         MapAcceptedDomainEndpoints(group);
@@ -383,6 +389,116 @@ public static class AdminEndpoints
             await svc.DeleteAsync(id, ct);
             return Results.Ok(new { Message = "API key revoked" });
         });
+    }
+
+    private static void MapAuditEndpoints(RouteGroupBuilder group)
+    {
+        // Mirrors the Audit Log UI page: host admins only. Classified as diag (not admin) on purpose —
+        // it is a read-only observability surface, so a HostAdmin troubleshooting key with diag:read
+        // can answer "who changed what" without carrying the admin area's write powers.
+        group.MapGet("/audit", async (IAdminAuditService svc, CancellationToken ct,
+            string? action = null, int? tenantId = null, string? search = null, int skip = 0, int take = 100) =>
+        {
+            take = Math.Clamp(take, 1, 500);
+            skip = Math.Max(skip, 0);
+            var (events, total) = await svc.QueryAsync(action, tenantId, search, skip, take, ct);
+            return Results.Ok(new AuditQueryResponse(total, events.Select(e => new AuditEventSummary(
+                e.Id, e.OccurredUtc, e.Action, e.ActorUserId, e.ActorApiKeyId, e.ActorEmail,
+                e.TargetUserId, e.TenantId, e.Detail)).ToList()));
+        })
+        .RequireAuthorization(AuthorizationPolicies.HostAdmin)
+        .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Diag));
+    }
+
+    private static void MapHealthCheckEndpoints(RouteGroupBuilder group)
+    {
+        // Daily self-check snapshots (the /diagnostics page's data). Host-level records → host admins
+        // only, like the UI page. Read-only: runs are produced by the scheduled self-check.
+        var ep = group.MapGroup("/health/checks")
+            .RequireAuthorization(AuthorizationPolicies.HostAdmin)
+            .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Diag));
+
+        ep.MapGet("/latest", async (IHealthCheckSnapshotService svc, CancellationToken ct) =>
+        {
+            var snapshot = await svc.GetLatestAsync(ct);
+            return snapshot is null
+                ? Results.NotFound(new { Error = "No self-check has run yet" })
+                : Results.Ok(HealthSnapshotDetail.From(snapshot));
+        });
+
+        ep.MapGet("/history", async (IHealthCheckSnapshotService svc, CancellationToken ct,
+            int maxCount = 30) =>
+        {
+            maxCount = Math.Clamp(maxCount, 1, 365);
+            var runs = await svc.GetHistoryAsync(maxCount, ct);
+            return Results.Ok(runs.Select(HealthSnapshotSummary.From));
+        });
+    }
+
+    private static void MapSuppressionEndpoints(RouteGroupBuilder group)
+    {
+        // Mirrors the Suppressions UI page: AdminFull even for listing (the list is recipient PII).
+        var ep = group.MapGroup("/suppressions")
+            .RequireAuthorization(AuthorizationPolicies.AdminFull)
+            .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+
+        // The ambient tenant filter scopes the listing (host scope sees all tenants).
+        ep.MapGet("/", async (ISuppressionService svc, CancellationToken ct) =>
+        {
+            var entries = await svc.GetAllAsync(ct);
+            return Results.Ok(entries.Select(e => new SuppressionSummary(
+                e.Id, e.TenantId, e.Address, e.Reason.ToString(), e.Detail, e.CreatedUtc)));
+        });
+
+        ep.MapPost("/", async (CreateSuppressionRequest req, ISuppressionService svc, ICurrentTenant tenant, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Address))
+                return Results.BadRequest(new { Error = "Address is required" });
+
+            // A suppression belongs to exactly one tenant: tenant-scoped callers use their own; a
+            // host-scope caller must name the target tenant explicitly.
+            int? tenantId = tenant.FilterEnabled ? tenant.FilterTenantId : req.TenantId;
+            if (tenantId is not int tid)
+                return Results.BadRequest(new { Error = "TenantId is required at host scope" });
+
+            await svc.AddAsync(req.Address, SuppressionReason.Manual, req.Detail, tid, ct);
+            return Results.Ok(new { Message = "Address suppressed" });
+        });
+
+        ep.MapDelete("/{id:int}", async (int id, ISuppressionService svc, RelayDbContext db, CancellationToken ct) =>
+        {
+            // The tenant query filter hides out-of-scope entries, so this doubles as authorization.
+            if (!await db.SuppressionEntries.AsNoTracking().AnyAsync(e => e.Id == id, ct))
+                return Results.NotFound();
+            await svc.RemoveAsync(id, ct);
+            return Results.Ok(new { Message = "Suppression removed — the address is deliverable again" });
+        });
+    }
+
+    private static void MapRejectionEndpoints(RouteGroupBuilder group)
+    {
+        // Read-only view of refused submissions (the Rejections page's data). The one-click decisions
+        // (accept domain / allow IP / ignore) stay UI-only for now — they compose config changes with
+        // recorded operator context.
+        group.MapGet("/rejections", async (RelayDbContext db, ICurrentTenant tenant, CancellationToken ct,
+            bool includeIgnored = false) =>
+        {
+            // RejectedSubmission is deliberately NOT ITenantOwned (a row whose tenant attribution
+            // FAILED has no tenant), so the tenant split must be applied by hand — same as the UI page.
+            var query = db.RejectedSubmissions.AsNoTracking();
+            if (tenant.FilterEnabled)
+                query = query.Where(r => r.TenantId == tenant.FilterTenantId);
+            if (!includeIgnored)
+                query = query.Where(r => r.IgnoredUtc == null);
+
+            var rows = await query.ToListAsync(ct);
+            return Results.Ok(rows
+                .OrderByDescending(r => r.LastSeenUtc)
+                .Select(r => new RejectionSummary(
+                    r.Id, r.TenantId, r.ClientIp, r.Reason.ToString(), r.Reason.Describe(), r.ReplyCode,
+                    r.SenderDomain, r.Detail, r.IsTrustedSource, r.Reason.IsTemporary(), r.Count,
+                    r.FirstSeenUtc, r.LastSeenUtc, r.IgnoredUtc, r.LastBuffer)));
+        }).WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Diag));
     }
 
     private static void MapStatisticsEndpoints(RouteGroupBuilder group)
@@ -772,6 +888,55 @@ public record CreateAcceptedDomainRequest(string Domain);
 public record CreateAcceptedSenderDomainRequest(string Domain);
 public record CreateTenantRequest(string Name, string Slug);
 public record UpdateTenantRequest(string Name, bool IsEnabled);
+
+public record AuditQueryResponse(int Total, IReadOnlyList<AuditEventSummary> Events);
+
+/// <summary>One audit row. <c>ActorApiKeyId</c> set = programmatic actor (automation/MCP), with
+/// <c>ActorEmail</c> carrying the key's name; both actor ids null = system/background action.</summary>
+public record AuditEventSummary(
+    int Id, DateTimeOffset OccurredUtc, string Action, int? ActorUserId, int? ActorApiKeyId,
+    string? ActorEmail, int? TargetUserId, int? TenantId, string? Detail);
+
+/// <summary>A self-check run without its findings — the trend/history view.</summary>
+public record HealthSnapshotSummary(
+    long Id, DateTimeOffset RunUtc, int DurationMs, string OverallSeverity,
+    int ErrorCount, int WarningCount, int InfoCount, int OkCount)
+{
+    public static HealthSnapshotSummary From(HealthCheckSnapshot s) => new(
+        s.Id, s.RunUtc, s.DurationMs, s.OverallSeverity.ToString(),
+        s.ErrorCount, s.WarningCount, s.InfoCount, s.OkCount);
+}
+
+/// <summary>The latest self-check run including its findings (severities as strings for readability).</summary>
+public record HealthSnapshotDetail(
+    long Id, DateTimeOffset RunUtc, int DurationMs, string OverallSeverity,
+    int ErrorCount, int WarningCount, int InfoCount, int OkCount,
+    IReadOnlyList<HealthFindingSummary> Findings)
+{
+    public static HealthSnapshotDetail From(HealthCheckSnapshot s) => new(
+        s.Id, s.RunUtc, s.DurationMs, s.OverallSeverity.ToString(),
+        s.ErrorCount, s.WarningCount, s.InfoCount, s.OkCount,
+        s.Findings.Select(f => new HealthFindingSummary(
+            f.Category, f.Code, f.Severity.ToString(), f.Title, f.Detail, f.Target, f.Hint)).ToList());
+}
+
+public record HealthFindingSummary(
+    string Category, string Code, string Severity, string Title, string Detail, string? Target, string? Hint);
+
+public record SuppressionSummary(
+    int Id, int TenantId, string Address, string Reason, string? Detail, DateTimeOffset CreatedUtc);
+
+/// <summary>TenantId required only for host-scope callers; tenant-scoped callers always suppress
+/// within their own tenant. The reason is always Manual for API-created entries.</summary>
+public record CreateSuppressionRequest(string Address, string? Detail = null, int? TenantId = null);
+
+/// <summary>One aggregated refused submission. <c>ReasonDescription</c> is the operator-facing text;
+/// <c>IsTemporary</c> marks throttling that clears on its own; <c>LastBuffer</c> is the redacted
+/// failing command line (syntax errors only, never message content).</summary>
+public record RejectionSummary(
+    int Id, int? TenantId, string ClientIp, string Reason, string ReasonDescription, int ReplyCode,
+    string SenderDomain, string? Detail, bool IsTrustedSource, bool IsTemporary, long Count,
+    DateTimeOffset FirstSeenUtc, DateTimeOffset LastSeenUtc, DateTimeOffset? IgnoredUtc, string? LastBuffer);
 
 public record ApiKeySummary(
     int Id, int? TenantId, string Name, string KeyPrefix, string Role, string? Scopes,
