@@ -62,7 +62,12 @@ else if (createdSecret is not null)
                     <BbLabel>Use it</BbLabel>
                     <p class="text-muted" style="font-size:0.8125rem;margin:0 0 0.35rem;">
                         REST API: send it as <code>Authorization: Bearer &lt;key&gt;</code> or <code>X-Api-Key: &lt;key&gt;</code>.
-                        For an MCP client (e.g. Claude Code), add the server with the key already filled in:
+                        For an MCP client (e.g. Claude Code), add the server with the key already filled in &mdash; pick the scope:
+                    </p>
+
+                    <p class="text-muted" style="font-size:0.78rem;margin:0.5rem 0 0.2rem;">
+                        <strong>This project only</strong> (default) &mdash; the assistant sees the relay only when Claude Code
+                        runs in that one folder:
                     </p>
                     <div style="display:flex;gap:0.5rem;align-items:flex-start;">
                         <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.5rem 0.7rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.8rem;">@McpAddCommand</code></pre>
@@ -71,6 +76,21 @@ else if (createdSecret is not null)
                         </BbButton>
                     </div>
                     @if (mcpCommandCopied)
+                    {
+                        <span class="text-muted" style="font-size:0.8125rem;">Copied to clipboard</span>
+                    }
+
+                    <p class="text-muted" style="font-size:0.78rem;margin:0.6rem 0 0.2rem;">
+                        <strong>All your projects</strong> (<code class="mono">--scope user</code>) &mdash; the relay is
+                        available in every folder you open on this machine:
+                    </p>
+                    <div style="display:flex;gap:0.5rem;align-items:flex-start;">
+                        <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.5rem 0.7rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.8rem;">@McpAddCommandUserScope</code></pre>
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopyMcpCommandUserScopeAsync">
+                            <LucideIcon Name="copy" />
+                        </BbButton>
+                    </div>
+                    @if (mcpCommandUserScopeCopied)
                     {
                         <span class="text-muted" style="font-size:0.8125rem;">Copied to clipboard</span>
                     }
@@ -411,10 +431,15 @@ else if (key is not null)
     private string? createdSecret;
     private bool copied;
     private bool mcpCommandCopied;
+    private bool mcpCommandUserScopeCopied;
 
     private string McpUrl => $"{Nav.BaseUri}mcp";
     private string McpAddCommand =>
         $"claude mcp add --transport http win-smtp-relay {McpUrl} --header \"Authorization: Bearer {createdSecret}\"";
+    // Same command with --scope user: registers the server for every folder on the machine,
+    // not only the one Claude Code is started in (the default "local" scope).
+    private string McpAddCommandUserScope =>
+        $"claude mcp add --scope user --transport http win-smtp-relay {McpUrl} --header \"Authorization: Bearer {createdSecret}\"";
 
     // Edit/view state.
     private ApiKey? key;
@@ -501,6 +526,14 @@ else if (key is not null)
             return;
         await JS.InvokeVoidAsync("navigator.clipboard.writeText", McpAddCommand);
         mcpCommandCopied = true;
+    }
+
+    private async Task CopyMcpCommandUserScopeAsync()
+    {
+        if (createdSecret is null)
+            return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", McpAddCommandUserScope);
+        mcpCommandUserScopeCopied = true;
     }
 
     private async Task ConfirmRevokeAsync()

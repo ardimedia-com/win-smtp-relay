@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build71] - 2026-07-20
+
+### Added
+
+- **The one-time-secret screen and the MCP page now show both a project-local and a machine-wide
+  (`--scope user`) `claude mcp add` command.** The default `claude mcp add` registers the relay only for
+  the folder Claude Code is started in; the new `--scope user` variant makes it available in every folder
+  on the machine. Both are shown with the key already filled in, with a one-line note on the difference.
+
 ## [1.0.0-beta1-build70] - 2026-07-19
 
 ### Added
