@@ -11,6 +11,9 @@
     <PackageReference Include="BCrypt.Net-Next" Version="4.*" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.*" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.*" />
+    <!-- Overrides the vulnerable transitive 2.1.11 (NU1903 / GHSA-2m69-gcr7-jv3q, SQLite < 3.50.2).
+         Pinned to the 2.1.x line EF Core 10 targets; lift to 3.x when EF Core bumps its dependency. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.*">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

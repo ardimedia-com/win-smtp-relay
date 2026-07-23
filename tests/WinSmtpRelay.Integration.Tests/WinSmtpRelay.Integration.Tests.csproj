@@ -13,6 +13,8 @@
     <PackageReference Include="MSTest" Version="4.2.3" />
     <PackageReference Include="MailKit" Version="4.*" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.*" />
+    <!-- Overrides the vulnerable transitive 2.1.11 (NU1903 / GHSA-2m69-gcr7-jv3q); see WinSmtpRelay.Storage.csproj. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.*" />
   </ItemGroup>
 

@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Known NU1902 (moderate, GHSA-pgww-w46g-26qg): BlazorBlueprint → HtmlSanitizer (stable line)
+         pins the vulnerable AngleSharp [0.17.1] exactly, so it cannot be overridden without breaking
+         the sanitizer. Fixed upstream in HtmlSanitizer 9.1 (beta, AngleSharp ≥ 1.5.2) — lift when that
+         goes stable and BlazorBlueprint adopts it. -->
     <PackageReference Include="BlazorBlueprint.Components" Version="3.12.1" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.*" />
   </ItemGroup>

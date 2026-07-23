@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back to the machine FQDN instead of an explicitly configured public hostname. Combined with the
   existing reverse-DNS finding this catches an EHLO/PTR mismatch before the first strict receiver does.
 
+### Security
+
+- **Fixed two high-severity dependency vulnerabilities (NU1903)** by overriding vulnerable transitive
+  packages: `SQLitePCLRaw.bundle_e_sqlite3` 2.1.11 → 2.1.12 (GHSA-2m69-gcr7-jv3q, memory corruption in
+  SQLite < 3.50.2) and `Microsoft.OpenApi` 2.0.0 → 2.11.0 (GHSA-v5pm-xwqc-g5wc, stack-overflow DoS on
+  circular schema references). A remaining *moderate* advisory (AngleSharp 0.17.1 via BlazorBlueprint →
+  HtmlSanitizer, GHSA-pgww-w46g-26qg) cannot be fixed downstream — the sanitizer pins that exact
+  version; documented in the csproj with the lift condition (HtmlSanitizer 9.1 stable).
+
 ### Fixed
 
 - **Outbound deliveries now announce a fully qualified EHLO/HELO name.** `LocalDomain` was never set, so

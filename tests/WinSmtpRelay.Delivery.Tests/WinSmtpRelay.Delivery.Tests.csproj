@@ -12,6 +12,8 @@
     <PackageReference Include="MSTest" Version="4.2.3" />
     <PackageReference Include="NSubstitute" Version="5.3.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.*" />
+    <!-- Overrides the vulnerable transitive 2.1.11 (NU1903 / GHSA-2m69-gcr7-jv3q); see WinSmtpRelay.Storage.csproj. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
   </ItemGroup>
 
   <ItemGroup>

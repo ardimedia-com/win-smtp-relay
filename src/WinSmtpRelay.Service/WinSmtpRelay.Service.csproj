@@ -15,6 +15,9 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.*" />
+    <!-- Overrides the vulnerable transitive 2.0.0 (NU1903 / GHSA-v5pm-xwqc-g5wc, stack-overflow DoS
+         on circular schema references; patched in 2.7.5+). -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.11.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.*" />
     <PackageReference Include="System.Drawing.Common" Version="10.*" />
