@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-connector EHLO hostname override.** A send connector that sends from a different egress IP than
+  the host default can announce its own EHLO name (the FQDN matching that IP's PTR record) — new
+  `EhloDomain` field on send connectors (UI + API).
+- **Self-check: EHLO name finding.** The Deliverability self-check now reports what outbound delivery
+  will announce in EHLO — error when no qualified name exists (delivery paused), warning when it falls
+  back to the machine FQDN instead of an explicitly configured public hostname. Combined with the
+  existing reverse-DNS finding this catches an EHLO/PTR mismatch before the first strict receiver does.
+
+### Fixed
+
+- **Outbound deliveries now announce a fully qualified EHLO/HELO name.** `LocalDomain` was never set, so
+  MailKit announced the bare machine name, which strict receivers reject outright with
+  `550 Is neither a FQDN nor a IP literal` (RFC 5321 §4.1.4) — observed live against FL1/Telecom
+  Liechtenstein MX hosts, permanently bouncing every recipient on such domains. The announced name is now
+  the connector's `EhloDomain` override, else the **public hostname** (Settings → Sending identity — the
+  setting that always documented itself as "used as the EHLO name"), else the machine's FQDN.
+  **BREAKING (behaviour):** when none of the three yields a fully qualified name (no public hostname
+  configured and the machine has no DNS suffix), outbound delivery now **pauses** — messages stay queued
+  with a loud error and a blocking self-check finding — instead of silently announcing an unqualified
+  name that works against tolerant receivers and bounces at strict ones. Set the public hostname (ideally
+  matching the outbound IP's PTR) to resume.
+- **DKIM signatures now survive delivery to receivers without 8BITMIME.** The message is prepared to
+  7-bit encoding *before* DKIM signing (MimeKit's documented prerequisite). Previously an 8-bit body was
+  signed as-is and re-encoded by MailKit at send time when the receiving server did not advertise
+  8BITMIME — invalidating the DKIM body hash and failing DMARC at exactly the strict/legacy receivers.
+- **Journal wording no longer conflates "MX rejected us" with "no MX reachable".** A protocol-level
+  rejection now reads `mx01.example.com rejected the delivery: <server text>` (and names that host as the
+  remote server), while reachability failures read `No MX host for domain … could be reached: <reason>`.
+  The previous single "All MX hosts exhausted" text sent Journal readers down the wrong debugging path.
+
 ## [1.0.0-beta1-build71] - 2026-07-20
 
 ### Added

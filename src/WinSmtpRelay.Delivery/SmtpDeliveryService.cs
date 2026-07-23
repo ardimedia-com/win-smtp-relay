@@ -5,6 +5,7 @@ using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MimeKit;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -20,6 +21,7 @@ public class SmtpDeliveryService : IDeliveryService
     private readonly DkimSigningService _dkimSigner;
     private readonly IDkimDomainService _dkimDomains;
     private readonly IPublicSuffixService _psl;
+    private readonly IDnsSettingsService _dnsSettings;
     private readonly ILogger<SmtpDeliveryService> _logger;
 
     public SmtpDeliveryService(
@@ -29,6 +31,7 @@ public class SmtpDeliveryService : IDeliveryService
         DkimSigningService dkimSigner,
         IDkimDomainService dkimDomains,
         IPublicSuffixService psl,
+        IDnsSettingsService dnsSettings,
         ILogger<SmtpDeliveryService> logger)
     {
         _mxResolver = mxResolver;
@@ -37,12 +40,20 @@ public class SmtpDeliveryService : IDeliveryService
         _dkimSigner = dkimSigner;
         _dkimDomains = dkimDomains;
         _psl = psl;
+        _dnsSettings = dnsSettings;
         _logger = logger;
     }
 
     public async Task<IReadOnlyList<DeliveryResult>> DeliverAsync(QueuedMessage message, CancellationToken cancellationToken = default)
     {
         var mimeMessage = await MimeMessage.LoadAsync(new MemoryStream(message.RawMessage), cancellationToken);
+
+        // Pin the wire encoding BEFORE DKIM-signing (MimeKit's documented DKIM prerequisite). Without
+        // this, MailKit re-encodes 8-bit bodies to 7-bit at send time when the receiving server does not
+        // advertise 8BITMIME — changing the body AFTER the signature was computed, so the DKIM body hash
+        // (bh=) no longer matches and DMARC fails at exactly the strict/legacy receivers. Preparing to
+        // 7-bit up front makes the signed bytes immutable for every receiver.
+        mimeMessage.Prepare(EncodingConstraint.SevenBit);
 
         // DKIM-sign before sending, scoped to the message's tenant so a tenant can only sign with
         // its own key (no-op if the tenant has no DKIM key for the sender domain).
@@ -60,6 +71,10 @@ public class SmtpDeliveryService : IDeliveryService
 
         // Optional per-tenant outbound source IP (null = OS default).
         var egressEndPoint = ParseEgressEndPoint(await _configCache.GetTenantEgressIpAsync(message.TenantId, cancellationToken));
+
+        // The host-level EHLO fallback (Settings → Sending identity → Public hostname). Per-connector
+        // overrides take precedence; the effective name is resolved per delivery path below.
+        var publicHostname = (await _dnsSettings.GetAsync(cancellationToken)).PublicHostname;
 
         // Skip recipients that already received a 250 on a previous attempt — never re-deliver to them
         // when retrying a partially-failed multi-recipient/multi-domain message.
@@ -83,7 +98,7 @@ public class SmtpDeliveryService : IDeliveryService
             var domain = domainGroup.Key;
             var domainRecipients = domainGroup.ToList();
 
-            var domainResults = await DeliverToDomainAsync(mimeMessage, envelopeSender, domainRecipients, domain, message.TenantId, egressEndPoint, cancellationToken);
+            var domainResults = await DeliverToDomainAsync(mimeMessage, envelopeSender, domainRecipients, domain, message.TenantId, egressEndPoint, publicHostname, cancellationToken);
             results.AddRange(domainResults);
         }
 
@@ -106,6 +121,7 @@ public class SmtpDeliveryService : IDeliveryService
         string domain,
         int tenantId,
         IPEndPoint? egressEndPoint,
+        string? publicHostname,
         CancellationToken cancellationToken)
     {
         // 1. Per-domain route takes highest priority (scoped to the message's tenant so a tenant
@@ -123,6 +139,7 @@ public class SmtpDeliveryService : IDeliveryService
                 connector.OpportunisticTls, connector.RequireTls,
                 connector.ConnectTimeoutSeconds,
                 egressEndPoint,
+                RequireEhloDomain(connector.EhloDomain, publicHostname),
                 cancellationToken);
         }
 
@@ -140,6 +157,7 @@ public class SmtpDeliveryService : IDeliveryService
                 defaultConnector.OpportunisticTls, defaultConnector.RequireTls,
                 defaultConnector.ConnectTimeoutSeconds,
                 egressEndPoint,
+                RequireEhloDomain(defaultConnector.EhloDomain, publicHostname),
                 cancellationToken);
         }
 
@@ -153,19 +171,22 @@ public class SmtpDeliveryService : IDeliveryService
                 _config.OpportunisticTls, _config.RequireTls,
                 _config.ConnectTimeoutSeconds,
                 egressEndPoint,
+                RequireEhloDomain(null, publicHostname),
                 cancellationToken);
         }
 
         // 4. Direct MX delivery
+        var ehloDomain = RequireEhloDomain(null, publicHostname);
         var mxHosts = await _mxResolver.ResolveMxAsync(domain, cancellationToken);
 
         Exception? lastException = null;
+        string? rejectedByHost = null; // the MX that rejected us at SMTP protocol level, if any
         foreach (var mxHost in mxHosts)
         {
             try
             {
                 return await SendViaSmtpAsync(mimeMessage, sender, recipients, mxHost, 25, null, null,
-                    _config.OpportunisticTls, requireTls: false, _config.ConnectTimeoutSeconds, egressEndPoint, cancellationToken);
+                    _config.OpportunisticTls, requireTls: false, _config.ConnectTimeoutSeconds, egressEndPoint, ehloDomain, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -179,31 +200,57 @@ public class SmtpDeliveryService : IDeliveryService
             catch (Exception ex)
             {
                 lastException = ex;
+                if (ex is SmtpCommandException)
+                    rejectedByHost = mxHost;
                 _logger.LogWarning(ex, "Delivery to MX {MxHost} failed for domain {Domain}, trying next",
                     mxHost, domain);
             }
         }
 
-        // All MX hosts exhausted. Use the server's real status code if one actually rejected us; a
-        // connection/timeout/DNS failure is TRANSIENT (421) — not a permanent 550 — so a momentary
-        // outage of the destination is retried, not silently bounced.
+        // No MX accepted the message. Two very different failure modes must stay distinguishable in the
+        // Journal: an MX that we REACHED and that REJECTED us at SMTP protocol level (permanent, its real
+        // 5xx/4xx code and response text), versus no MX being reachable at all (transient 421 — a
+        // momentary outage of the destination is retried, not silently bounced).
         var statusCode = lastException is SmtpCommandException sce ? ((int)sce.StatusCode).ToString() : "421";
-        // Surface a human-readable reason — the raw OperationCanceledException message is just
-        // "A task was canceled", which reads as a mystery in the Journal/Event Log.
-        var errorMessage = lastException switch
-        {
-            null => "no MX host could be reached",
-            OperationCanceledException => $"the connection timed out after {_config.ConnectTimeoutSeconds}s",
-            _ => lastException.Message
-        };
+        var statusMessage = BuildMxFailureMessage(domain, lastException, rejectedByHost, _config.ConnectTimeoutSeconds);
         return recipients.Select(r => new DeliveryResult
         {
             Recipient = r,
             StatusCode = statusCode,
-            StatusMessage = $"All MX hosts exhausted for domain {domain}: {errorMessage}",
-            RemoteServer = mxHosts.FirstOrDefault()
+            StatusMessage = statusMessage,
+            RemoteServer = rejectedByHost ?? mxHosts.FirstOrDefault()
         }).ToList();
     }
+
+    /// <summary>
+    /// Builds the Journal-facing failure text for an unsuccessful MX loop. A protocol-level rejection
+    /// names the rejecting host and quotes the server's response ("mx01.example.com rejected the
+    /// delivery: …"); anything else is a reachability problem ("No MX host … could be reached").
+    /// Conflating the two sends whoever reads the Journal down the wrong debugging path.
+    /// </summary>
+    internal static string BuildMxFailureMessage(string domain, Exception? lastException, string? rejectedByHost, int connectTimeoutSeconds)
+    {
+        if (lastException is SmtpCommandException smtpEx)
+            return $"{rejectedByHost ?? "The MX host"} rejected the delivery: {smtpEx.Message}";
+
+        // Surface a human-readable reason — the raw OperationCanceledException message is just
+        // "A task was canceled", which reads as a mystery in the Journal/Event Log.
+        return lastException switch
+        {
+            null => $"No MX host for domain {domain} could be reached (no usable MX records)",
+            OperationCanceledException => $"No MX host for domain {domain} could be reached: the connection timed out after {connectTimeoutSeconds}s",
+            _ => $"No MX host for domain {domain} could be reached: {lastException.Message}"
+        };
+    }
+
+    /// <summary>
+    /// Resolves the effective EHLO name for a delivery path (connector override → public hostname →
+    /// machine FQDN) and refuses to deliver when none is fully qualified — announcing an unqualified
+    /// name gets mail rejected by strict receivers, so failing loudly here beats bouncing in production.
+    /// </summary>
+    private static string RequireEhloDomain(string? connectorEhloDomain, string? publicHostname) =>
+        EhloHostname.Resolve(connectorEhloDomain, publicHostname)
+        ?? throw new EhloNotConfiguredException();
 
     /// <summary>
     /// Returns the envelope sender (MAIL FROM) to transmit. When the stored envelope-from is not aligned with
@@ -304,6 +351,7 @@ public class SmtpDeliveryService : IDeliveryService
         bool requireTls,
         int connectTimeoutSeconds,
         IPEndPoint? egressEndPoint,
+        string ehloDomain,
         CancellationToken cancellationToken)
     {
         // PerRecipientSmtpClient records each recipient's RCPT TO verdict instead of MailKit's default of
@@ -312,6 +360,10 @@ public class SmtpDeliveryService : IDeliveryService
         // same-domain transaction.
         using var client = new PerRecipientSmtpClient(new MailKitProtocolLogger(_logger));
         client.Timeout = connectTimeoutSeconds * 1000;
+
+        // Announce a fully qualified EHLO/HELO name. MailKit's default is the bare machine name, which
+        // strict receivers reject ("550 Is neither a FQDN nor a IP literal", RFC 5321 §4.1.4).
+        client.LocalDomain = ehloDomain;
 
         // Bind outbound connections to the tenant's source IP when configured.
         if (egressEndPoint is not null)
@@ -449,3 +501,15 @@ public class DeliveryException(string message, IReadOnlyList<DeliveryResult> res
 {
     public IReadOnlyList<DeliveryResult> Results { get; } = results;
 }
+
+/// <summary>
+/// Thrown before any connection is made when no fully qualified EHLO name can be resolved (no connector
+/// override, no public hostname configured, and the machine has no DNS suffix). The delivery worker
+/// keeps the message queued — with a loud error, not a bounce — until the operator fixes the
+/// configuration; the daily self-check surfaces the same condition as a blocking finding.
+/// </summary>
+public sealed class EhloNotConfiguredException() : Exception(
+    "Outbound delivery is paused: no fully qualified EHLO hostname is available. Set the public hostname "
+    + "under Settings → Sending identity (ideally the FQDN matching the PTR of the outbound IP), or an "
+    + "EHLO override on the send connector. Announcing this machine's unqualified name would get mail "
+    + "rejected by strict receivers (RFC 5321).");

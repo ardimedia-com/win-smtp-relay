@@ -105,6 +105,15 @@ else
                     <BbLabel For="retry-intervals">Retry Intervals (minutes, comma-separated)</BbLabel>
                     <BbInput Id="retry-intervals" @bind-Value="retryIntervals" Placeholder="1,5,30,120,480,1440" />
                 </div>
+                <div class="form-group col-span-full">
+                    <BbLabel For="ehlo-domain">EHLO hostname override (empty = host default)</BbLabel>
+                    <BbInput Id="ehlo-domain" @bind-Value="ehloDomain" Placeholder="relay.example.com" />
+                    <span class="text-muted" style="font-size:0.8rem;">
+                        Announced in EHLO/HELO for deliveries through this connector. Only needed when this
+                        connector sends from a different egress IP than the host default &mdash; use the FQDN
+                        matching that IP's PTR record. Empty uses the public hostname from Settings &rarr; Sending identity.
+                    </span>
+                </div>
                 <div class="form-group">
                     <BbLabel For="enabled">Enabled</BbLabel>
                     <BbNativeSelect Id="enabled" @bind-Value="enabled">
@@ -154,6 +163,7 @@ else
     private string maxRetry = "48";
     private string retryIntervals = "1,5,30,120,480,1440";
     private string enabled = "true";
+    private string ehloDomain = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -196,6 +206,7 @@ else
         maxRetry = c.MaxRetryHours.ToString();
         retryIntervals = c.RetryIntervalsMinutes;
         enabled = c.IsEnabled.ToString().ToLowerInvariant();
+        ehloDomain = c.EhloDomain ?? "";
         isLoading = false;
     }
 
@@ -219,7 +230,8 @@ else
             MaxRetryHours = int.TryParse(maxRetry, out var mr) ? mr : 48,
             RetryIntervalsMinutes = retryIntervals.Trim(),
             ConnectTimeoutSeconds = 30,
-            IsEnabled = enabled == "true"
+            IsEnabled = enabled == "true",
+            EhloDomain = string.IsNullOrWhiteSpace(ehloDomain) ? null : ehloDomain.Trim().TrimEnd('.')
         };
 
         if (IsNew)

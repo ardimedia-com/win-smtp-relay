@@ -27,7 +27,15 @@ public class DomainRoutingTests
             dkimSigner,
             new StubDkimDomainService(),
             new PublicSuffixService(),
+            new StubDnsSettingsService(),
             NullLogger<SmtpDeliveryService>.Instance);
+    }
+
+    private sealed class StubDnsSettingsService : IDnsSettingsService
+    {
+        public Task<DnsSettings> GetAsync(CancellationToken ct = default) =>
+            Task.FromResult(new DnsSettings { PublicHostname = "relay.example.com" });
+        public Task UpdateAsync(DnsSettings settings, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private static DomainRoute CreateRoute(string pattern, string host, int port = 587)

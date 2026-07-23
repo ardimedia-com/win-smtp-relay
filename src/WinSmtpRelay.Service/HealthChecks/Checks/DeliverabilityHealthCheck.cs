@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Health;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -63,6 +64,25 @@ public sealed class DeliverabilityHealthCheck(
             f.Add(MapRecord("hostname", $"Public hostname {settings.PublicHostname}", settings.PublicHostname!, host,
                 missing: HealthSeverity.Warning, mismatch: HealthSeverity.Warning));
         }
+
+        // --- EHLO name: what outbound delivery will actually announce ---
+        // PTR/FCrDNS alignment against the public hostname is covered by the reverse-dns finding below;
+        // this finding covers the announced name itself (paused / implicit fallback / explicit).
+        var ehlo = EhloHostname.Resolve(null, settings.PublicHostname);
+        if (ehlo is null)
+            f.Add(Err("ehlo", "No EHLO hostname — outbound delivery is paused",
+                "No fully qualified EHLO name is available: no public hostname is configured and this machine has no DNS suffix. "
+                + "Outbound delivery refuses to run rather than announce an unqualified name, which strict receivers reject "
+                + "(\"550 Is neither a FQDN nor a IP literal\"). Queued mail is held until this is fixed.",
+                hint: "Set the public hostname under Settings → Sending identity to the FQDN matching the outbound IP's PTR record."));
+        else if (string.IsNullOrWhiteSpace(settings.PublicHostname))
+            f.Add(Warn("ehlo", $"EHLO falls back to the machine FQDN {ehlo}",
+                "No public hostname is configured, so outbound delivery announces this machine's FQDN. That works only while "
+                + "it matches the outbound IP's PTR record — receivers score the EHLO/PTR/SPF constellation.",
+                ehlo, "Set the public hostname under Settings → Sending identity explicitly (the FQDN matching the PTR)."));
+        else
+            f.Add(Ok("ehlo", $"Outbound EHLO announces {ehlo}",
+                "Send connectors without an explicit EHLO override announce this name. PTR alignment is checked below.", ehlo));
 
         // --- Per sending IP: reverse DNS (PTR) + DNS blocklist ---
         if (ips.Count == 0)

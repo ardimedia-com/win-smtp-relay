@@ -231,6 +231,17 @@ public class DeliveryWorker(
             logger.LogInformation("Message {MessageId} (id={QueueId}) delivered successfully",
                 message.MessageId, message.Id);
         }
+        catch (EhloNotConfiguredException ex)
+        {
+            // A configuration gap, not a delivery failure: nothing was attempted, so no delivery-log
+            // entry, no RetryCount bump, no path to a bounce. Keep the message queued and re-check in a
+            // few minutes; the error is loud (Event Log + self-check) until the operator fixes it.
+            logger.LogError("Message {MessageId} (id={QueueId}) held: {Reason}",
+                message.MessageId, message.Id, ex.Message);
+            await queue.UpdateStatusAsync(message.Id, MessageStatus.Queued, ex.Message, CancellationToken.None);
+            await queue.SetRetryAsync(message.Id, message.RetryCount, DateTimeOffset.UtcNow.AddMinutes(5), CancellationToken.None);
+            _ = activityNotifier.NotifyQueueChangedAsync();
+        }
         catch (Exception ex)
         {
             // Service shutdown cancelled an in-flight delivery — not a real failure. Re-queue it (with a
