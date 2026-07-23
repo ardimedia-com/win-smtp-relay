@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build72] - 2026-07-23
+
 ### Added
 
 - **Per-connector EHLO hostname override.** A send connector that sends from a different egress IP than
