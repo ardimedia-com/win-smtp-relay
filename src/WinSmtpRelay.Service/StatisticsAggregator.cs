@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
@@ -77,14 +78,18 @@ public class StatisticsAggregator(
     /// <summary>
     /// Sleeps (in capped chunks) until the next configured run time. Re-reads the setting each
     /// chunk so an aggregation-time change is picked up promptly. Returns false if cancelled.
+    /// The next run is always measured from the moment the wait STARTED: measured from "now" on every
+    /// wake-up it would jump to tomorrow as soon as the target minute is reached, and the nightly
+    /// aggregation / retention purge never ran.
     /// </summary>
     private async Task<bool> WaitForNextRunAsync(CancellationToken ct)
     {
+        var waitStartedUtc = DateTime.UtcNow;
         var logged = false;
         while (!ct.IsCancellationRequested)
         {
             var settings = await GetRetentionSettingsAsync(ct);
-            var wait = NextRunUtc(settings.AggregationTimeUtc) - DateTime.UtcNow;
+            var wait = DailySchedule.NextRunUtc(settings.AggregationTimeUtc, new TimeOnly(0, 0), waitStartedUtc) - DateTime.UtcNow;
             if (wait <= TimeSpan.Zero)
                 return true;
 
@@ -111,15 +116,5 @@ public class StatisticsAggregator(
     {
         using var scope = scopeFactory.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<IStatisticsRetentionSettingsService>().GetAsync(ct);
-    }
-
-    private static DateTime NextRunUtc(string aggregationTimeUtc)
-    {
-        if (!TimeOnly.TryParse(aggregationTimeUtc, out var targetTime))
-            targetTime = new TimeOnly(0, 0);
-
-        var now = DateTime.UtcNow;
-        var todayTarget = now.Date.Add(targetTime.ToTimeSpan());
-        return todayTarget <= now ? todayTarget.AddDays(1) : todayTarget;
     }
 }

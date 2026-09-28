@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Health;
 using WinSmtpRelay.Core.Interfaces;
@@ -151,35 +152,25 @@ public class HealthCheckService(
 
     private static string Key(HealthCheckFinding f) => $"{f.Code}|{f.Target}";
 
-    /// <summary>Sleeps (in capped chunks, for responsive shutdown) until the next configured run time.</summary>
+    /// <summary>
+    /// Sleeps (in capped chunks, for responsive shutdown) until the next configured run time. The target is
+    /// fixed when the wait starts — re-computing it on every wake-up would always yield tomorrow once the
+    /// target minute is reached, so the scheduled run never happened (only the startup run did).
+    /// </summary>
     private async Task<bool> WaitForNextRunAsync(string dailyTimeUtc, CancellationToken ct)
     {
-        var logged = false;
+        var nextRun = DailySchedule.NextRunUtc(dailyTimeUtc, new TimeOnly(5, 30), DateTime.UtcNow);
+        logger.LogInformation("Next self-check at {Time} UTC (in ~{Delay})", dailyTimeUtc, nextRun - DateTime.UtcNow);
+
         while (!ct.IsCancellationRequested)
         {
-            var wait = NextRunUtc(dailyTimeUtc) - DateTime.UtcNow;
+            var wait = nextRun - DateTime.UtcNow;
             if (wait <= TimeSpan.Zero)
                 return true;
-
-            if (!logged)
-            {
-                logger.LogInformation("Next self-check at {Time} UTC (in ~{Delay})", dailyTimeUtc, wait);
-                logged = true;
-            }
 
             try { await Task.Delay(wait < PollInterval ? wait : PollInterval, ct); }
             catch (OperationCanceledException) { return false; }
         }
         return false;
-    }
-
-    private static DateTime NextRunUtc(string dailyTimeUtc)
-    {
-        if (!TimeOnly.TryParse(dailyTimeUtc, out var target))
-            target = new TimeOnly(5, 30);
-
-        var now = DateTime.UtcNow;
-        var todayTarget = now.Date.Add(target.ToTimeSpan());
-        return todayTarget <= now ? todayTarget.AddDays(1) : todayTarget;
     }
 }

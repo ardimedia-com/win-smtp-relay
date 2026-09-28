@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Daily self-check, nightly statistics aggregation and retention purge never ran on schedule.** The
+  wait loops recomputed "the next run after now" on every wake-up; at the target minute "now" had caught
+  up with it, so the next run jumped to tomorrow and the wait never reached zero. Only the startup
+  self-check ran — the digest kept showing a snapshot from the last service start (observed: 5 days old).
+  The target is now fixed when the wait starts (`DailySchedule.NextRunUtc`, unit-tested); the statistics
+  loop still re-reads the configured aggregation time while waiting.
+
+### Changed
+
+- `Microsoft.OpenApi` override raised 2.11.0 → 2.12.0: `Microsoft.AspNetCore.OpenApi` 10.0.12 requires
+  ≥ 2.12.0; the restore otherwise fails with NU1605 (package downgrade, warning as error).
+
 ## [1.0.0-beta1-build72] - 2026-07-23
 
 ### Added
