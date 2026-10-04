@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build73] - 2026-10-04
+
 ### Fixed
 
 - **Devices that send `MAIL FROM: user@host` (no angle brackets) can now relay from trusted networks.**
