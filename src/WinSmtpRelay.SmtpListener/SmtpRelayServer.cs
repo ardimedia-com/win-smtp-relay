@@ -131,6 +131,12 @@ public class SmtpRelayServer : BackgroundService
 
         serviceProvider.Add(_userAuthenticator);
 
+        // Accept "MAIL FROM: user@host" / "RCPT TO: user@host" (no angle brackets) from trusted networks —
+        // firmware that cannot be fixed sends it, and the library answers 502. Syntax only: the normalised
+        // line then goes through the unchanged parser and every gate in RelayMailboxFilter. Untrusted
+        // clients stay strict. See LenientEndpointListenerFactory and design/lenient-address-syntax.md.
+        serviceProvider.Add(new LenientEndpointListenerFactory(IsTrustedSourceAsync, _logger));
+
         var smtpServer = new SmtpServer.SmtpServer(options, serviceProvider);
 
         smtpServer.SessionCreated += (sender, args) =>
@@ -220,6 +226,20 @@ public class SmtpRelayServer : BackgroundService
             // Observability must never break a session, and this handler runs inside one.
             _logger.LogDebug(ex, "Recording a protocol-level rejection failed");
         }
+    }
+
+    /// <summary>
+    /// Whether a client may use the lenient MAIL FROM / RCPT TO syntax: the same "configured network"
+    /// classification the Rejections page uses (<see cref="IpAccessEvaluator.IsTrustedSource"/>), so the
+    /// devices that page flags as misconfigured are exactly the ones this tolerance covers. It grants no
+    /// access — relay authorization stays with RelayMailboxFilter.
+    /// </summary>
+    private async ValueTask<bool> IsTrustedSourceAsync(IPAddress clientIp, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var cache = scope.ServiceProvider.GetRequiredService<IRuntimeConfigCache>();
+        var ipRules = await cache.GetIpAccessRulesAsync(ct);
+        return IpAccessEvaluator.IsTrustedSource(clientIp, ipRules, _config.AllowedNetworks);
     }
 
     /// <summary>

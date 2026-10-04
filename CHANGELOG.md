@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Devices that send `MAIL FROM: user@host` (no angle brackets) can now relay from trusted networks.**
+  Much embedded firmware omits the `<…>` RFC 5321 requires; the SMTP library answered
+  `502 Unrecognized command` and the device retried forever (observed: two HP MSA2012 storage
+  controllers, ~64,000 refused attempts in 2½ months, every alert mail lost). For clients in a configured
+  network (the same classification the Rejections page marks as trusted), a bare address — optionally
+  after blanks, optionally followed by ESMTP parameters — in `MAIL FROM` and `RCPT TO` is now rewritten to
+  the canonical form before parsing. Syntax only: the envelope then passes every existing gate
+  (allowed networks, open-relay protection, rate limits, sender policies) unchanged. Clients from
+  anywhere else stay strict and still get the 502, recorded as before. Implemented as a wrapper around
+  the library's own endpoint listener (its only pre-parser extension point); the DATA body and AUTH
+  continuation lines are never touched. See `design/lenient-address-syntax.md`.
 - **Daily self-check, nightly statistics aggregation and retention purge never ran on schedule.** The
   wait loops recomputed "the next run after now" on every wake-up; at the target minute "now" had caught
   up with it, so the next run jumped to tomorrow and the wait never reached zero. Only the startup

@@ -96,6 +96,9 @@ public static class IpAccessEvaluator
     /// tenant-attribution failure is precisely the case where the tenant is what could not be resolved.
     /// Matching ANY tenant's allow rule is therefore the only computable definition. It is a
     /// classification for reporting, never an authorization decision — do not use it as an access gate.
+    /// (Its one other use, enabling the lenient MAIL FROM / RCPT TO syntax in
+    /// <see cref="LenientEndpointListenerFactory"/>, is consistent with that: it only changes how a line is
+    /// parsed, and the parsed envelope then passes every authorization gate unchanged.)
     /// </para>
     /// <para>
     /// Only Allow rules specific enough to authorize relaying count (<see cref="IsTooBroadForRelay"/>),
