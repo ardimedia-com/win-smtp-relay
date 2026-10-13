@@ -70,6 +70,14 @@ public class HealthCheckOptions
     /// <summary>A certificate expiring within this many days is an Error.</summary>
     public int CertExpiryErrorDays { get; set; } = 3;
 
+    // ---- API keys ----
+
+    /// <summary>An enabled API key expiring within this many days is a Warning (time to issue a replacement).</summary>
+    public int ApiKeyExpiryWarningDays { get; set; } = 30;
+
+    /// <summary>An enabled API key expiring within this many days is an Error (triggers the immediate alert).</summary>
+    public int ApiKeyExpiryErrorDays { get; set; } = 7;
+
     // ---- Runtime ----
 
     /// <summary>Clock offset (seconds) versus the reference NTP server above which a Warning is raised (DKIM/TLS are time-sensitive).</summary>

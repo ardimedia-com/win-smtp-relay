@@ -20,6 +20,7 @@ public static class HealthCheckRegistration
         services.AddScoped<IHealthCheck, ConfigurationHealthCheck>();
         services.AddScoped<IHealthCheck, QueueHealthCheck>();
         services.AddScoped<IHealthCheck, SecurityHealthCheck>();
+        services.AddScoped<IHealthCheck, ApiKeyHealthCheck>();
         services.AddScoped<IHealthCheck, RuntimeHealthCheck>();
         services.AddScoped<IHealthCheck, RejectedSubmissionsHealthCheck>();
 

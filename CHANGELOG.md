@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The self-check warns before an API key expires.** An enabled key whose expiry date is within 30 days
+  becomes a warning in the daily self-check and report; within 7 days it becomes an error, which sends the
+  immediate alert once — days before scripts, MCP clients or secret stores using it start getting 401. An
+  enabled key that has already expired is listed as a warning (disable or replace it). Keys without an
+  expiry date and disabled keys produce nothing. Thresholds: `HealthCheck:ApiKeyExpiryWarningDays` /
+  `HealthCheck:ApiKeyExpiryErrorDays`.
+
 ## [1.0.0-beta1-build73] - 2026-10-04
 
 ### Fixed
