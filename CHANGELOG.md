@@ -66,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   certificate store re-imports its exported copy; when that failed, the page said «The file is not a valid PFX /
   PKCS#12 certificate, or the password is incorrect» — although no file or password was involved — and dropped
   the actual cause. The message now names the underlying error.
+- **Importing a certificate failed on hosts where the service account cannot create a machine key.** The
+  built-in self-signed certificate already fell back to the user key set there, but an uploaded PFX and a
+  certificate picked from the store were loaded into the machine key set only — so on such a host (seen on a
+  Windows 11 machine) every import, by upload or by «Use», failed. Both now use the same fallback.
 
 ## [1.0.0-beta1-build73] - 2026-10-04
 

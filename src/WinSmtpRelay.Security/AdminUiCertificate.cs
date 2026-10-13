@@ -31,11 +31,8 @@ public static class AdminUiCertificate
     // lives as long as the certificate object, which the cert provider roots for the process lifetime;
     // that is all SChannel needs, and the container is cleaned up on dispose/finalize.
     // (EphemeralKeySet is intentionally excluded — Windows SChannel/Kestrel can't use ephemeral keys.)
-    private static readonly X509KeyStorageFlags[] LoadStrategies =
-    [
-        X509KeyStorageFlags.MachineKeySet,
-        X509KeyStorageFlags.UserKeySet,
-    ];
+    // One list for the self-signed and the imported certificate (PfxKeyLoader), so both behave alike on every host.
+    private static readonly X509KeyStorageFlags[] LoadStrategies = WinSmtpRelay.Core.PfxKeyLoader.Strategies;
 
     /// <summary>
     /// Returns the certificate to bind the admin HTTPS endpoint to, or <c>null</c> if no certificate

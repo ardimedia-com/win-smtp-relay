@@ -2,6 +2,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
@@ -9,11 +10,11 @@ namespace WinSmtpRelay.Storage;
 
 public class AdminCertificateService(RelayDbContext db) : IAdminCertificateService
 {
-    // Round-trip through a machine key set so SChannel/Kestrel can use the private key. WITHOUT
-    // PersistKeySet: the key container then lives only as long as the certificate object (which the cert
-    // provider roots for the process lifetime — sufficient for SChannel) instead of accumulating a new
-    // orphaned container under MachineKeys on every service start and import.
-    private const X509KeyStorageFlags LoadFlags = X509KeyStorageFlags.MachineKeySet;
+    // Keys are loaded through PfxKeyLoader: machine key set first, user key set where the service account may not
+    // create a machine key container on this host (the self-signed certificate already falls back the same way;
+    // the import did not, so on such a host every import failed). WITHOUT PersistKeySet: the key container then
+    // lives only as long as the certificate object (which the cert provider roots for the process lifetime —
+    // sufficient for SChannel) instead of accumulating a new orphaned container on every service start and import.
 
     public async Task<AdminCertificateSettings> GetAsync(CancellationToken ct = default)
         => await db.AdminCertificateSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct) ?? new AdminCertificateSettings();
@@ -25,7 +26,7 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
             return null;
 
         var pfx = Convert.FromBase64String(row.PfxBase64);
-        return X509CertificateLoader.LoadPkcs12(pfx, null, LoadFlags);
+        return PfxKeyLoader.Load(pfx, null);
     }
 
     public async Task<AdminCertificateSettings> ImportAsync(byte[] pfxBytes, string? password, CancellationToken ct = default)
@@ -33,8 +34,7 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
         X509Certificate2 cert;
         try
         {
-            cert = X509CertificateLoader.LoadPkcs12(pfxBytes, password,
-                LoadFlags | X509KeyStorageFlags.Exportable);
+            cert = PfxKeyLoader.Load(pfxBytes, password, X509KeyStorageFlags.Exportable);
         }
         catch (Exception ex)
         {
@@ -80,7 +80,7 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
         if (row is null || !row.FollowStoreRenewals || string.IsNullOrEmpty(row.PfxBase64))
             return null;
 
-        using var current = X509CertificateLoader.LoadPkcs12(Convert.FromBase64String(row.PfxBase64), null, LoadFlags);
+        using var current = PfxKeyLoader.Load(Convert.FromBase64String(row.PfxBase64), null);
         var names = DnsNames(current);
         if (names.Count == 0)
             return null;
