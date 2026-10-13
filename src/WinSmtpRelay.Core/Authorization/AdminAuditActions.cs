@@ -74,6 +74,9 @@ public static class AdminAuditActions
 
     public const string RateLimitsUpdated = "ratelimits.updated";
 
+    /// <summary>Sending identity / SPF-DMARC inputs (Settings → Sending identity) changed.</summary>
+    public const string DnsSettingsUpdated = "dnssettings.updated";
+
     public const string HeaderRuleCreated = "headerrule.created";
     public const string HeaderRuleUpdated = "headerrule.updated";
     public const string HeaderRuleDeleted = "headerrule.deleted";

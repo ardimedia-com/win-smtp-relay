@@ -131,6 +131,31 @@ else if (IsNew)
                             <option value="@RelayRoles.TenantAdmin">Admin (read/write)</option>
                         }
                     </select>
+                    @if (ScopeTenantId is not null && canCreateHostKeys)
+                    {
+                        @* Host-level keys are minted only in the Global scope — say so, otherwise a host admin
+                           looking for "Host admin" here only ever finds the tenant roles. *@
+                        <p class="text-muted" style="font-size:0.8125rem;margin:0.35rem 0 0;">
+                            This key belongs to the current tenant. A <strong>host-level key</strong> (self-check, audit log,
+                            tenants, sending identity, DKIM of every tenant) is created in the <strong>Global</strong> scope —
+                            switch the scope selector at the top to <em>Global</em> and create it there.
+                        </p>
+                    }
+                </div>
+                <div class="form-group">
+                    <BbLabel For="expires">Expires</BbLabel>
+                    <select class="form-select" id="expires" value="@newExpiryDays"
+                            @onchange="@(e => newExpiryDays = e.Value?.ToString() ?? newExpiryDays)">
+                        <option value="90">In 90 days</option>
+                        <option value="180">In 180 days</option>
+                        <option value="365">In 1 year</option>
+                        <option value="730">In 2 years</option>
+                        <option value="never">Never</option>
+                    </select>
+                    <p class="text-muted" style="font-size:0.8125rem;margin:0.35rem 0 0;">
+                        After this date the key is refused. The daily self-check warns 30 days before and alerts 7 days
+                        before, so a replacement can be issued in time.
+                    </p>
                 </div>
                 @* Quick-start presets fill the role + scopes below for the two common purposes; you can
                    still adjust anything before creating. Intent is carried by the preset and the Name —
@@ -156,6 +181,11 @@ else if (IsNew)
                     <p class="text-muted" style="font-size:0.8125rem;margin:0.4rem 0 0;">
                         <strong>MCP assistant</strong>: diagnose + fix mail flow (read diagnostics &amp; messages,
                         write queue &amp; configuration) — no account access at all, no message bodies.
+                        @if (ScopeTenantId is null)
+                        {
+                            <text>In the Global scope it is a <strong>host-level</strong> key, so it can also read the self-check
+                            and the audit log and manage the sending identity and every tenant's DKIM.</text>
+                        }
                         <strong>Standard API</strong>: the same, plus <em>read</em> access to accounts (list
                         tenants, users and keys) for provisioning scripts — still no account <em>management</em>
                         and no bodies. <strong>Read-only</strong> clears every scope. Grant
@@ -203,6 +233,19 @@ else if (key is not null)
                 <div class="form-group">
                     <BbLabel>Last used</BbLabel>
                     <div><LocalTime Utc="@key.LastUsedUtc" /></div>
+                </div>
+                <div class="form-group">
+                    <BbLabel>Expires</BbLabel>
+                    <div>
+                        @if (key.ExpiresUtc is null)
+                        {
+                            <span class="text-muted">Never</span>
+                        }
+                        else
+                        {
+                            <LocalTime Utc="@key.ExpiresUtc" Format="yyyy-MM-dd HH:mm" />
+                        }
+                    </div>
                 </div>
                 <div class="form-group">
                     <BbLabel>Status</BbLabel>
@@ -262,6 +305,14 @@ else if (key is not null)
     private string newRole = RelayRoles.TenantViewer;
     private bool creating;
     private string? appliedPreset;
+    // "90" | "180" | "365" | "730" | "never". Default one year: keys should expire, and the self-check warns ahead.
+    private string newExpiryDays = "365";
+    private bool canCreateHostKeys;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private DateTimeOffset? NewExpiresUtc =>
+        int.TryParse(newExpiryDays, out var days) ? DateTimeOffset.UtcNow.AddDays(days) : null;
 
     // Scope editor state ("none" | "read" | "write" per area, plus the body switch). Shared between
     // the create form and the edit view — scopes are the only mutable part of an existing key.
@@ -453,6 +504,8 @@ else if (key is not null)
         {
             // Host scope mints host-level keys; tenant scope mints tenant keys (see the role select).
             newRole = ScopeTenantId is null ? RelayRoles.HostAdmin : RelayRoles.TenantViewer;
+            if (AuthState is not null)
+                canCreateHostKeys = RelayAccess.HasHostMembership((await AuthState).User);
             isLoading = false;
             return;
         }
@@ -485,7 +538,7 @@ else if (key is not null)
         {
             using var scope = ScopeFactory.CreateScope();
             var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
-            var (_, plaintext) = await svc.CreateAsync(ScopeTenantId, newName.Trim(), newRole, BuildScopes(), null);
+            var (_, plaintext) = await svc.CreateAsync(ScopeTenantId, newName.Trim(), newRole, BuildScopes(), NewExpiresUtc);
             // Show the secret on this page; do NOT navigate away before the user can copy it.
             createdSecret = plaintext;
         }

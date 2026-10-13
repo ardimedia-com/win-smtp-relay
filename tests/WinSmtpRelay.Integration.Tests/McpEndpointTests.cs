@@ -13,6 +13,7 @@ using WinSmtpRelay.AdminApi.Mcp;
 using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
+using WinSmtpRelay.Security;
 using WinSmtpRelay.Storage;
 using WinSmtpRelay.Storage.Identity;
 
@@ -39,6 +40,7 @@ public class McpEndpointTests
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddRelayStorage($"Data Source={_dbPath}");
+        builder.Services.AddRelaySecurity(); // IDnsSetupService for set_dkim_enabled
         builder.Services.AddRelayAdminAuth();
         builder.Services.AddRelayMcp();
 
@@ -135,7 +137,41 @@ public class McpEndpointTests
             "list_rejections", "get_health_check", "query_audit", "get_relay_config",
             "list_suppressions", "add_accepted_sender_domain", "add_accepted_domain",
             "add_ip_allow_rule", "add_suppression", "remove_suppression", "requeue_message",
+            "get_sending_identity", "set_sending_identity",
+            "list_dkim_domains", "generate_dkim_key", "set_dkim_enabled",
         }, names);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_GenerateDkimKey_ReturnsDnsRecord_NeverThePrivateKey_AndStartsDisabled()
+    {
+        await _client.PostAsync("/mcp", Rpc("tools/call",
+            new { name = "add_accepted_sender_domain", arguments = new { domain = "signed.example" } }));
+
+        var response = await _client.PostAsync("/mcp", Rpc("tools/call",
+            new { name = "generate_dkim_key", arguments = new { domain = "signed.example", selector = "mcp1" } }));
+        var result = (await ReadRpcAsync(response)).GetProperty("result");
+        Assert.IsFalse(result.TryGetProperty("isError", out var isError) && isError.GetBoolean(), $"expected success, got: {result}");
+
+        var text = result.ToString();
+        StringAssert.Contains(text, "mcp1._domainkey.signed.example");
+        StringAssert.Contains(text, "v=DKIM1; k=rsa; p=");
+        Assert.IsFalse(text.Contains("PRIVATE KEY", StringComparison.OrdinalIgnoreCase), "the private key must never leave the server");
+        // The tool result is JSON carried as the content text.
+        var payload = JsonDocument.Parse(result.GetProperty("content")[0].GetProperty("text").GetString()!).RootElement;
+        Assert.IsFalse(payload.GetProperty("isEnabled").GetBoolean(), $"key must start disabled: {text}");
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_SetSendingIdentity_WithViewerKey_IsToolError()
+    {
+        var response = await _viewerClient.PostAsync("/mcp", Rpc("tools/call",
+            new { name = "set_sending_identity", arguments = new { sendingIpAddresses = new[] { "203.0.113.10" } } }));
+        var result = (await ReadRpcAsync(response)).GetProperty("result");
+        Assert.IsTrue(result.TryGetProperty("isError", out var isError) && isError.GetBoolean(),
+            $"a viewer key must not change the sending identity: {result}");
     }
 
     [TestMethod]

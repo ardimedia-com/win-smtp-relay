@@ -43,7 +43,7 @@ public class TenantReadinessServiceTests
         new IpAccessRuleService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
         new MessageFilterService(_db, new NoopRuntimeConfigCache(), new CurrentActor(), new AdminAuditService(_db)),
         new ApiKeyService(_db, new CurrentActor(), new AdminAuditService(_db)),
-        new DnsSettingsService(_db),
+        new DnsSettingsService(_db, new CurrentActor(), new AdminAuditService(_db)),
         new EmailAuthSettingsService(_db, null!),
         new SuppressionService(_db, new CurrentActor(), new AdminAuditService(_db)));
 

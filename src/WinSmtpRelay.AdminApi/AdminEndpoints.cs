@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.AdminApi.Auth;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -62,6 +63,7 @@ public static class AdminEndpoints
         MapDkimDomainEndpoints(group);
         MapRateLimitEndpoints(group);
         MapMessageFilterEndpoints(group);
+        MapSendingIdentityEndpoints(group);
 
         return endpoints;
     }
@@ -229,6 +231,47 @@ public static class AdminEndpoints
             });
         }).RequireAuthorization(AuthorizationPolicies.HostAdmin)
           .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+
+        // The safe, tenant-usable flow (DkimKeyOperations): key generated and stored server-side, only the DNS
+        // record is returned, new keys start disabled, enabling requires the published record. No PrivateKeyPath,
+        // so — unlike /dkim/domains — tenant admins may use it for their own sender domains.
+        var keys = group.MapGroup("/dkim/keys").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+
+        keys.MapGet("/", async (IDkimDomainService dkim, CancellationToken ct) =>
+            Results.Ok(await DkimKeyOperations.ListAsync(dkim, ct)));
+
+        keys.MapPost("/", async (GenerateDkimKeyRequest req, IDkimDomainService dkim,
+            IAcceptedSenderDomainService senders, CancellationToken ct) =>
+        {
+            try
+            {
+                var created = await DkimKeyOperations.GenerateAsync(req.Domain, req.Selector, req.KeySize, req.Replace, dkim, senders, ct);
+                return Results.Created($"/api/dkim/keys/{created.Id}", created);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { Error = ex.Message });
+            }
+        });
+
+        // [FromServices]: explicit, so a host that does not register the security engine fails at the call (500)
+        // instead of the whole route table failing to infer the parameter as a second body.
+        keys.MapPut("/{domain}/enabled", async (string domain, SetDkimEnabledRequest req, IDkimDomainService dkim,
+            [Microsoft.AspNetCore.Mvc.FromServices] IDnsSetupService dns, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await DkimKeyOperations.SetEnabledAsync(domain, req.Enabled, dkim, dns, ct));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { Error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { Error = ex.Message });
+            }
+        });
     }
 
     private static void MapDeliveryLogEndpoints(RouteGroupBuilder group)
@@ -723,6 +766,30 @@ public static class AdminEndpoints
         });
     }
 
+    private static void MapSendingIdentityEndpoints(RouteGroupBuilder group)
+    {
+        // Settings → Sending identity: the PUBLIC hostname and sending IPs receivers see (SPF, PTR, blocklists,
+        // EHLO). Host-level settings → host admins only. Not to be confused with a tenant's source IP, which is
+        // the local address delivery binds to.
+        var ep = group.MapGroup("/settings/sending-identity").RequireAuthorization(AuthorizationPolicies.HostAdmin)
+            .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+
+        ep.MapGet("/", async (IDnsSettingsService svc, CancellationToken ct) =>
+            Results.Ok(SendingIdentityResponse.From(await svc.GetAsync(ct))));
+
+        ep.MapPut("/", async (UpdateSendingIdentityRequest req, IDnsSettingsService svc, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await SendingIdentityResponse.ApplyAsync(svc, req.PublicHostname, req.SendingIpAddresses, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { Error = ex.Message });
+            }
+        });
+    }
+
     private static void MapRateLimitEndpoints(RouteGroupBuilder group)
     {
         var ep = group.MapGroup("/rate-limits").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
@@ -836,6 +903,10 @@ public record UpdateUserRequest(
 
 public record DkimGenerateRequest(string Domain, string Selector, int KeySize = 2048);
 
+/// <summary>Selector null = <c>wsrYYYYMM</c>; key size null = 2048; replace must be true to replace an existing key.</summary>
+public record GenerateDkimKeyRequest(string Domain, string? Selector = null, int? KeySize = null, bool Replace = false);
+public record SetDkimEnabledRequest(bool Enabled);
+
 /// <summary>
 /// Safe projection of a <see cref="DkimDomain"/> for API responses. Deliberately omits the private-key
 /// material (PrivateKeyPem / PrivateKeyPath) — the only DKIM secret — exposing only whether a key is
@@ -886,6 +957,42 @@ public record DeliveryLogSummary(
 
 public record CreateAcceptedDomainRequest(string Domain);
 public record CreateAcceptedSenderDomainRequest(string Domain);
+/// <summary>Partial update: a null field stays as it is; an empty list clears the sending IPs.</summary>
+public record UpdateSendingIdentityRequest(string? PublicHostname = null, IReadOnlyList<string>? SendingIpAddresses = null);
+
+/// <summary>The public sending identity (Settings → Sending identity) plus the SPF/DMARC records it implies.</summary>
+public record SendingIdentityResponse(
+    string? PublicHostname, IReadOnlyList<string> SendingIpAddresses, IReadOnlyList<string> PrivateSendingIpAddresses,
+    IReadOnlyList<string> SpfIncludes, string SpfAllQualifier, string? DmarcReportEmail, string DmarcPolicy,
+    int DmarcPercentage, DateTimeOffset UpdatedUtc)
+{
+    public static SendingIdentityResponse From(DnsSettings s)
+    {
+        var ips = Split(s.SendingIpAddresses);
+        return new(s.PublicHostname, ips,
+            [.. ips.Where(ip => IpAddressScope.TryParseAddressOrNetwork(ip, out var a) && IpAddressScope.IsPrivateOrLoopback(a))],
+            Split(s.SpfIncludes), s.SpfAllQualifier, s.DmarcReportEmail, s.DmarcPolicy, s.DmarcPercentage, s.UpdatedUtc);
+    }
+
+    /// <summary>Applies a partial update through the service (validated + audited there) and returns the result.</summary>
+    public static async Task<SendingIdentityResponse> ApplyAsync(
+        IDnsSettingsService svc, string? publicHostname, IReadOnlyList<string>? sendingIps, CancellationToken ct)
+    {
+        var current = await svc.GetAsync(ct);
+        if (publicHostname is not null)
+            current.PublicHostname = publicHostname;
+        if (sendingIps is not null)
+            current.SendingIpAddresses = string.Join("; ", sendingIps);
+        await svc.UpdateAsync(current, ct);
+        return From(await svc.GetAsync(ct));
+    }
+
+    private static List<string> Split(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : [.. value.Split([';', ',', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+}
+
 public record CreateTenantRequest(string Name, string Slug);
 public record UpdateTenantRequest(string Name, bool IsEnabled);
 

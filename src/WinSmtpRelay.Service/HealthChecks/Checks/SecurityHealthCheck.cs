@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Health;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -49,26 +50,6 @@ public sealed class SecurityHealthCheck(
     {
         var slash = cidr.IndexOf('/');
         var baseIp = slash >= 0 ? cidr[..slash] : cidr;
-        return IPAddress.TryParse(baseIp.Trim(), out var ip) && !IsPrivateOrLoopback(ip);
-    }
-
-    private static bool IsPrivateOrLoopback(IPAddress ip)
-    {
-        if (IPAddress.IsLoopback(ip))
-            return true;
-
-        var b = ip.GetAddressBytes();
-        if (b.Length == 4)
-            return b[0] == 10                                   // 10.0.0.0/8
-                || (b[0] == 172 && b[1] >= 16 && b[1] <= 31)    // 172.16.0.0/12
-                || (b[0] == 192 && b[1] == 168)                 // 192.168.0.0/16
-                || (b[0] == 169 && b[1] == 254)                 // 169.254.0.0/16 link-local
-                || (b[0] == 100 && b[1] >= 64 && b[1] <= 127);  // 100.64.0.0/10 CGNAT
-
-        if (b.Length == 16)
-            return (b[0] & 0xFE) == 0xFC          // fc00::/7 unique-local
-                || (b[0] == 0xFE && (b[1] & 0xC0) == 0x80); // fe80::/10 link-local
-
-        return false;
+        return IPAddress.TryParse(baseIp.Trim(), out var ip) && !IpAddressScope.IsPrivateOrLoopback(ip);
     }
 }

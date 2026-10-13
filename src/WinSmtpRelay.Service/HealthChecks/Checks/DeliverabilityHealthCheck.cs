@@ -91,6 +91,19 @@ public sealed class DeliverabilityHealthCheck(
 
         foreach (var ip in ips)
         {
+            // A private address never reaches a receiver: SPF, reverse DNS and blocklists are all about the public
+            // address behind the NAT, so checking the private one only produces misleading findings.
+            if (IpAddressScope.TryParseAddressOrNetwork(ip, out var parsedIp) && IpAddressScope.IsPrivateOrLoopback(parsedIp))
+            {
+                f.Add(Err("sending-ip-private", $"Sending IP {ip} is a private address",
+                    $"{ip} is a private address that receiving mail servers never see, so the SPF record recommended from it, "
+                    + "the reverse-DNS and the blocklist checks all point at the wrong address. Behind NAT, the sending IP is "
+                    + "the router's public address.",
+                    ip, "Replace it under Settings → Sending identity with the public address (\"Detect public IP\" proposes it). "
+                    + "The local source address a tenant binds to stays under Tenants → Source IP."));
+                continue;
+            }
+
             var ptr = await dns.CheckReverseDnsAsync(ip, ct);
             f.Add(MapRecord("reverse-dns", $"Reverse DNS for {ip}", ip, ptr, missing: HealthSeverity.Error, mismatch: HealthSeverity.Warning));
 

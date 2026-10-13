@@ -123,6 +123,13 @@ public class DnsSetupService(
             return new DnsRecordResult("SPF", domain, expected, null, DnsRecordStatus.Missing,
                 "No SPF record is published." + await LookupWarningAsync(expected, ct));
 
+        // Ask the receiver's question — does the record authorise the relay's PUBLIC sending address? — instead of
+        // demanding the recommended mechanisms verbatim. A record with "ip4:<our IP> include:…" passes SPF even
+        // without "a:<public hostname>". The text comparison stays as the fallback when no public address is known.
+        var relayIps = await RelayPublicAddressesAsync(ct);
+        if (relayIps.Count > 0)
+            return await CheckSpfByEvaluationAsync(domain, live, expected, relayIps, ct);
+
         var covers = SpfCovers(live, expected);
         if (covers)
             return new DnsRecordResult("SPF", domain, expected, live, DnsRecordStatus.Ok,
@@ -136,6 +143,81 @@ public class DnsSetupService(
             "The published SPF record does not authorise this relay's senders. SPF allows only one record per domain — publish the merged \"To publish\" value below (your record plus the relay's missing parts); do not replace your existing record."
                 + await LookupWarningAsync(merged, ct),
             merged);
+    }
+
+    private async Task<DnsRecordResult> CheckSpfByEvaluationAsync(
+        string domain, string live, string expected, IReadOnlyList<System.Net.IPAddress> relayIps, CancellationToken ct)
+    {
+        var resolver = new SpfResolver(this);
+        var unauthorised = new List<(System.Net.IPAddress Ip, SpfResult Result)>();
+        foreach (var ip in relayIps)
+        {
+            var result = await SpfEvaluator.EvaluateAsync(domain, ip, resolver, ct);
+            if (result != SpfResult.Pass)
+                unauthorised.Add((ip, result));
+        }
+
+        var ipText = string.Join(", ", relayIps);
+        if (unauthorised.Count == 0)
+            return new DnsRecordResult("SPF", domain, expected, live, DnsRecordStatus.Ok,
+                $"The published SPF record authorises this relay's sending IP ({ipText})." + await LookupWarningAsync(live, ct));
+
+        // Offer the published record plus exactly the missing addresses (a domain may have only ONE SPF record).
+        var missingMechanisms = string.Join(' ', unauthorised.Select(u =>
+            (u.Ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 ? "ip6:" : "ip4:") + u.Ip));
+        var merged = BuildMergedSpf(live, $"v=spf1 {missingMechanisms} ~all");
+        var why = string.Join("; ", unauthorised.Select(u => $"{u.Ip}: {Describe(u.Result)}"));
+        return new DnsRecordResult("SPF", domain, expected, live, DnsRecordStatus.Mismatch,
+            $"The published SPF record does not authorise this relay's sending IP ({why}). SPF allows only one record per domain — publish the merged \"To publish\" value below (your record plus the relay's address); do not replace your existing record."
+                + await LookupWarningAsync(merged, ct),
+            merged);
+
+        static string Describe(SpfResult r) => r switch
+        {
+            SpfResult.Fail => "fail (-all reached)",
+            SpfResult.SoftFail => "softfail (~all reached)",
+            SpfResult.Neutral => "neutral (no mechanism matches)",
+            SpfResult.PermError => "permerror (record cannot be evaluated: too many lookups or a broken include)",
+            SpfResult.None => "no SPF record",
+            _ => r.ToString(),
+        };
+    }
+
+    // The relay's public sending addresses: the configured sending IPs that are single PUBLIC addresses (a private
+    // one is never seen by a receiver; a CIDR range has no single address to test), else the public hostname's
+    // public A/AAAA addresses.
+    private async Task<IReadOnlyList<System.Net.IPAddress>> RelayPublicAddressesAsync(CancellationToken ct)
+    {
+        var configured = Current.SendingIpAddresses
+            .Select(s => System.Net.IPAddress.TryParse(s.Trim(), out var a) ? a : null)
+            .Where(a => a is not null && !WinSmtpRelay.Core.IpAddressScope.IsPrivateOrLoopback(a))
+            .Select(a => a!)
+            .Distinct()
+            .ToList();
+        if (configured.Count > 0 || string.IsNullOrWhiteSpace(Current.PublicHostname))
+            return configured;
+
+        var resolved = await ResolveAddressesAsync(Current.PublicHostname.Trim(), ct);
+        return [.. resolved
+            .Select(System.Net.IPAddress.Parse)
+            .Where(a => !WinSmtpRelay.Core.IpAddressScope.IsPrivateOrLoopback(a))];
+    }
+
+    private sealed class SpfResolver(DnsSetupService owner) : ISpfDnsResolver
+    {
+        public Task<string?> GetSpfRecordAsync(string domain, CancellationToken ct) =>
+            owner.ResolveTxtAsync(domain, t => t.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase), ct);
+
+        public async Task<IReadOnlyList<System.Net.IPAddress>> GetAddressesAsync(string host, CancellationToken ct)
+        {
+            var list = new List<System.Net.IPAddress>();
+            list.AddRange(await owner.ResolveByTypeAsync(host, QueryType.A, ct));
+            list.AddRange(await owner.ResolveByTypeAsync(host, QueryType.AAAA, ct));
+            return list;
+        }
+
+        public async Task<IReadOnlyList<string>> GetMxHostsAsync(string domain, CancellationToken ct) =>
+            await owner.ResolveMxAsync(domain, ct);
     }
 
     private const int SpfMaxLookups = 10;
@@ -247,9 +329,22 @@ public class DnsSetupService(
             return new DnsRecordResult("DKIM", name, expected, null, DnsRecordStatus.Missing, "No DKIM record is published.");
 
         var match = string.Equals(ExtractDkimKey(expected), ExtractDkimKey(live), StringComparison.Ordinal);
+        if (match && !dkim.IsEnabled)
+            // Published but not signing: DMARC can't pass via DKIM yet, so this must not read as "Ok".
+            return new DnsRecordResult("DKIM", name, expected, live, DnsRecordStatus.Mismatch,
+                "The published DKIM key matches, but signing with it is disabled — enable the key (DKIM page or set_dkim_enabled).");
         return new DnsRecordResult("DKIM", name, expected, live,
             match ? DnsRecordStatus.Ok : DnsRecordStatus.Mismatch,
             match ? "The published DKIM public key matches." : "The published DKIM key differs from the configured key.");
+    }
+
+    public async Task<bool> IsDkimKeyPublishedAsync(DkimDomain key, CancellationToken ct = default)
+    {
+        var expected = TryDeriveDkimTxt(key);
+        if (expected is null)
+            return false;
+        var live = await ResolveTxtAsync($"{key.Selector}._domainkey.{key.Domain}", t => t.Contains("p=", StringComparison.OrdinalIgnoreCase), ct);
+        return live is not null && string.Equals(ExtractDkimKey(expected), ExtractDkimKey(live), StringComparison.Ordinal);
     }
 
     public async Task<DnsRecordResult> CheckHostnameAsync(CancellationToken ct = default)
@@ -527,9 +622,7 @@ public class DnsSetupService(
             else
                 return null;
 
-            using var rsa = RSA.Create();
-            rsa.ImportFromPem(pem); // handles PKCS#1 and PKCS#8
-            return "v=DKIM1; k=rsa; p=" + Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+            return DkimKeyGenerator.DeriveDnsTxtValue(pem); // handles PKCS#1 and PKCS#8
         }
         catch (Exception ex)
         {

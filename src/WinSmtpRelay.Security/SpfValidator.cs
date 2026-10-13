@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Sockets;
 using DnsClient;
 using DnsClient.Protocol;
 using Microsoft.Extensions.Logging;
@@ -7,11 +6,15 @@ using WinSmtpRelay.Security.Models;
 
 namespace WinSmtpRelay.Security;
 
+/// <summary>
+/// Inbound SPF check (RFC 7208 check_host) for a received message's MAIL FROM domain. The evaluation itself is
+/// <see cref="SpfEvaluator"/> — the same code the deliverability check uses for outbound — resolved through the
+/// host's DNS resolver; this class adds the verdict mapping and turns DNS failures into TempError.
+/// </summary>
 public class SpfValidator
 {
     private readonly ILookupClient _dns;
     private readonly ILogger<SpfValidator> _logger;
-    private const int MaxDnsLookups = 10; // RFC 7208 §4.6.4
 
     public SpfValidator(ILookupClient dns, ILogger<SpfValidator> logger)
     {
@@ -29,7 +32,16 @@ public class SpfValidator
 
         try
         {
-            return await EvaluateAsync(senderIp, mailFromDomain, 0, cancellationToken);
+            var result = await SpfEvaluator.EvaluateAsync(mailFromDomain, senderIp, new Resolver(_dns), cancellationToken);
+            return result switch
+            {
+                SpfResult.Pass => new SpfCheckResult(SpfVerdict.Pass, $"{mailFromDomain} authorises {senderIp}"),
+                SpfResult.Fail => new SpfCheckResult(SpfVerdict.Fail, $"{mailFromDomain} does not authorise {senderIp} (-all)"),
+                SpfResult.SoftFail => new SpfCheckResult(SpfVerdict.SoftFail, $"{mailFromDomain} does not authorise {senderIp} (~all)"),
+                SpfResult.PermError => new SpfCheckResult(SpfVerdict.PermError, $"SPF record of {mailFromDomain} cannot be evaluated"),
+                SpfResult.None => new SpfCheckResult(SpfVerdict.None, $"no SPF record for {mailFromDomain}"),
+                _ => new SpfCheckResult(SpfVerdict.Neutral, "no mechanism matched"),
+            };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -38,207 +50,51 @@ public class SpfValidator
         }
     }
 
-    private async Task<SpfCheckResult> EvaluateAsync(
-        IPAddress senderIp,
-        string domain,
-        int lookupCount,
-        CancellationToken cancellationToken)
+    private sealed class Resolver(ILookupClient dns) : ISpfDnsResolver
     {
-        if (lookupCount >= MaxDnsLookups)
-            return new SpfCheckResult(SpfVerdict.PermError, "too many DNS lookups");
-
-        var spfRecord = await GetSpfRecordAsync(domain, cancellationToken);
-        if (spfRecord is null)
-            return new SpfCheckResult(SpfVerdict.None, $"no SPF record for {domain}");
-
-        var senderIpv4 = senderIp.IsIPv4MappedToIPv6 ? senderIp.MapToIPv4() : senderIp;
-
-        var terms = spfRecord.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var currentLookups = lookupCount;
-
-        foreach (var term in terms.Skip(1)) // skip "v=spf1"
+        public async Task<string?> GetSpfRecordAsync(string domain, CancellationToken ct)
         {
-            // Handle redirect modifier
-            if (term.StartsWith("redirect=", StringComparison.OrdinalIgnoreCase))
+            try
             {
-                var redirectDomain = term[9..];
-                currentLookups++;
-                return await EvaluateAsync(senderIpv4, redirectDomain, currentLookups, cancellationToken);
+                var result = await dns.QueryAsync(domain, QueryType.TXT, cancellationToken: ct);
+                return result.Answers
+                    .OfType<TxtRecord>()
+                    .Select(txt => string.Join("", txt.Text))
+                    .FirstOrDefault(t => t.StartsWith("v=spf1 ", StringComparison.OrdinalIgnoreCase) ||
+                                         t.Equals("v=spf1", StringComparison.OrdinalIgnoreCase));
             }
-
-            // Parse qualifier
-            var qualifier = term[0] switch
+            catch (DnsResponseException)
             {
-                '+' => SpfVerdict.Pass,
-                '-' => SpfVerdict.Fail,
-                '~' => SpfVerdict.SoftFail,
-                '?' => SpfVerdict.Neutral,
-                _ => SpfVerdict.Pass // default qualifier is +
-            };
-            var mechanism = term.TrimStart('+', '-', '~', '?');
-
-            // Evaluate mechanism
-            if (mechanism.Equals("all", StringComparison.OrdinalIgnoreCase))
-            {
-                return new SpfCheckResult(qualifier, $"{term} matched");
-            }
-
-            if (mechanism.StartsWith("ip4:", StringComparison.OrdinalIgnoreCase))
-            {
-                var cidr = mechanism[4..];
-                if (senderIpv4.AddressFamily == AddressFamily.InterNetwork && IsInCidr(senderIpv4, cidr))
-                    return new SpfCheckResult(qualifier, $"{term} matched {senderIpv4}");
-            }
-            else if (mechanism.StartsWith("ip6:", StringComparison.OrdinalIgnoreCase))
-            {
-                var cidr = mechanism[4..];
-                if (senderIp.AddressFamily == AddressFamily.InterNetworkV6 && IsInCidr(senderIp, cidr))
-                    return new SpfCheckResult(qualifier, $"{term} matched {senderIp}");
-            }
-            else if (mechanism.StartsWith("include:", StringComparison.OrdinalIgnoreCase))
-            {
-                var includeDomain = mechanism[8..];
-                currentLookups++;
-                var includeResult = await EvaluateAsync(senderIpv4, includeDomain, currentLookups, cancellationToken);
-                if (includeResult.Verdict == SpfVerdict.Pass)
-                    return new SpfCheckResult(qualifier, $"include:{includeDomain} passed");
-            }
-            else if (mechanism.Equals("a", StringComparison.OrdinalIgnoreCase) ||
-                     mechanism.StartsWith("a:", StringComparison.OrdinalIgnoreCase) ||
-                     mechanism.StartsWith("a/", StringComparison.OrdinalIgnoreCase))
-            {
-                currentLookups++;
-                var (aDomain, prefixLen) = ParseDomainAndPrefix(mechanism, domain, "a");
-                if (await MatchesARecordAsync(senderIpv4, aDomain, prefixLen, cancellationToken))
-                    return new SpfCheckResult(qualifier, $"{term} matched {senderIpv4}");
-            }
-            else if (mechanism.Equals("mx", StringComparison.OrdinalIgnoreCase) ||
-                     mechanism.StartsWith("mx:", StringComparison.OrdinalIgnoreCase) ||
-                     mechanism.StartsWith("mx/", StringComparison.OrdinalIgnoreCase))
-            {
-                currentLookups++;
-                var (mxDomain, prefixLen) = ParseDomainAndPrefix(mechanism, domain, "mx");
-                if (await MatchesMxRecordAsync(senderIpv4, mxDomain, prefixLen, currentLookups, cancellationToken))
-                    return new SpfCheckResult(qualifier, $"{term} matched {senderIpv4}");
+                return null;
             }
         }
 
-        return new SpfCheckResult(SpfVerdict.Neutral, "no mechanism matched");
-    }
-
-    private async Task<string?> GetSpfRecordAsync(string domain, CancellationToken cancellationToken)
-    {
-        try
+        public async Task<IReadOnlyList<IPAddress>> GetAddressesAsync(string host, CancellationToken ct)
         {
-            var result = await _dns.QueryAsync(domain, QueryType.TXT, cancellationToken: cancellationToken);
-            return result.Answers
-                .OfType<TxtRecord>()
-                .Select(txt => string.Join("", txt.Text))
-                .FirstOrDefault(t => t.StartsWith("v=spf1 ", StringComparison.OrdinalIgnoreCase) ||
-                                     t.Equals("v=spf1", StringComparison.OrdinalIgnoreCase));
-        }
-        catch (DnsResponseException)
-        {
-            return null;
-        }
-    }
-
-    private async Task<bool> MatchesARecordAsync(
-        IPAddress senderIp, string domain, int prefixLen, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var result = await _dns.QueryAsync(domain, QueryType.A, cancellationToken: cancellationToken);
-            foreach (var a in result.Answers.OfType<ARecord>())
+            var list = new List<IPAddress>();
+            foreach (var type in new[] { QueryType.A, QueryType.AAAA })
             {
-                if (prefixLen == 32 ? a.Address.Equals(senderIp) : IsInCidr(senderIp, $"{a.Address}/{prefixLen}"))
-                    return true;
+                try
+                {
+                    var result = await dns.QueryAsync(host, type, cancellationToken: ct);
+                    list.AddRange(result.Answers.OfType<AddressRecord>().Select(r => r.Address));
+                }
+                catch (DnsResponseException) { }
+            }
+            return list;
+        }
+
+        public async Task<IReadOnlyList<string>> GetMxHostsAsync(string domain, CancellationToken ct)
+        {
+            try
+            {
+                var result = await dns.QueryAsync(domain, QueryType.MX, cancellationToken: ct);
+                return [.. result.Answers.OfType<MxRecord>().OrderBy(m => m.Preference).Select(m => m.Exchange.Value.TrimEnd('.'))];
+            }
+            catch (DnsResponseException)
+            {
+                return [];
             }
         }
-        catch (DnsResponseException) { }
-        return false;
-    }
-
-    private async Task<bool> MatchesMxRecordAsync(
-        IPAddress senderIp, string domain, int prefixLen, int lookupCount, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var mxResult = await _dns.QueryAsync(domain, QueryType.MX, cancellationToken: cancellationToken);
-            var currentLookups = lookupCount;
-            foreach (var mx in mxResult.Answers.OfType<MxRecord>())
-            {
-                currentLookups++;
-                if (currentLookups >= MaxDnsLookups) break;
-                var mxHost = mx.Exchange.Value.TrimEnd('.');
-                if (await MatchesARecordAsync(senderIp, mxHost, prefixLen, cancellationToken))
-                    return true;
-            }
-        }
-        catch (DnsResponseException) { }
-        return false;
-    }
-
-    private static (string domain, int prefixLen) ParseDomainAndPrefix(string mechanism, string defaultDomain, string prefix)
-    {
-        var rest = mechanism.Length > prefix.Length ? mechanism[prefix.Length..] : "";
-        var domain = defaultDomain;
-        var prefixLen = 32;
-
-        if (rest.StartsWith(':'))
-        {
-            var slashIdx = rest.IndexOf('/');
-            if (slashIdx > 0)
-            {
-                domain = rest[1..slashIdx];
-                int.TryParse(rest[(slashIdx + 1)..], out prefixLen);
-            }
-            else
-            {
-                domain = rest[1..];
-            }
-        }
-        else if (rest.StartsWith('/'))
-        {
-            int.TryParse(rest[1..], out prefixLen);
-        }
-
-        return (domain, prefixLen);
-    }
-
-    private static bool IsInCidr(IPAddress address, string cidr)
-    {
-        var parts = cidr.Split('/');
-        if (!IPAddress.TryParse(parts[0], out var network))
-            return false;
-
-        if (parts.Length == 1)
-            return address.Equals(network);
-
-        if (!int.TryParse(parts[1], out var prefixLength))
-            return false;
-
-        var addressBytes = address.GetAddressBytes();
-        var networkBytes = network.GetAddressBytes();
-        if (addressBytes.Length != networkBytes.Length)
-            return false;
-
-        var fullBytes = prefixLength / 8;
-        var remainingBits = prefixLength % 8;
-
-        for (var i = 0; i < fullBytes && i < addressBytes.Length; i++)
-        {
-            if (addressBytes[i] != networkBytes[i])
-                return false;
-        }
-
-        if (remainingBits > 0 && fullBytes < addressBytes.Length)
-        {
-            var mask = (byte)(0xFF << (8 - remainingBits));
-            if ((addressBytes[fullBytes] & mask) != (networkBytes[fullBytes] & mask))
-                return false;
-        }
-
-        return true;
     }
 }

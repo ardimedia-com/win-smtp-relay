@@ -397,8 +397,13 @@ else
             }
 
             var sendingIps = SplitList(settings.SendingIpAddresses);
-            // A tenant egress IP is only an extra check when it isn't already one of the sending IPs.
-            var egressExtra = !string.IsNullOrWhiteSpace(egress) && !sendingIps.Any(s => IpEquals(s, egress)) ? egress : null;
+            // A tenant egress IP is only an extra check when it isn't already one of the sending IPs — and only when it
+            // is public: a private source address sits behind NAT, receivers see the public sending IP instead, so
+            // reverse DNS, blocklists and SPF coverage of the private address would all be false alarms.
+            var egressIsPublic = !string.IsNullOrWhiteSpace(egress)
+                && System.Net.IPAddress.TryParse(egress, out var egressAddress)
+                && !WinSmtpRelay.Core.IpAddressScope.IsPrivateOrLoopback(egressAddress);
+            var egressExtra = egressIsPublic && !sendingIps.Any(s => IpEquals(s, egress!)) ? egress : null;
             var ipList = new List<string>(sendingIps);
             if (egressExtra is not null) ipList.Add(egressExtra);
 

@@ -190,7 +190,94 @@ public sealed class RelayMcpTools
             e.Id, e.TenantId, e.Address, e.Reason.ToString(), e.Detail, e.CreatedUtc));
     }
 
+    [McpServerTool(Name = "get_sending_identity"), Description(
+        "The PUBLIC sending identity (Settings → Sending identity): public hostname (EHLO, SPF a:) and the public "
+        + "sending IPs receivers see (SPF ip4:/ip6:, reverse DNS, blocklists), plus the SPF/DMARC inputs. "
+        + "privateSendingIpAddresses lists entries that are private addresses (a misconfiguration behind NAT). Host admins only.")]
+    public static async Task<SendingIdentityResponse> GetSendingIdentity(
+        ClaimsPrincipal user, IAuthorizationService auth, IDnsSettingsService svc, CancellationToken ct)
+    {
+        await RequireAsync(auth, user, AuthorizationPolicies.HostAdmin, ApiKeyScopes.Config);
+        return SendingIdentityResponse.From(await svc.GetAsync(ct));
+    }
+
+    [McpServerTool(Name = "list_dkim_domains"), Description(
+        "DKIM keys of the current scope: domain, selector, whether signing is enabled, and the DNS TXT record "
+        + "(name + value) each key needs. Never returns private keys.")]
+    public static async Task<IReadOnlyList<DkimKeyInfo>> ListDkimDomains(
+        ClaimsPrincipal user, IAuthorizationService auth, IDkimDomainService dkim, CancellationToken ct)
+    {
+        await RequireAsync(auth, user, AuthorizationPolicies.AdminView, ApiKeyScopes.Config);
+        return await DkimKeyOperations.ListAsync(dkim, ct);
+    }
+
     // ---- Fixes (writes — all audited with the API-key actor) ----
+
+    [McpServerTool(Name = "generate_dkim_key"), Description(
+        "Generate a DKIM key for an accepted sender domain of the current scope. The private key stays on the server; "
+        + "the answer is the DNS TXT record (name + value) to publish. The key starts DISABLED — publish the record, "
+        + "then call set_dkim_enabled. An existing key is only replaced with replace=true (the domain is unsigned until "
+        + "the new key is enabled). Audited.")]
+    public static async Task<DkimKeyInfo> GenerateDkimKey(
+        ClaimsPrincipal user, IAuthorizationService auth, IDkimDomainService dkim, IAcceptedSenderDomainService senders,
+        CancellationToken ct,
+        [Description("The sender domain, e.g. 'acme.com'")] string domain,
+        [Description("DKIM selector (default 'wsrYYYYMM')")] string? selector = null,
+        [Description("RSA key size: 2048 (default), 3072 or 4096")] int? keySize = null,
+        [Description("Replace an existing key for this domain")] bool replace = false)
+    {
+        await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
+        try
+        {
+            return await DkimKeyOperations.GenerateAsync(domain, selector, keySize, replace, dkim, senders, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new McpException(ex.Message);
+        }
+    }
+
+    [McpServerTool(Name = "set_dkim_enabled"), Description(
+        "Enable or disable DKIM signing for a domain. Enabling first checks that the public DNS record carries the "
+        + "key and refuses otherwise. Audited.")]
+    public static async Task<DkimKeyInfo> SetDkimEnabled(
+        ClaimsPrincipal user, IAuthorizationService auth, IDkimDomainService dkim, IDnsSetupService dns,
+        CancellationToken ct,
+        [Description("The sender domain")] string domain,
+        [Description("true = sign outgoing mail with the key, false = stop signing")] bool enabled)
+    {
+        await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
+        try
+        {
+            return await DkimKeyOperations.SetEnabledAsync(domain, enabled, dkim, dns, ct);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
+        {
+            throw new McpException(ex.Message);
+        }
+    }
+
+    [McpServerTool(Name = "set_sending_identity"), Description(
+        "Set the public hostname and/or the PUBLIC sending IPs (behind NAT: the router's public address, never the "
+        + "server's private IP — a tenant's local source IP is a different setting). Omitted fields stay unchanged. "
+        + "Feeds the recommended SPF record and the self-check. Host admins only. Audited.")]
+    public static async Task<SendingIdentityResponse> SetSendingIdentity(
+        ClaimsPrincipal user, IAuthorizationService auth, IDnsSettingsService svc, CancellationToken ct,
+        [Description("Public hostname, e.g. 'smtp.example.com' (omit to keep)")] string? publicHostname = null,
+        [Description("Public sending IPs or CIDR networks, e.g. ['203.0.113.10'] (omit to keep, [] to clear)")] string[]? sendingIpAddresses = null)
+    {
+        await RequireAsync(auth, user, AuthorizationPolicies.HostAdmin, ApiKeyScopes.Config, write: true);
+        if (publicHostname is null && sendingIpAddresses is null)
+            throw new McpException("Nothing to change: pass publicHostname and/or sendingIpAddresses.");
+        try
+        {
+            return await SendingIdentityResponse.ApplyAsync(svc, publicHostname, sendingIpAddresses, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new McpException(ex.Message);
+        }
+    }
 
     [McpServerTool(Name = "add_accepted_sender_domain"), Description(
         "Allow a sender domain (fixes 'sender domain not accepted' rejections). The change is audited and live immediately.")]

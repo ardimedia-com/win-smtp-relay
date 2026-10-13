@@ -30,6 +30,17 @@ public static class DkimKeyGenerator
         return (privatePem, publicPem, dnsTxt);
     }
 
+    /// <summary>
+    /// The DNS TXT value (<c>v=DKIM1; k=rsa; p=…</c>) for a PEM private key (PKCS#1 or PKCS#8). Throws when the PEM
+    /// is not an RSA private key.
+    /// </summary>
+    public static string DeriveDnsTxtValue(string privateKeyPem)
+    {
+        using var rsa = System.Security.Cryptography.RSA.Create();
+        rsa.ImportFromPem(privateKeyPem);
+        return "v=DKIM1; k=rsa; p=" + Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+    }
+
     private static string ToPem(AsymmetricKeyParameter key, string type)
     {
         var sb = new StringBuilder();

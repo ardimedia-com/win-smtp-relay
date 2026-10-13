@@ -668,13 +668,21 @@ public class AdminApiTests
         var cache = _app.Services.GetRequiredService<IRuntimeConfigCache>();
         Assert.IsNull(await cache.GetTenantEgressIpAsync(tid));
 
+        // Loopback is assigned to every machine, so it stands in for "an address of this server".
         using (var scope = _app.Services.CreateScope())
-            await scope.ServiceProvider.GetRequiredService<ITenantService>().SetEgressIpAsync(tid, "203.0.113.7");
-        Assert.AreEqual("203.0.113.7", await cache.GetTenantEgressIpAsync(tid), "cache should reflect the set egress IP");
+            await scope.ServiceProvider.GetRequiredService<ITenantService>().SetEgressIpAsync(tid, "127.0.0.1");
+        Assert.AreEqual("127.0.0.1", await cache.GetTenantEgressIpAsync(tid), "cache should reflect the set egress IP");
 
         using (var scope = _app.Services.CreateScope())
             await Assert.ThrowsExactlyAsync<InvalidOperationException>(
                 () => scope.ServiceProvider.GetRequiredService<ITenantService>().SetEgressIpAsync(tid, "not-an-ip"));
+
+        // An address this machine does not own (typically the public NAT address) would make every delivery fail
+        // to bind — refused, and the previous value stays.
+        using (var scope = _app.Services.CreateScope())
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                () => scope.ServiceProvider.GetRequiredService<ITenantService>().SetEgressIpAsync(tid, "203.0.113.7"));
+        Assert.AreEqual("127.0.0.1", await cache.GetTenantEgressIpAsync(tid));
 
         using (var scope = _app.Services.CreateScope())
             await scope.ServiceProvider.GetRequiredService<ITenantService>().SetEgressIpAsync(tid, "");

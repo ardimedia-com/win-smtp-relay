@@ -15,6 +15,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enabled key that has already expired is listed as a warning (disable or replace it). Keys without an
   expiry date and disabled keys produce nothing. Thresholds: `HealthCheck:ApiKeyExpiryWarningDays` /
   `HealthCheck:ApiKeyExpiryErrorDays`.
+- **API keys created in the admin UI get an expiry date.** The «New API key» page has an *Expires* field
+  (90 days to 2 years, default one year, or never); the key list and the key page show it. Before, keys made
+  in the UI never expired, so the expiry warning above could not fire for them.
+- **Host-level API keys are easier to find.** In a tenant scope the «New API key» page now says that a
+  host-level key (self-check, audit log, tenants, sending identity, every tenant's DKIM) is created in the
+  *Global* scope; in the Global scope the *MCP assistant* preset says it produces such a host-level key.
+- **DKIM keys over the API and MCP.** `GET/POST /api/dkim/keys` and `PUT /api/dkim/keys/{domain}/enabled`, and
+  the MCP tools `list_dkim_domains`, `generate_dkim_key` and `set_dkim_enabled`. The private key is generated
+  and kept on the server — the answer is the DNS TXT record to publish, never the key. A new key starts
+  **disabled**; enabling it checks that the public DNS record carries the key and refuses otherwise.
+  Tenant-scoped keys with `config:write` may use this for their own sender domains; replacing an existing
+  key needs `replace=true`. The raw `/api/dkim/domains` endpoints (which accept a host file path) stay
+  host-only.
+- **Sending identity over the API and MCP.** `GET/PUT /api/settings/sending-identity` and the MCP tools
+  `get_sending_identity` / `set_sending_identity` (host-level keys with `config`) read and set the public
+  hostname and the public sending IPs; private entries are listed separately as a misconfiguration.
+
+### Changed
+
+- **The SPF check asks whether the record authorises the relay, instead of comparing text.** Before, a
+  sender domain was flagged «mail will fail DMARC» unless its SPF record contained every recommended
+  mechanism verbatim — so `v=spf1 ip4:<relay IP> include:… ~all` without `a:<public hostname>` was reported
+  as failing although receivers let it pass. The deliverability page and the self-check now evaluate the
+  record (ip4/ip6, a, mx, include, redirect, the 10-lookup limit) against the relay's public sending IPs and
+  offer a merged record with only the missing address when it really is not authorised. The inbound SPF
+  check uses the same evaluator, which also corrects how it handled `redirect=` (now only after all
+  mechanisms), counts lookups across includes and resolves IPv6 (AAAA) for `a`/`mx`.
+- **A DKIM key that is published but disabled no longer counts as DKIM-aligned.** The DKIM record check
+  reports it as «published, but signing is disabled», so the DMARC verdict no longer claims a pass via DKIM.
+- **A tenant's source IP must be an address of this server.** It is the local address outbound deliveries
+  bind to; saving an address the machine does not own (typically the public NAT address) is refused,
+  because every delivery of that tenant would fail. The field is now labelled «Source IP (local adapter)»
+  and the sending-identity field «Public sending IP addresses», each explaining the other.
+- **A private sending IP is an error in the self-check** («receivers never see it»), and its reverse-DNS and
+  blocklist checks are skipped instead of producing misleading findings. The tenant DNS page no longer
+  checks a private tenant source IP as if it were public.
+- **Changes to the sending identity are audited** (`dnssettings.updated`), and sending IPs are validated
+  (address or CIDR network) when saved.
 
 ## [1.0.0-beta1-build73] - 2026-10-04
 

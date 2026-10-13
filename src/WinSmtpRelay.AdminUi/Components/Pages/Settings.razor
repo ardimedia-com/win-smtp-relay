@@ -283,8 +283,13 @@ else
                     <BbInput Id="public-hostname" @bind-Value="dnsPublicHostname" Placeholder="relay.example.com" />
                 </div>
                 <div class="form-group" style="margin-top:0.75rem;">
-                    <BbLabel For="sending-ip-addresses">Sending IP addresses (delimited)</BbLabel>
+                    <BbLabel For="sending-ip-addresses">Public sending IP addresses (delimited)</BbLabel>
                     <BbInput Id="sending-ip-addresses" @bind-Value="dnsSendingIps" Placeholder="203.0.113.10; 2001:db8::1" />
+                    <p class="text-muted" style="font-size:0.78rem;margin:0.25rem 0 0;">
+                        The address receiving mail servers see — behind NAT that is the router's public address, not this
+                        server's private IP. It goes into SPF (<code>ip4:</code>) and is checked for reverse DNS and blocklists.
+                        The local source address a tenant's mail binds to is set per tenant (Tenants → Source IP).
+                    </p>
                     <div style="margin-top:0.35rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;font-size:0.8rem;">
                         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="DetectIpAsync" Disabled="@detectingIp">
                             <LucideIcon Name="globe" /> @(detectingIp ? "Detecting…" : "Detect public IP")
@@ -682,16 +687,24 @@ else
     {
         var pct = int.TryParse(dnsDmarcPct, out var p) ? Math.Clamp(p, 1, 100) : 100;
         using var scope = ScopeFactory.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IDnsSettingsService>().UpdateAsync(new WinSmtpRelay.Core.Models.DnsSettings
+        try
         {
-            PublicHostname = dnsPublicHostname,
-            SendingIpAddresses = dnsSendingIps ?? "",
-            SpfIncludes = dnsSpfIncludes ?? "",
-            SpfAllQualifier = dnsSpfAll,
-            DmarcReportEmail = dnsDmarcEmail,
-            DmarcPolicy = dnsDmarcPolicy,
-            DmarcPercentage = pct
-        });
+            await scope.ServiceProvider.GetRequiredService<IDnsSettingsService>().UpdateAsync(new WinSmtpRelay.Core.Models.DnsSettings
+            {
+                PublicHostname = dnsPublicHostname,
+                SendingIpAddresses = dnsSendingIps ?? "",
+                SpfIncludes = dnsSpfIncludes ?? "",
+                SpfAllQualifier = dnsSpfAll,
+                DmarcReportEmail = dnsDmarcEmail,
+                DmarcPolicy = dnsDmarcPolicy,
+                DmarcPercentage = pct
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            dnsStatus = ex.Message;
+            return;
+        }
         dnsDmarcPct = pct.ToString();
         dnsStatus = "DNS recommendation settings saved. The Deliverability page reflects them on its next check.";
     }

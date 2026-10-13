@@ -45,6 +45,7 @@ else
                 <BbTableHeaderCell TData="ApiKey">Scopes</BbTableHeaderCell>
                 <BbTableHeaderCell TData="ApiKey">Created</BbTableHeaderCell>
                 <BbTableHeaderCell TData="ApiKey">Last used</BbTableHeaderCell>
+                <BbTableHeaderCell TData="ApiKey">Expires</BbTableHeaderCell>
                 <BbTableHeaderCell TData="ApiKey"></BbTableHeaderCell>
             </BbTableRow>
         </BbTableHeader>
@@ -52,7 +53,7 @@ else
             @if (keys.Count == 0)
             {
                 <BbTableRow TData="ApiKey">
-                    <BbTableCell colspan="7" style="text-align:center;">No API keys</BbTableCell>
+                    <BbTableCell colspan="8" style="text-align:center;">No API keys</BbTableCell>
                 </BbTableRow>
             }
             @foreach (var k in keys)
@@ -73,6 +74,7 @@ else
                     </BbTableCell>
                     <BbTableCell><LocalTime Utc="@k.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell><LocalTime Utc="@k.LastUsedUtc" /></BbTableCell>
+                    <BbTableCell>@if (k.ExpiresUtc is null) { <span class="text-muted">never</span> } else { <LocalTime Utc="@k.ExpiresUtc" Format="yyyy-MM-dd" /> }</BbTableCell>
                     <BbTableCell>
                         <div class="list-row-actions" @onclick:stopPropagation="true">
                             <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Revoke"

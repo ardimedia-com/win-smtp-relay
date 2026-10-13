@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -72,8 +73,17 @@ public class TenantService(
             throw new InvalidOperationException($"'{normalized}' is not a valid IP address.");
 
         var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
-        if (tenant is null)
-            return;
+        if (tenant is null || tenant.EgressIpAddress == normalized)
+            return; // unchanged: the tenant form saves this on every save, don't block it over an old value
+
+        // Delivery binds outbound sockets to this address (SmtpDeliveryService LocalEndPoint), so an address this
+        // machine does not own makes every delivery of the tenant fail. The usual mistake behind NAT is entering
+        // the public address receivers see — that one belongs in the sending identity, not here.
+        if (normalized is not null && !IpAddressScope.IsAssignedLocally(IPAddress.Parse(normalized)))
+            throw new InvalidOperationException(
+                $"'{normalized}' is not an address of this server, so outbound mail could not bind to it. Enter an address " +
+                "assigned to one of this server's network adapters (behind NAT that is the private address). The public " +
+                "address receivers see belongs under Settings → Sending identity.");
 
         tenant.EgressIpAddress = normalized;
         await db.SaveChangesAsync(cancellationToken);

@@ -73,5 +73,6 @@ public class OutboundAuthCheckServiceTests
         public Task<DnsRecordResult> CheckBlocklistsAsync(string ipAddress, CancellationToken ct = default) => throw new NotImplementedException();
         public string BuildOwnershipRecord(string token) => "";
         public Task<bool> CheckOwnershipAsync(string domain, string token, CancellationToken ct = default) => Task.FromResult(false);
+        public Task<bool> IsDkimKeyPublishedAsync(DkimDomain key, CancellationToken ct = default) => Task.FromResult(false);
     }
 }

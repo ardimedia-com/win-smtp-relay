@@ -70,9 +70,14 @@ else
                     }
                 </div>
                 <div class="form-group col-span-full">
-                    <BbLabel For="egress-ip-address">Outbound (sending) IP</BbLabel>
+                    <BbLabel For="egress-ip-address">Source IP (local adapter)</BbLabel>
                     <BbInput Id="egress-ip-address" @bind-Value="egress" Placeholder="(OS default)" />
-                    <p class="text-muted" style="font-size:0.78rem;margin-top:0.25rem;">Outbound mail for this tenant binds to this source IP. The host must own it; leave blank for the OS default.</p>
+                    <p class="text-muted" style="font-size:0.78rem;margin-top:0.25rem;">
+                        Outbound mail for this tenant binds to this address. It must be assigned to one of this server's
+                        network adapters (behind NAT that is a private address); leave blank for the OS default. The public
+                        address receivers see belongs under Settings → Sending identity — entering it here would make every
+                        delivery of this tenant fail.
+                    </p>
                     <div class="flex gap-1 items-center" style="margin-top:0.5rem;flex-wrap:wrap;">
                         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="DetectLocalIps">
                             <LucideIcon Name="search" /> Detect local IPs

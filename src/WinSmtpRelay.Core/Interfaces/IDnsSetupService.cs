@@ -37,4 +37,7 @@ public interface IDnsSetupService
 
     /// <summary>True if a TXT record matching <see cref="BuildOwnershipRecord"/> for the token is published at the domain.</summary>
     Task<bool> CheckOwnershipAsync(string domain, string token, CancellationToken ct = default);
+
+    /// <summary>True if <c>selector._domainkey.domain</c> publicly carries the public half of this key (enabled or not).</summary>
+    Task<bool> IsDkimKeyPublishedAsync(DkimDomain key, CancellationToken ct = default);
 }
