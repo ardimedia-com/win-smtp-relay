@@ -25,6 +25,13 @@ public class AdminCertificateSettings
     /// <summary>When the certificate was imported.</summary>
     public DateTimeOffset? UploadedUtc { get; set; }
 
+    /// <summary>
+    /// True when the certificate was picked from the Windows certificate store: the relay then switches by itself
+    /// to a renewed certificate for the same host names (e.g. written by win-acme / Let's Encrypt) instead of
+    /// serving its imported copy until it expires. False for an uploaded PFX.
+    /// </summary>
+    public bool FollowStoreRenewals { get; set; }
+
     /// <summary>True when a certificate has been imported (otherwise the built-in self-signed cert is used).</summary>
     public bool HasImportedCertificate => !string.IsNullOrEmpty(PfxBase64);
 }

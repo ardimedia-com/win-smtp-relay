@@ -39,4 +39,11 @@ public interface IAdminCertificateService
     /// marked exportable, or the service account lacks read access to it).
     /// </summary>
     Task<AdminCertificateSettings> ImportFromStoreAsync(string thumbprint, CancellationToken ct = default);
+
+    /// <summary>
+    /// When the served certificate came from the store (<see cref="AdminCertificateSettings.FollowStoreRenewals"/>):
+    /// the thumbprint of a renewal in <c>LocalMachine\My</c> — valid now, trusted, expiring later and covering every
+    /// host name of the served one — or <c>null</c> when there is none (or following is off).
+    /// </summary>
+    Task<string?> FindStoreRenewalAsync(CancellationToken ct = default);
 }

@@ -15,7 +15,7 @@ namespace WinSmtpRelay.Storage.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<int>", b =>
                 {
@@ -262,6 +262,9 @@ namespace WinSmtpRelay.Storage.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("FollowStoreRenewals")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("NotAfterUtc")

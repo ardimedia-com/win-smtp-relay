@@ -154,6 +154,8 @@ if (adminUiConfig.Enabled)
     // The admin-UI certificate applier is a host concern (it depends on the host-provided
     // IAdminCertificateProvider registered above), so it stays here rather than in the security engine.
     builder.Services.AddScoped<AdminCertificateApplier>();
+    // Follows renewals of a store-picked admin certificate (win-acme / Let's Encrypt) — decision T3.
+    builder.Services.AddHostedService<WinSmtpRelay.Service.AdminCertificateRenewalService>();
 
     // OpenAPI document for the REST API (served at /openapi/v1.json by MapOpenApi below). Lets external
     // clients/tools discover the AdminApi surface; the endpoints themselves still require an API key.

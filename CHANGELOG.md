@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tenant-scoped keys with `config:write` may use this for their own sender domains; replacing an existing
   key needs `replace=true`. The raw `/api/dkim/domains` endpoints (which accept a host file path) stay
   host-only.
+- **The admin UI certificate follows renewals in the Windows certificate store.** A certificate picked from
+  the store (HTTPS Certificate page) is now replaced automatically — shortly after start and every six hours —
+  by a renewed certificate for the same host names, e.g. the one win-acme / Let's Encrypt writes every ~60
+  days. Before, the relay kept serving its imported copy until it expired. An uploaded PFX is not followed;
+  the page shows which applies. A certificate picked from the store before this release is followed once it
+  is picked again.
 - **Sending identity over the API and MCP.** `GET/PUT /api/settings/sending-identity` and the MCP tools
   `get_sending_identity` / `set_sending_identity` (host-level keys with `config`) read and set the public
   hostname and the public sending IPs; private entries are listed separately as a misconfiguration.

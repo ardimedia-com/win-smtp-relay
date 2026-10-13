@@ -64,10 +64,62 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
             row.Thumbprint = cert.Thumbprint;
             row.NotAfterUtc = cert.NotAfter;
             row.UploadedUtc = DateTimeOffset.UtcNow;
+            row.FollowStoreRenewals = false; // an uploaded PFX has no store copy to follow
             await db.SaveChangesAsync(ct);
 
             return await GetAsync(ct);
         }
+    }
+
+    public async Task<string?> FindStoreRenewalAsync(CancellationToken ct = default)
+    {
+        var row = await db.AdminCertificateSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct);
+        if (row is null || !row.FollowStoreRenewals || string.IsNullOrEmpty(row.PfxBase64))
+            return null;
+
+        using var current = X509CertificateLoader.LoadPkcs12(Convert.FromBase64String(row.PfxBase64), null, LoadFlags);
+        var names = DnsNames(current);
+        if (names.Count == 0)
+            return null;
+
+        var now = DateTime.Now;
+        using var store = new X509Store(StoreName.My, StoreLocation.LocalMachine);
+        store.Open(OpenFlags.ReadOnly);
+        string? best = null;
+        var bestNotAfter = current.NotAfter;
+        foreach (var cert in store.Certificates)
+        {
+            using (cert)
+            {
+                // A renewal: valid now, later expiry than what is served, private key + serverAuth, trusted
+                // machine-wide, and covering every host name the served certificate covers.
+                if (cert.NotAfter <= bestNotAfter || cert.NotBefore > now || !cert.HasPrivateKey
+                    || !HasServerAuthEku(cert) || !IsTrusted(cert))
+                    continue;
+                var candidateNames = DnsNames(cert);
+                if (!names.All(candidateNames.Contains))
+                    continue;
+                best = cert.Thumbprint;
+                bestNotAfter = cert.NotAfter;
+            }
+        }
+        return best;
+    }
+
+    // The certificate's DNS names (SAN dNSName entries; the CN when there is no SAN), lower-case.
+    private static HashSet<string> DnsNames(X509Certificate2 cert)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var san in cert.Extensions.OfType<X509SubjectAlternativeNameExtension>())
+            foreach (var dns in san.EnumerateDnsNames())
+                names.Add(dns.ToLowerInvariant());
+        if (names.Count == 0)
+        {
+            var cn = cert.GetNameInfo(X509NameType.DnsName, forIssuer: false);
+            if (!string.IsNullOrWhiteSpace(cn))
+                names.Add(cn.ToLowerInvariant());
+        }
+        return names;
     }
 
     public async Task ClearAsync(CancellationToken ct = default)
@@ -81,6 +133,7 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
         row.Thumbprint = null;
         row.NotAfterUtc = null;
         row.UploadedUtc = null;
+        row.FollowStoreRenewals = false;
         await db.SaveChangesAsync(ct);
     }
 
@@ -132,7 +185,13 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
             }
         }
 
-        return await ImportAsync(pfx, null, ct);
+        await ImportAsync(pfx, null, ct);
+
+        // Picked from the store → follow its renewals there (FindStoreRenewalAsync).
+        var settings = await db.AdminCertificateSettings.FirstAsync(s => s.Id == 1, ct);
+        settings.FollowStoreRenewals = true;
+        await db.SaveChangesAsync(ct);
+        return await GetAsync(ct);
     }
 
     private static bool HasServerAuthEku(X509Certificate2 cert)

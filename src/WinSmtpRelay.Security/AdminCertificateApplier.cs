@@ -36,6 +36,24 @@ public class AdminCertificateApplier(
         return settings;
     }
 
+    /// <summary>
+    /// Switches to a renewed store certificate (see <see cref="IAdminCertificateService.FindStoreRenewalAsync"/>) and
+    /// serves it immediately. Returns the new thumbprint, or null when nothing was to do.
+    /// </summary>
+    public async Task<string?> FollowStoreRenewalAsync(CancellationToken ct = default)
+    {
+        var renewal = await store.FindStoreRenewalAsync(ct);
+        if (renewal is null)
+            return null;
+
+        var before = (await store.GetAsync(ct)).Thumbprint;
+        await ImportFromStoreAndApplyAsync(renewal, ct);
+        logger.LogInformation(
+            "Admin UI certificate renewed from the Windows certificate store: {OldThumbprint} -> {NewThumbprint}",
+            before, renewal);
+        return renewal;
+    }
+
     /// <summary>Removes the imported certificate and immediately reverts to the configured/self-signed one.</summary>
     public async Task RemoveAndRevertAsync(CancellationToken ct = default)
     {

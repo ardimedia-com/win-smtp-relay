@@ -59,6 +59,24 @@ else
                         <code class="mono dns-record-value">@CurrentThumbprint</code>
                     </div>
                 }
+                @if (info.HasImportedCertificate)
+                {
+                    <div class="dns-record-row">
+                        <span class="dns-record-label">Renewals</span>
+                        <span class="dns-record-value" style="font-size:0.8rem;">
+                            @if (info.FollowStoreRenewals)
+                            {
+                                <text>Followed automatically — a renewed certificate for the same host names in the Windows
+                                certificate store (e.g. from win-acme / Let's Encrypt) is picked up within six hours.</text>
+                            }
+                            else
+                            {
+                                <text>Not followed — this certificate was uploaded as a PFX; upload its successor before it
+                                expires, or pick it from the Windows certificate store to have renewals followed.</text>
+                            }
+                        </span>
+                    </div>
+                }
             </div>
 
             @if (info.HasImportedCertificate)

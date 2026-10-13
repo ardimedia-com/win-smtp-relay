@@ -67,6 +67,25 @@ public class AdminCertificateServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
+    public async Task UploadedPfx_DoesNotFollowStoreRenewals()
+    {
+        // Only a certificate picked from the Windows store has a store copy whose renewals can be followed.
+        var (pfx, password) = CreatePfx("CN=admin.test.local");
+        var info = await _svc.ImportAsync(pfx, password);
+
+        Assert.IsFalse(info.FollowStoreRenewals);
+        Assert.IsNull(await _svc.FindStoreRenewalAsync(), "nothing to follow for an uploaded PFX");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task FindStoreRenewal_WithoutImportedCertificate_ReturnsNull()
+    {
+        Assert.IsNull(await _svc.FindStoreRenewalAsync());
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
     public async Task Import_InvalidBytes_ThrowsInvalidOperation()
     {
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
