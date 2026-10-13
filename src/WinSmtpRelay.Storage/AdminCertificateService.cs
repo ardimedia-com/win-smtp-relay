@@ -38,8 +38,11 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
         }
         catch (Exception ex)
         {
+            // Name the underlying cause: the same message also covers a store certificate re-imported by
+            // ImportFromStoreAsync, where neither "file" nor "password" is the operator's doing — without the
+            // cause there is nothing to act on.
             throw new InvalidOperationException(
-                "The file is not a valid PFX / PKCS#12 certificate, or the password is incorrect.", ex);
+                $"The certificate could not be loaded with its private key — not a valid PFX / PKCS#12 file, a wrong password, or the key cannot be imported for the service account. Cause: {ex.GetType().Name}: {ex.Message}", ex);
         }
 
         using (cert)

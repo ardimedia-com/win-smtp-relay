@@ -60,6 +60,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changes to the sending identity are audited** (`dnssettings.updated`), and sending IPs are validated
   (address or CIDR network) when saved.
 
+### Fixed
+
+- **«Use» on a store certificate failed with a misleading message.** Picking a certificate from the Windows
+  certificate store re-imports its exported copy; when that failed, the page said «The file is not a valid PFX /
+  PKCS#12 certificate, or the password is incorrect» — although no file or password was involved — and dropped
+  the actual cause. The message now names the underlying error.
+
 ## [1.0.0-beta1-build73] - 2026-10-04
 
 ### Fixed
