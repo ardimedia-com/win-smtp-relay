@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build75] - 2026-10-14
+
 ### Added
 
 - **MCP tool `remove_accepted_sender_domain`** — the counterpart of `add_accepted_sender_domain`: removes a
