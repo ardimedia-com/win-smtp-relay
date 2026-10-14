@@ -62,7 +62,7 @@ else if (createdSecret is not null)
                     <BbLabel>Use it</BbLabel>
                     <p class="text-muted" style="font-size:0.8125rem;margin:0 0 0.35rem;">
                         REST API: send it as <code>Authorization: Bearer &lt;key&gt;</code> or <code>X-Api-Key: &lt;key&gt;</code>.
-                        For an MCP client (e.g. Claude Code), add the server with the key already filled in &mdash; pick the scope:
+                        For an MCP client (e.g. Claude Code), add the server with one of these commands &mdash; the key is shortened on screen, the copy button puts the full command on the clipboard. Pick the scope:
                     </p>
 
                     <p class="text-muted" style="font-size:0.78rem;margin:0.5rem 0 0.2rem;">
@@ -70,7 +70,7 @@ else if (createdSecret is not null)
                         runs in that one folder:
                     </p>
                     <div style="display:flex;gap:0.5rem;align-items:flex-start;">
-                        <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.5rem 0.7rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.8rem;">@McpAddCommand</code></pre>
+                        <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.5rem 0.7rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.8rem;">@McpAddCommandShown</code></pre>
                         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopyMcpCommandAsync">
                             <LucideIcon Name="copy" />
                         </BbButton>
@@ -85,7 +85,7 @@ else if (createdSecret is not null)
                         available in every folder you open on this machine:
                     </p>
                     <div style="display:flex;gap:0.5rem;align-items:flex-start;">
-                        <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.5rem 0.7rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.8rem;">@McpAddCommandUserScope</code></pre>
+                        <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.5rem 0.7rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.8rem;">@McpAddCommandUserScopeShown</code></pre>
                         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopyMcpCommandUserScopeAsync">
                             <LucideIcon Name="copy" />
                         </BbButton>
@@ -498,12 +498,19 @@ else if (key is not null)
     private bool mcpCommandUserScopeCopied;
 
     private string McpUrl => $"{Nav.BaseUri}mcp";
-    private string McpAddCommand =>
-        $"claude mcp add --transport http win-smtp-relay {McpUrl} --header \"Authorization: Bearer {createdSecret}\"";
+    private string McpAddCommand => BuildMcpAddCommand(userScope: false, createdSecret);
     // Same command with --scope user: registers the server for every folder on the machine,
     // not only the one Claude Code is started in (the default "local" scope).
-    private string McpAddCommandUserScope =>
-        $"claude mcp add --scope user --transport http win-smtp-relay {McpUrl} --header \"Authorization: Bearer {createdSecret}\"";
+    private string McpAddCommandUserScope => BuildMcpAddCommand(userScope: true, createdSecret);
+
+    // What the page SHOWS carries only the key's first characters, so a screenshot of the page does not
+    // leak the secret; the copy buttons still put the full command on the clipboard.
+    private string McpAddCommandShown => BuildMcpAddCommand(userScope: false, MaskedSecret);
+    private string McpAddCommandUserScopeShown => BuildMcpAddCommand(userScope: true, MaskedSecret);
+    private string MaskedSecret => createdSecret is { Length: > 8 } s ? s[..8] + "…" : "…";
+
+    private string BuildMcpAddCommand(bool userScope, string? key) =>
+        $"claude mcp add {(userScope ? "--scope user " : "")}--transport http win-smtp-relay {McpUrl} --header \"Authorization: Bearer {key}\"";
 
     // Edit/view state.
     private ApiKey? key;

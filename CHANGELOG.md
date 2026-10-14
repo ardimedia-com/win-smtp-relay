@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A new API key no longer appears in clear text in the `claude mcp add` commands** on the page shown after
+  creating it — the commands show the key shortened, the copy buttons still copy the full command. A screenshot
+  of that page (with the secret field covered) no longer leaks the key.
+
 ### Fixed
 
 - Missing space between two sentences in the preset description on the *New API key* page.
