@@ -297,6 +297,14 @@ public class AdminApiTests
         Assert.AreEqual(HttpStatusCode.Forbidden, write.StatusCode);
     }
 
+    /// <summary>A host-key POST that names the Default tenant (X-Relay-Tenant), as a tenant write needs once several tenants exist.</summary>
+    private Task<HttpResponseMessage> PostInDefaultTenantAsync<T>(string url, T body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body) };
+        request.Headers.Add(RelayTenantContextMiddleware.TenantHeader, TenantDefaults.DefaultSlug);
+        return _client.SendAsync(request);
+    }
+
     [TestMethod]
     [TestCategory("Integration")]
     public async Task ApiKey_TenantScope_IsolatesData()
@@ -319,8 +327,9 @@ public class AdminApiTests
         using var t2 = new HttpClient { BaseAddress = _client.BaseAddress };
         t2.DefaultRequestHeaders.Add(ApiKeyDefaults.HeaderName, tenant2Key);
 
-        // Host admin creates a user (default tenant); tenant-2 admin creates a user (stamped tenant 2).
-        var created1 = await _client.PostAsJsonAsync("/api/users", new CreateUserRequest("alice_t1", "P@ssw0rd!"));
+        // Host admin creates a user in the default tenant (with two tenants it must name it); tenant-2
+        // admin creates a user (stamped tenant 2).
+        var created1 = await PostInDefaultTenantAsync("/api/users", new CreateUserRequest("alice_t1", "P@ssw0rd!"));
         Assert.AreEqual(HttpStatusCode.Created, created1.StatusCode);
         var created2 = await t2.PostAsJsonAsync("/api/users", new CreateUserRequest("bob_t2", "P@ssw0rd!"));
         Assert.AreEqual(HttpStatusCode.Created, created2.StatusCode);
@@ -358,7 +367,7 @@ public class AdminApiTests
         t2.DefaultRequestHeaders.Add(ApiKeyDefaults.HeaderName, tenant2Key);
 
         // Host creates a user that belongs to the default tenant.
-        await _client.PostAsJsonAsync("/api/users", new CreateUserRequest("alice_t1", "P@ssw0rd!"));
+        await PostInDefaultTenantAsync("/api/users", new CreateUserRequest("alice_t1", "P@ssw0rd!"));
         var hostUsers = await _client.GetFromJsonAsync<UserSummary[]>("/api/users");
         var aliceId = hostUsers!.Single(u => u.Username == "alice_t1").Id;
 

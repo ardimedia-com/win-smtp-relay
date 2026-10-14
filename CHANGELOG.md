@@ -7,17 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **One API key for host and tenant work** — a host-level key can name the tenant a call acts in: the
+  `X-Relay-Tenant: <id or slug>` header (REST and MCP, pins the whole request) or the new `tenant` argument of
+  the MCP tools that change tenant data (`add_accepted_sender_domain`, `remove_accepted_sender_domain`,
+  `add_accepted_domain`, `add_ip_allow_rule`, `add_suppression`, `generate_dkim_key`, `set_dkim_enabled`;
+  `list_dkim_domains` uses it as a filter). Naming a tenant only narrows what the key already reaches. A tenant
+  key may name only its own tenant.
+
 ### Changed
 
 - **Host-level API keys can be created from a tenant view** — a host admin now finds *Host admin (host-level
   key)* in the role list of *New API key* while a tenant is selected, instead of having to switch to the Global
   scope first. The key is created without a tenant, and the page says where it is listed afterwards.
+- **BREAKING:** the MCP tool `add_suppression` takes the tenant as `tenant` (id or slug) instead of `tenantId`.
 
 ### Fixed
 
 - **Host → API Keys in the Global scope showed «Select an organization»** instead of the key list, so the
   documented way to create a host-level key (e.g. for an MCP assistant that reads the sending identity) was a
   dead end. The Global scope now lists every key and creates host-level keys.
+- **A host-level key's tenant changes landed silently in the Default tenant** — a sender domain, recipient
+  domain, IP rule, relay user, route, filter or DKIM key created over REST or MCP by a host-level key (no tenant
+  of its own) went to the Default tenant, whatever tenant it was meant for. With several tenants such a change is
+  now refused with the list of tenants until one is named; with a single tenant that tenant is used, as before.
+  A suppression added by a host-level key on a single-tenant relay no longer needs a tenant id.
 
 ## [1.0.0-beta1-build75] - 2026-10-14
 

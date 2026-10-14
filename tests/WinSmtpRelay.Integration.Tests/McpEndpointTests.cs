@@ -370,4 +370,101 @@ public class McpEndpointTests
         StringAssert.Contains(result.ToString(), "role", StringComparison.OrdinalIgnoreCase);
         Assert.IsTrue(await SenderDomainExistsAsync("protected.example"));
     }
+
+    // ---- T9: a host-level key names the tenant of a tenant write ----
+
+    private async Task<int> AddTenantAsync(string slug)
+    {
+        using var scope = _app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+        var tenant = new Tenant { Name = slug, Slug = slug };
+        db.Tenants.Add(tenant);
+        await db.SaveChangesAsync();
+        return tenant.Id;
+    }
+
+    private async Task<int?> SenderDomainTenantAsync(string domain)
+    {
+        using var scope = _app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+        return await db.AcceptedSenderDomains.IgnoreQueryFilters().AsNoTracking()
+            .Where(d => d.Domain == domain).Select(d => (int?)d.TenantId).FirstOrDefaultAsync();
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_HostKey_SingleTenant_WriteLandsInThatTenant()
+    {
+        var result = await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "single.example" });
+
+        Assert.IsFalse(IsToolError(result), $"expected success, got: {result}");
+        Assert.AreEqual(TenantDefaults.DefaultTenantId, await SenderDomainTenantAsync("single.example"));
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_HostKey_SeveralTenants_WithoutTenant_IsRefused_AndNamesTheTenants()
+    {
+        await AddTenantAsync("acme");
+
+        var result = await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "nowhere.example" });
+
+        Assert.IsTrue(IsToolError(result), $"a tenant write without a tenant must be refused: {result}");
+        StringAssert.Contains(result.ToString(), "acme");
+        Assert.IsFalse(await SenderDomainExistsAsync("nowhere.example"), "nothing may land in the Default tenant");
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_HostKey_SeveralTenants_WithTenantArgument_LandsInThatTenant()
+    {
+        var acme = await AddTenantAsync("acme");
+
+        var bySlug = await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "acme.example", tenant = "acme" });
+        var byId = await CallToolAsync(_client, "add_ip_allow_rule", new { network = "192.0.2.10/32", tenant = acme.ToString() });
+
+        Assert.IsFalse(IsToolError(bySlug), $"expected success, got: {bySlug}");
+        Assert.IsFalse(IsToolError(byId), $"expected success, got: {byId}");
+        Assert.AreEqual(acme, await SenderDomainTenantAsync("acme.example"));
+        using var scope = _app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+        var rule = await db.IpAccessRules.IgnoreQueryFilters().AsNoTracking().SingleAsync(r => r.Network == "192.0.2.10/32");
+        Assert.AreEqual(acme, rule.TenantId);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_HostKey_TenantHeader_PinsTheWholeRequest()
+    {
+        var acme = await AddTenantAsync("acme");
+        _client.DefaultRequestHeaders.Add(RelayTenantContextMiddleware.TenantHeader, "acme");
+
+        var result = await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "header.example" });
+
+        Assert.IsFalse(IsToolError(result), $"expected success, got: {result}");
+        Assert.AreEqual(acme, await SenderDomainTenantAsync("header.example"));
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_TenantHeader_UnknownTenant_IsBadRequest()
+    {
+        _client.DefaultRequestHeaders.Add(RelayTenantContextMiddleware.TenantHeader, "no-such-tenant");
+
+        var response = await _client.PostAsync("/mcp", Rpc("tools/list"));
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_TenantKey_NamingAnotherTenant_IsRefused()
+    {
+        await AddTenantAsync("acme");
+
+        var result = await CallToolAsync(_viewerClient, "list_dkim_domains", new { tenant = "acme" });
+
+        Assert.IsTrue(IsToolError(result), $"a tenant key must not reach another tenant: {result}");
+        StringAssert.Contains(result.ToString(), "bound to tenant");
+    }
 }

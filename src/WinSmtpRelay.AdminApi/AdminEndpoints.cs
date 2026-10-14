@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using WinSmtpRelay.AdminApi.Auth;
 using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Authorization;
@@ -35,6 +36,29 @@ public static class AdminEndpoints
         // top of the role policies. Each subgroup below declares its ApiKeyScopes area via
         // ApiScopeMetadata; the filter fails closed for unclassified endpoints.
         group.AddEndpointFilter(ApiKeyScopeFilter.InvokeAsync);
+
+        // Tenant writes (groups marked TenantWriteMetadata) from a host-scope caller that named no tenant
+        // (header X-Relay-Tenant): narrowed to the only tenant, or refused with the tenant list when there
+        // are several — tenant-owned rows default to the Default tenant and would land there silently.
+        group.AddEndpointFilter(async (ctx, next) =>
+        {
+            var http = ctx.HttpContext;
+            if (!HttpMethods.IsGet(http.Request.Method) && !HttpMethods.IsHead(http.Request.Method)
+                && http.GetEndpoint()?.Metadata.GetMetadata<TenantWriteMetadata>() is not null)
+            {
+                try
+                {
+                    await TenantSelector.RequireTenantAsync(
+                        http.RequestServices.GetRequiredService<ICurrentTenant>(),
+                        http.RequestServices.GetRequiredService<RelayDbContext>(), http.RequestAborted);
+                }
+                catch (TenantRequiredException ex)
+                {
+                    return Results.BadRequest(new { Error = ex.Message });
+                }
+            }
+            return await next(ctx);
+        });
 
         MapHealthEndpoints(group);
         MapMetricsEndpoints(group);
@@ -173,7 +197,7 @@ public static class AdminEndpoints
 
     private static void MapUserEndpoints(RouteGroupBuilder group)
     {
-        var users = group.MapGroup("/users").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Admin));
+        var users = group.MapGroup("/users").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Admin), new TenantWriteMetadata());
 
         users.MapGet("/", async (IUserService svc, CancellationToken ct) =>
         {
@@ -235,7 +259,7 @@ public static class AdminEndpoints
         // The safe, tenant-usable flow (DkimKeyOperations): key generated and stored server-side, only the DNS
         // record is returned, new keys start disabled, enabling requires the published record. No PrivateKeyPath,
         // so — unlike /dkim/domains — tenant admins may use it for their own sender domains.
-        var keys = group.MapGroup("/dkim/keys").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+        var keys = group.MapGroup("/dkim/keys").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config), new TenantWriteMetadata());
 
         keys.MapGet("/", async (IDkimDomainService dkim, CancellationToken ct) =>
             Results.Ok(await DkimKeyOperations.ListAsync(dkim, ct)));
@@ -493,16 +517,26 @@ public static class AdminEndpoints
                 e.Id, e.TenantId, e.Address, e.Reason.ToString(), e.Detail, e.CreatedUtc)));
         });
 
-        ep.MapPost("/", async (CreateSuppressionRequest req, ISuppressionService svc, ICurrentTenant tenant, CancellationToken ct) =>
+        ep.MapPost("/", async (CreateSuppressionRequest req, ISuppressionService svc, ICurrentTenant tenant, RelayDbContext db, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req.Address))
                 return Results.BadRequest(new { Error = "Address is required" });
 
-            // A suppression belongs to exactly one tenant: tenant-scoped callers use their own; a
-            // host-scope caller must name the target tenant explicitly.
-            int? tenantId = tenant.FilterEnabled ? tenant.FilterTenantId : req.TenantId;
-            if (tenantId is not int tid)
-                return Results.BadRequest(new { Error = "TenantId is required at host scope" });
+            // A suppression belongs to exactly one tenant: tenant-scoped callers (incl. a host-level key
+            // that sent X-Relay-Tenant) use their own; a host-scope caller names it in the body, or —
+            // when there is only one tenant — gets that one.
+            if (!tenant.FilterEnabled && req.TenantId is null)
+            {
+                try
+                {
+                    await TenantSelector.RequireTenantAsync(tenant, db, ct);
+                }
+                catch (TenantRequiredException ex)
+                {
+                    return Results.BadRequest(new { Error = ex.Message });
+                }
+            }
+            int tid = tenant.FilterEnabled ? tenant.FilterTenantId : req.TenantId!.Value;
 
             await svc.AddAsync(req.Address, SuppressionReason.Manual, req.Detail, tid, ct);
             return Results.Ok(new { Message = "Address suppressed" });
@@ -592,7 +626,7 @@ public static class AdminEndpoints
 
     private static void MapAcceptedDomainEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/domains/accepted").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+        var ep = group.MapGroup("/domains/accepted").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config), new TenantWriteMetadata());
 
         ep.MapGet("/", async (IAcceptedDomainService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
@@ -616,7 +650,7 @@ public static class AdminEndpoints
 
     private static void MapAcceptedSenderDomainEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/domains/accepted-sender").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+        var ep = group.MapGroup("/domains/accepted-sender").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config), new TenantWriteMetadata());
 
         ep.MapGet("/", async (IAcceptedSenderDomainService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
@@ -640,7 +674,7 @@ public static class AdminEndpoints
 
     private static void MapIpAccessRuleEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/ip-rules").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+        var ep = group.MapGroup("/ip-rules").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config), new TenantWriteMetadata());
 
         ep.MapGet("/", async (IIpAccessRuleService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
@@ -670,7 +704,7 @@ public static class AdminEndpoints
 
     private static void MapSendConnectorEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/connectors/send").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+        var ep = group.MapGroup("/connectors/send").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config), new TenantWriteMetadata());
 
         ep.MapGet("/", async (ISendConnectorService svc, CancellationToken ct) =>
             Results.Ok((await svc.GetAllAsync(ct)).Select(SendConnectorSummary.From)));
@@ -700,7 +734,7 @@ public static class AdminEndpoints
 
     private static void MapDomainRouteEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/routes").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+        var ep = group.MapGroup("/routes").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config), new TenantWriteMetadata());
 
         ep.MapGet("/", async (IDomainRouteService svc, CancellationToken ct) =>
             Results.Ok((await svc.GetAllAsync(ct)).Select(DomainRouteSummary.From)));
@@ -733,7 +767,7 @@ public static class AdminEndpoints
         // PrivateKeyPath is an arbitrary host-filesystem path, so per-tenant admins must not manage it
         // (it would let them probe server files or reference another tenant's key) — host admins only.
         var ep = group.MapGroup("/dkim/domains").RequireAuthorization(AuthorizationPolicies.HostAdmin)
-            .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+            .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config), new TenantWriteMetadata());
 
         // The list never returns key material (PrivateKeyPem / PrivateKeyPath): the private key is the only
         // DKIM secret and must not leak over the wire. Project to a summary DTO that exposes only whether a
@@ -806,7 +840,7 @@ public static class AdminEndpoints
 
     private static void MapMessageFilterEndpoints(RouteGroupBuilder group)
     {
-        var headers = group.MapGroup("/filters/headers").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+        var headers = group.MapGroup("/filters/headers").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config), new TenantWriteMetadata());
 
         headers.MapGet("/", async (IMessageFilterService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetHeaderRulesAsync(ct)));
@@ -833,7 +867,7 @@ public static class AdminEndpoints
             return Results.Ok(new { Message = "Header rewrite rule deleted" });
         });
 
-        var senders = group.MapGroup("/filters/senders").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+        var senders = group.MapGroup("/filters/senders").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config), new TenantWriteMetadata());
 
         senders.MapGet("/", async (IMessageFilterService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetSenderRulesAsync(ct)));

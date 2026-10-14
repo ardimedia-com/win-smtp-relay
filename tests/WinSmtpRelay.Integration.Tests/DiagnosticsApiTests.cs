@@ -156,16 +156,100 @@ public class DiagnosticsApiTests
         Assert.AreEqual(1, history!.Length);
     }
 
+    // ---- T9: a host-level key names the tenant of a tenant write ----
+
+    private async Task<int> AddTenantAsync(string slug)
+    {
+        using var scope = _app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+        var tenant = new Tenant { Name = slug, Slug = slug };
+        db.Tenants.Add(tenant);
+        await db.SaveChangesAsync();
+        return tenant.Id;
+    }
+
+    private async Task<int?> SenderDomainTenantAsync(string domain)
+    {
+        using var scope = _app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+        return await db.AcceptedSenderDomains.IgnoreQueryFilters().AsNoTracking()
+            .Where(d => d.Domain == domain).Select(d => (int?)d.TenantId).FirstOrDefaultAsync();
+    }
+
+    private Task<HttpResponseMessage> PostSenderDomainAsync(string domain, string? tenantHeader = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/domains/accepted-sender")
+        {
+            Content = JsonContent.Create(new { Domain = domain }),
+        };
+        if (tenantHeader is not null)
+            request.Headers.Add(RelayTenantContextMiddleware.TenantHeader, tenantHeader);
+        return _client.SendAsync(request);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task TenantWrite_HostKey_SingleTenant_LandsInThatTenant()
+    {
+        var response = await PostSenderDomainAsync("single.example");
+
+        Assert.IsTrue(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.AreEqual(TenantDefaults.DefaultTenantId, await SenderDomainTenantAsync("single.example"));
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task TenantWrite_HostKey_SeveralTenants_WithoutHeader_IsBadRequest_AndCreatesNothing()
+    {
+        await AddTenantAsync("acme");
+
+        var response = await PostSenderDomainAsync("nowhere.example");
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        StringAssert.Contains(await response.Content.ReadAsStringAsync(), "acme");
+        Assert.IsNull(await SenderDomainTenantAsync("nowhere.example"), "nothing may land in the Default tenant");
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task TenantWrite_HostKey_TenantHeader_LandsInThatTenant()
+    {
+        var acme = await AddTenantAsync("acme");
+
+        var bySlug = await PostSenderDomainAsync("slug.example", "acme");
+        var byId = await PostSenderDomainAsync("id.example", acme.ToString());
+
+        Assert.IsTrue(bySlug.IsSuccessStatusCode, await bySlug.Content.ReadAsStringAsync());
+        Assert.IsTrue(byId.IsSuccessStatusCode, await byId.Content.ReadAsStringAsync());
+        Assert.AreEqual(acme, await SenderDomainTenantAsync("slug.example"));
+        Assert.AreEqual(acme, await SenderDomainTenantAsync("id.example"));
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task TenantWrite_HostLevelSetting_NeedsNoTenant()
+    {
+        await AddTenantAsync("acme");
+
+        // The sending identity is host-level: no tenant needed, even with several tenants.
+        var response = await _client.PutAsJsonAsync("/api/settings/sending-identity",
+            new { PublicHostname = "smtp.example.com" });
+
+        Assert.IsTrue(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+    }
+
     // ---- Suppressions ----
 
     [TestMethod]
     [TestCategory("Integration")]
     public async Task Suppressions_AddListRemove_RoundTrip()
     {
-        // Host scope must name the tenant explicitly.
+        // Host scope with several tenants must name the tenant explicitly.
+        await AddTenantAsync("other");
         var missingTenant = await _client.PostAsJsonAsync("/api/suppressions",
             new CreateSuppressionRequest("Dead@Example.com"));
         Assert.AreEqual(HttpStatusCode.BadRequest, missingTenant.StatusCode);
+        StringAssert.Contains(await missingTenant.Content.ReadAsStringAsync(), "other");
 
         var add = await _client.PostAsJsonAsync("/api/suppressions",
             new CreateSuppressionRequest("Dead@Example.com", "manual test", TenantDefaults.DefaultTenantId));

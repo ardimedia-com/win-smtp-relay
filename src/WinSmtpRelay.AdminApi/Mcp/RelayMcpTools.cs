@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
+using WinSmtpRelay.AdminApi.Auth;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Authorization;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -205,10 +207,12 @@ public sealed class RelayMcpTools
         "DKIM keys of the current scope: domain, selector, whether signing is enabled, and the DNS TXT record "
         + "(name + value) each key needs. Never returns private keys.")]
     public static async Task<IReadOnlyList<DkimKeyInfo>> ListDkimDomains(
-        ClaimsPrincipal user, IAuthorizationService auth, IDkimDomainService dkim, CancellationToken ct)
+        ClaimsPrincipal user, IAuthorizationService auth, IDkimDomainService dkim, ICurrentTenant current, RelayDbContext db,
+        CancellationToken ct,
+        [Description("Only this tenant (id or slug); a host-level key otherwise lists every tenant's keys")] string? tenant = null)
     {
         await RequireAsync(auth, user, AuthorizationPolicies.AdminView, ApiKeyScopes.Config);
-        return await DkimKeyOperations.ListAsync(dkim, ct);
+        return await InTenantAsync(current, db, tenant, write: false, ct, () => DkimKeyOperations.ListAsync(dkim, ct));
     }
 
     // ---- Fixes (writes — all audited with the API-key actor) ----
@@ -220,16 +224,18 @@ public sealed class RelayMcpTools
         + "the new key is enabled). Audited.")]
     public static async Task<DkimKeyInfo> GenerateDkimKey(
         ClaimsPrincipal user, IAuthorizationService auth, IDkimDomainService dkim, IAcceptedSenderDomainService senders,
-        CancellationToken ct,
+        ICurrentTenant current, RelayDbContext db, CancellationToken ct,
         [Description("The sender domain, e.g. 'acme.com'")] string domain,
         [Description("DKIM selector (default 'wsrYYYYMM')")] string? selector = null,
         [Description("RSA key size: 2048 (default), 3072 or 4096")] int? keySize = null,
-        [Description("Replace an existing key for this domain")] bool replace = false)
+        [Description("Replace an existing key for this domain")] bool replace = false,
+        [Description(TenantArgument)] string? tenant = null)
     {
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         try
         {
-            return await DkimKeyOperations.GenerateAsync(domain, selector, keySize, replace, dkim, senders, ct);
+            return await InTenantAsync(current, db, tenant, write: true, ct,
+                () => DkimKeyOperations.GenerateAsync(domain, selector, keySize, replace, dkim, senders, ct));
         }
         catch (InvalidOperationException ex)
         {
@@ -242,14 +248,16 @@ public sealed class RelayMcpTools
         + "key and refuses otherwise. Audited.")]
     public static async Task<DkimKeyInfo> SetDkimEnabled(
         ClaimsPrincipal user, IAuthorizationService auth, IDkimDomainService dkim, IDnsSetupService dns,
-        CancellationToken ct,
+        ICurrentTenant current, RelayDbContext db, CancellationToken ct,
         [Description("The sender domain")] string domain,
-        [Description("true = sign outgoing mail with the key, false = stop signing")] bool enabled)
+        [Description("true = sign outgoing mail with the key, false = stop signing")] bool enabled,
+        [Description(TenantArgument)] string? tenant = null)
     {
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         try
         {
-            return await DkimKeyOperations.SetEnabledAsync(domain, enabled, dkim, dns, ct);
+            return await InTenantAsync(current, db, tenant, write: true, ct,
+                () => DkimKeyOperations.SetEnabledAsync(domain, enabled, dkim, dns, ct));
         }
         catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
         {
@@ -282,17 +290,22 @@ public sealed class RelayMcpTools
     [McpServerTool(Name = "add_accepted_sender_domain"), Description(
         "Allow a sender domain (fixes 'sender domain not accepted' rejections). The change is audited and live immediately.")]
     public static async Task<object> AddAcceptedSenderDomain(
-        ClaimsPrincipal user, IAuthorizationService auth, IAcceptedSenderDomainService svc, CancellationToken ct,
-        [Description("The domain, e.g. 'acme.com'")] string domain)
+        ClaimsPrincipal user, IAuthorizationService auth, IAcceptedSenderDomainService svc,
+        ICurrentTenant current, RelayDbContext db, CancellationToken ct,
+        [Description("The domain, e.g. 'acme.com'")] string domain,
+        [Description(TenantArgument)] string? tenant = null)
     {
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         domain = domain.Trim().ToLowerInvariant();
         if (domain.Length == 0)
             throw new McpException("Domain must not be empty.");
-        if (await svc.ExistsAsync(domain, ct))
-            return new { Message = $"'{domain}' is already an accepted sender domain." };
-        var created = await svc.CreateAsync(domain, ct);
-        return new { Message = $"Sender domain '{domain}' accepted (id {created.Id}). Note: it is not ownership-verified yet." };
+        return await InTenantAsync<object>(current, db, tenant, write: true, ct, async () =>
+        {
+            if (await svc.ExistsAsync(domain, ct))
+                return new { Message = $"'{domain}' is already an accepted sender domain." };
+            var created = await svc.CreateAsync(domain, ct);
+            return new { Message = $"Sender domain '{domain}' accepted for tenant {created.TenantId} (id {created.Id}). Note: it is not ownership-verified yet." };
+        });
     }
 
     [McpServerTool(Name = "remove_accepted_sender_domain"), Description(
@@ -302,14 +315,18 @@ public sealed class RelayMcpTools
         + "the sender-domain check off, so ANY domain could send). A DKIM key of the domain is kept. The change is "
         + "audited and live immediately.")]
     public static async Task<object> RemoveAcceptedSenderDomain(
-        ClaimsPrincipal user, IAuthorizationService auth, IAcceptedSenderDomainService svc, RelayDbContext db, CancellationToken ct,
+        ClaimsPrincipal user, IAuthorizationService auth, IAcceptedSenderDomainService svc, RelayDbContext db,
+        ICurrentTenant current, CancellationToken ct,
         [Description("The domain, e.g. 'acme.com'")] string? domain = null,
-        [Description("The sender-domain id (instead of domain)")] int? id = null)
+        [Description("The sender-domain id (instead of domain)")] int? id = null,
+        [Description("Tenant id or slug, to pick the right entry when the same domain exists in several tenants")] string? tenant = null)
     {
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         domain = domain?.Trim().ToLowerInvariant();
         if (string.IsNullOrEmpty(domain) == (id is null))
             throw new McpException("Pass either domain or id (exactly one of them).");
+        if (await TenantSelector.ApplyAsync(current, db, tenant, ct) is { } tenantError)
+            throw new McpException(tenantError);
 
         // The tenant query filter hides other tenants' domains, so this lookup doubles as authorization.
         var query = db.AcceptedSenderDomains.AsNoTracking();
@@ -341,54 +358,66 @@ public sealed class RelayMcpTools
     [McpServerTool(Name = "add_accepted_domain"), Description(
         "Add a hosted recipient domain (mail TO this domain is accepted for local/hosted delivery). Audited.")]
     public static async Task<object> AddAcceptedDomain(
-        ClaimsPrincipal user, IAuthorizationService auth, IAcceptedDomainService svc, CancellationToken ct,
-        [Description("The domain, e.g. 'acme.com'")] string domain)
+        ClaimsPrincipal user, IAuthorizationService auth, IAcceptedDomainService svc,
+        ICurrentTenant current, RelayDbContext db, CancellationToken ct,
+        [Description("The domain, e.g. 'acme.com'")] string domain,
+        [Description(TenantArgument)] string? tenant = null)
     {
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         domain = domain.Trim().ToLowerInvariant();
         if (domain.Length == 0)
             throw new McpException("Domain must not be empty.");
-        if (await svc.ExistsAsync(domain, ct))
-            return new { Message = $"'{domain}' is already an accepted domain." };
-        var created = await svc.CreateAsync(domain, ct);
-        return new { Message = $"Recipient domain '{domain}' accepted (id {created.Id})." };
+        return await InTenantAsync<object>(current, db, tenant, write: true, ct, async () =>
+        {
+            if (await svc.ExistsAsync(domain, ct))
+                return new { Message = $"'{domain}' is already an accepted domain." };
+            var created = await svc.CreateAsync(domain, ct);
+            return new { Message = $"Recipient domain '{domain}' accepted for tenant {created.TenantId} (id {created.Id})." };
+        });
     }
 
     [McpServerTool(Name = "add_ip_allow_rule"), Description(
         "Allow submissions from a network (fixes 'not in allowed networks' rejections for a known device). "
         + "Prefer a narrow CIDR (/32 for one host). Audited.")]
     public static async Task<object> AddIpAllowRule(
-        ClaimsPrincipal user, IAuthorizationService auth, IIpAccessRuleService svc, CancellationToken ct,
+        ClaimsPrincipal user, IAuthorizationService auth, IIpAccessRuleService svc,
+        ICurrentTenant current, RelayDbContext db, CancellationToken ct,
         [Description("Network in CIDR form, e.g. '192.168.1.10/32'")] string network,
-        [Description("Why this network is allowed (shown in the rule list)")] string? description = null)
+        [Description("Why this network is allowed (shown in the rule list)")] string? description = null,
+        [Description(TenantArgument)] string? tenant = null)
     {
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
         network = network.Trim();
         if (network.Length == 0)
             throw new McpException("Network must not be empty.");
-        var created = await svc.CreateAsync(new IpAccessRule
+        return await InTenantAsync<object>(current, db, tenant, write: true, ct, async () =>
         {
-            Network = network,
-            Action = IpAccessAction.Allow,
-            Description = description,
-        }, ct);
-        return new { Message = $"Allow rule for {network} created (id {created.Id})." };
+            var created = await svc.CreateAsync(new IpAccessRule
+            {
+                Network = network,
+                Action = IpAccessAction.Allow,
+                Description = description,
+            }, ct);
+            return new { Message = $"Allow rule for {network} created for tenant {created.TenantId} (id {created.Id})." };
+        });
     }
 
     [McpServerTool(Name = "add_suppression"), Description(
         "Manually block delivery to an address (e.g. a complainer). Audited.")]
     public static async Task<object> AddSuppression(
-        ClaimsPrincipal user, IAuthorizationService auth, ISuppressionService svc, ICurrentTenant tenant, CancellationToken ct,
+        ClaimsPrincipal user, IAuthorizationService auth, ISuppressionService svc,
+        ICurrentTenant current, RelayDbContext db, CancellationToken ct,
         [Description("The recipient address to suppress")] string address,
         [Description("Why (stored with the entry)")] string? note = null,
-        [Description("Target tenant id — required when the key is host-scoped")] int? tenantId = null)
+        [Description(TenantArgument)] string? tenant = null)
     {
         await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
-        int? tid = tenant.FilterEnabled ? tenant.FilterTenantId : tenantId;
-        if (tid is not int resolvedTenant)
-            throw new McpException("tenantId is required for a host-scoped key (a suppression belongs to one tenant).");
-        await svc.AddAsync(address, SuppressionReason.Manual, note, resolvedTenant, ct);
-        return new { Message = $"'{address.Trim().ToLowerInvariant()}' is now suppressed for tenant {resolvedTenant}." };
+        // The suppression service takes the tenant explicitly: resolve it like every other tenant write.
+        return await InTenantAsync<object>(current, db, tenant, write: true, ct, async () =>
+        {
+            await svc.AddAsync(address, SuppressionReason.Manual, note, current.FilterTenantId, ct);
+            return new { Message = $"'{address.Trim().ToLowerInvariant()}' is now suppressed for tenant {current.FilterTenantId}." };
+        });
     }
 
     [McpServerTool(Name = "remove_suppression"), Description(
@@ -417,6 +446,35 @@ public sealed class RelayMcpTools
         return await queue.RequeueAsync(id, ct)
             ? new { Message = $"Message {id} re-queued for delivery." }
             : new { Message = $"Message {id} is not in a retryable state (only Failed/Bounced can be re-queued)." };
+    }
+
+    private const string TenantArgument =
+        "Tenant id or slug the change belongs to. Needed with a host-level key when several tenants exist; "
+        + "a tenant key always acts in its own tenant";
+
+    /// <summary>
+    /// Narrows the call to the named tenant (see <see cref="TenantSelector"/>), then runs it. For a
+    /// <paramref name="write"/>, a host-level key that named none is narrowed to the only tenant, or — with
+    /// several — refused with a tool error naming them, instead of the row landing in the Default tenant.
+    /// </summary>
+    private static async Task<T> InTenantAsync<T>(
+        ICurrentTenant current, RelayDbContext db, string? tenant, bool write, CancellationToken ct, Func<Task<T>> action)
+    {
+        var error = await TenantSelector.ApplyAsync(current, db, tenant, ct);
+        if (error is not null)
+            throw new McpException(error);
+        if (write)
+        {
+            try
+            {
+                await TenantSelector.RequireTenantAsync(current, db, ct);
+            }
+            catch (TenantRequiredException ex)
+            {
+                throw new McpException(ex.Message);
+            }
+        }
+        return await action();
     }
 
     /// <summary>
