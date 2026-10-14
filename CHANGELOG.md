@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build78] - 2026-10-14
+
 ### Fixed
 
 - **The Deliverability page judges DMARC by the smart host too** — when every message of a sender domain's tenant
