@@ -138,24 +138,24 @@ else
             </BbDialogDescription>
         </BbDialogHeader>
 
-        <div class="form-group">
+        <div class="form-group" style="min-width:0;">
             <BbLabel For="resend-recipients">Recipients</BbLabel>
             <textarea id="resend-recipients" rows="5"
-                      style="width:100%;font-family:var(--font-mono,monospace);font-size:0.875rem;padding:0.5rem;border:1px solid var(--border);border-radius:var(--radius,0.375rem);background:var(--background);color:var(--foreground);"
+                      style="width:100%;max-width:100%;box-sizing:border-box;font-family:var(--font-mono,monospace);font-size:0.875rem;padding:0.5rem;border:1px solid var(--border);border-radius:var(--radius,0.375rem);background:var(--background);color:var(--foreground);"
                       value="@resendRecipients" @oninput="@(e => resendRecipients = e.Value?.ToString() ?? "")"></textarea>
         </div>
 
         @if (suppressedInList.Count > 0)
         {
-            <div style="font-size:0.85rem;color:var(--warning);margin-top:0.25rem;">
+            <div style="font-size:0.85rem;color:var(--warning);margin-top:0.25rem;min-width:0;">
                 <p style="display:flex;gap:0.4rem;align-items:flex-start;margin:0 0 0.4rem;">
                     <LucideIcon Name="triangle-alert" Size="14" />
                     <span>These recipients are on the suppression list and will be skipped unless you remove them first:</span>
                 </p>
                 @foreach (var addr in suppressedInList)
                 {
-                    <div style="display:flex;gap:0.5rem;align-items:center;margin:0 0 0.3rem 1.4rem;">
-                        <code>@addr</code>
+                    <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;margin:0 0 0.3rem 1.4rem;min-width:0;">
+                        <code style="min-width:0;overflow-wrap:anywhere;">@addr</code>
                         <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Outline" Disabled="@unsuppressing"
                                   @onclick="() => UnsuppressAsync(addr)">Remove from suppression list</BbButton>
                     </div>

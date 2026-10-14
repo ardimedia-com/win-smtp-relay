@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default (12 intervals, 69 h), and the retry check compared the sum of the WHOLE list with the 48 h window. The
   default schedule is now applied only when none is configured, and the window counts only the delays up to the
   current retry. Seen on 2026-10-08: a short DNS outage bounced every message queued at that moment.
+- **The «Resend message» dialog no longer spills over its edge** when a recipient is on the suppression list —
+  the address and its «Remove from suppression list» button wrap inside the dialog, and the recipients box fits.
 
 ## [1.0.0-beta1-build74] - 2026-10-14
 
