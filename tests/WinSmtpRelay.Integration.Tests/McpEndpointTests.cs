@@ -135,7 +135,7 @@ public class McpEndpointTests
         {
             "get_server_status", "list_queue_messages", "get_message", "list_delivery_logs",
             "list_rejections", "get_health_check", "query_audit", "get_relay_config",
-            "list_suppressions", "add_accepted_sender_domain", "add_accepted_domain",
+            "list_suppressions", "add_accepted_sender_domain", "remove_accepted_sender_domain", "add_accepted_domain",
             "add_ip_allow_rule", "add_suppression", "remove_suppression", "requeue_message",
             "get_sending_identity", "set_sending_identity",
             "list_dkim_domains", "generate_dkim_key", "set_dkim_enabled",
@@ -229,5 +229,145 @@ public class McpEndpointTests
         Assert.IsNotNull(audit, "the MCP write must leave an audit row");
         Assert.IsNotNull(audit.ActorApiKeyId, "the audit row must name the API key as actor");
         Assert.AreEqual("mcp-host", audit.ActorEmail);
+    }
+
+    /// <summary>Calls one tool and returns the JSON-RPC result (content + isError).</summary>
+    private static async Task<JsonElement> CallToolAsync(HttpClient client, string name, object arguments)
+    {
+        var response = await client.PostAsync("/mcp", Rpc("tools/call", new { name, arguments }));
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        return (await ReadRpcAsync(response)).GetProperty("result");
+    }
+
+    private static bool IsToolError(JsonElement result) =>
+        result.TryGetProperty("isError", out var isError) && isError.GetBoolean();
+
+    private async Task<bool> SenderDomainExistsAsync(string domain)
+    {
+        using var scope = _app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+        return await db.AcceptedSenderDomains.IgnoreQueryFilters().AsNoTracking().AnyAsync(d => d.Domain == domain);
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_RemoveAcceptedSenderDomain_ByDomain_RemovesIt_AndIsAudited()
+    {
+        await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "keep.example" });
+        await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "gone.example" });
+
+        // Input is trimmed and lower-cased like add_accepted_sender_domain.
+        var result = await CallToolAsync(_client, "remove_accepted_sender_domain", new { domain = "  Gone.Example " });
+        Assert.IsFalse(IsToolError(result), $"expected success, got: {result}");
+        StringAssert.Contains(result.ToString(), "gone.example");
+        Assert.IsFalse(await SenderDomainExistsAsync("gone.example"));
+        Assert.IsTrue(await SenderDomainExistsAsync("keep.example"));
+
+        // The removal went through the audited service with the API-key actor.
+        using var scope = _app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+        var audit = await db.AdminAuditEvents.AsNoTracking()
+            .Where(e => e.Action == AdminAuditActions.SenderDomainDeleted)
+            .OrderByDescending(e => e.Id)
+            .FirstOrDefaultAsync();
+        Assert.IsNotNull(audit, "the removal must leave an audit row");
+        Assert.AreEqual("gone.example", audit.Detail);
+        Assert.IsNotNull(audit.ActorApiKeyId, "the audit row must name the API key as actor");
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_RemoveAcceptedSenderDomain_ById_RemovesIt()
+    {
+        await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "keep.example" });
+        await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "byid.example" });
+        int id;
+        using (var scope = _app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            id = await db.AcceptedSenderDomains.IgnoreQueryFilters().AsNoTracking()
+                .Where(d => d.Domain == "byid.example").Select(d => d.Id).SingleAsync();
+        }
+
+        var result = await CallToolAsync(_client, "remove_accepted_sender_domain", new { id });
+        Assert.IsFalse(IsToolError(result), $"expected success, got: {result}");
+        Assert.IsFalse(await SenderDomainExistsAsync("byid.example"));
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_RemoveAcceptedSenderDomain_Unknown_IsToolError()
+    {
+        await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "keep.example" });
+
+        var result = await CallToolAsync(_client, "remove_accepted_sender_domain", new { domain = "unknown.example" });
+        Assert.IsTrue(IsToolError(result), $"an unknown domain must be a tool error: {result}");
+        StringAssert.Contains(result.ToString(), "not an accepted sender domain");
+
+        var byId = await CallToolAsync(_client, "remove_accepted_sender_domain", new { id = 999999 });
+        Assert.IsTrue(IsToolError(byId), $"an unknown id must be a tool error: {byId}");
+        StringAssert.Contains(byId.ToString(), "was not found");
+
+        var neither = await CallToolAsync(_client, "remove_accepted_sender_domain", new { });
+        Assert.IsTrue(IsToolError(neither), $"a call without domain or id must be a tool error: {neither}");
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_RemoveAcceptedSenderDomain_LastDomain_IsRefused()
+    {
+        await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "only.example" });
+
+        var result = await CallToolAsync(_client, "remove_accepted_sender_domain", new { domain = "only.example" });
+        Assert.IsTrue(IsToolError(result), $"removing the last sender domain must be refused: {result}");
+        StringAssert.Contains(result.ToString(), "last accepted sender domain");
+        Assert.IsTrue(await SenderDomainExistsAsync("only.example"));
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_RemoveAcceptedSenderDomain_WithPendingMessages_IsRefused()
+    {
+        await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "keep.example" });
+        await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "busy.example" });
+        using (var scope = _app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            db.QueuedMessages.Add(new QueuedMessage
+            {
+                MessageId = "<pending@busy.example>", Sender = "Printer@Busy.Example",
+                Recipients = "someone@elsewhere.example", RawMessage = [], Status = MessageStatus.Queued,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var result = await CallToolAsync(_client, "remove_accepted_sender_domain", new { domain = "busy.example" });
+        Assert.IsTrue(IsToolError(result), $"pending mail from the domain must block the removal: {result}");
+        StringAssert.Contains(result.ToString(), "waiting for delivery");
+        Assert.IsTrue(await SenderDomainExistsAsync("busy.example"));
+
+        // Once the message is delivered the removal goes through.
+        using (var scope = _app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            await db.QueuedMessages.IgnoreQueryFilters()
+                .ExecuteUpdateAsync(s => s.SetProperty(m => m.Status, MessageStatus.Delivered));
+        }
+        var retry = await CallToolAsync(_client, "remove_accepted_sender_domain", new { domain = "busy.example" });
+        Assert.IsFalse(IsToolError(retry), $"expected success after delivery, got: {retry}");
+        Assert.IsFalse(await SenderDomainExistsAsync("busy.example"));
+    }
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task Mcp_RemoveAcceptedSenderDomain_WithScopelessKey_IsToolError()
+    {
+        await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "keep.example" });
+        await CallToolAsync(_client, "add_accepted_sender_domain", new { domain = "protected.example" });
+
+        var result = await CallToolAsync(_viewerClient, "remove_accepted_sender_domain", new { domain = "protected.example" });
+        Assert.IsTrue(IsToolError(result), $"a viewer key must not remove sender domains: {result}");
+        StringAssert.Contains(result.ToString(), "role", StringComparison.OrdinalIgnoreCase);
+        Assert.IsTrue(await SenderDomainExistsAsync("protected.example"));
     }
 }

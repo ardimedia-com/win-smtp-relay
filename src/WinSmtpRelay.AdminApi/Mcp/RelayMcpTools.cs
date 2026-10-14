@@ -295,6 +295,49 @@ public sealed class RelayMcpTools
         return new { Message = $"Sender domain '{domain}' accepted (id {created.Id}). Note: it is not ownership-verified yet." };
     }
 
+    [McpServerTool(Name = "remove_accepted_sender_domain"), Description(
+        "Remove an accepted sender domain, by domain or by id (get_relay_config lists both). Mail from that domain is "
+        + "refused afterwards ('sender domain not accepted'). Refused while messages from the domain are still waiting "
+        + "in the queue (let them deliver first), and for the last sender domain of the relay (an empty list switches "
+        + "the sender-domain check off, so ANY domain could send). A DKIM key of the domain is kept. The change is "
+        + "audited and live immediately.")]
+    public static async Task<object> RemoveAcceptedSenderDomain(
+        ClaimsPrincipal user, IAuthorizationService auth, IAcceptedSenderDomainService svc, RelayDbContext db, CancellationToken ct,
+        [Description("The domain, e.g. 'acme.com'")] string? domain = null,
+        [Description("The sender-domain id (instead of domain)")] int? id = null)
+    {
+        await RequireAsync(auth, user, AuthorizationPolicies.AdminFull, ApiKeyScopes.Config, write: true);
+        domain = domain?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(domain) == (id is null))
+            throw new McpException("Pass either domain or id (exactly one of them).");
+
+        // The tenant query filter hides other tenants' domains, so this lookup doubles as authorization.
+        var query = db.AcceptedSenderDomains.AsNoTracking();
+        query = id is int byId ? query.Where(d => d.Id == byId) : query.Where(d => d.Domain == domain);
+        var entry = await query.FirstOrDefaultAsync(ct)
+            ?? throw new McpException(id is not null
+                ? $"Sender domain id {id} was not found."
+                : $"'{domain}' is not an accepted sender domain.");
+
+        // The SMTP gate is global and only active while at least one sender domain exists anywhere.
+        if (await db.AcceptedSenderDomains.IgnoreQueryFilters().CountAsync(ct) <= 1)
+            throw new McpException(
+                $"'{entry.Domain}' is the last accepted sender domain. Removing it would switch the sender-domain check "
+                + "off (any domain could send); add the replacement domain first.");
+
+        var suffix = "@" + entry.Domain;
+        var pending = await db.QueuedMessages.IgnoreQueryFilters().AsNoTracking()
+            .Where(m => m.Status == MessageStatus.Queued || m.Status == MessageStatus.Delivering)
+            .CountAsync(m => m.Sender.ToLower().EndsWith(suffix), ct);
+        if (pending > 0)
+            throw new McpException(
+                $"{pending} message(s) from '{entry.Domain}' are still waiting for delivery (list_queue_messages). "
+                + "Remove the domain once they are delivered or have failed.");
+
+        await svc.DeleteAsync(entry.Id, ct);
+        return new { Message = $"Sender domain '{entry.Domain}' (id {entry.Id}) removed — mail from it is refused from now on." };
+    }
+
     [McpServerTool(Name = "add_accepted_domain"), Description(
         "Add a hosted recipient domain (mail TO this domain is accepted for local/hosted delivery). Audited.")]
     public static async Task<object> AddAcceptedDomain(

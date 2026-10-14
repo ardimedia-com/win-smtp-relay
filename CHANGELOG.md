@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MCP tool `remove_accepted_sender_domain`** — the counterpart of `add_accepted_sender_domain`: removes a
+  sender domain by name or id, through the same audited service as the admin UI (`senderdomain.deleted`), with
+  the same permission (`config:write`). It refuses while messages from the domain are still waiting in the queue,
+  and for the last sender domain of the relay (an empty list switches the sender-domain check off, so any domain
+  could send). A DKIM key of the domain is kept.
+
 ### Fixed
 
 - **A temporary delivery failure no longer bounces the message at once.** A 421 (destination or DNS momentarily
