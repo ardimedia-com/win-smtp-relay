@@ -389,7 +389,9 @@
     [
         "setup", "deliverability", "health",
         "connectors/send", "domains", "dkim", "ip-rules", "filters",
-        "smtpusers", "suppressions", "apikeys", "tenant-admins",
+        // NOT "apikeys": the Host group links it in the global scope, where the page lists every key and
+        // creates host-level keys (a key's tenant is explicit, never stamped from the scope).
+        "smtpusers", "suppressions", "tenant-admins",
         // Per-tenant message content: keep it out of the host/all-tenants scope so a host admin
         // without a tenant membership never sees another tenant's mail. Require a tenant selection.
         "queue", "journal", "activity",

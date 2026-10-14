@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Host-level API keys can be created from a tenant view** — a host admin now finds *Host admin (host-level
+  key)* in the role list of *New API key* while a tenant is selected, instead of having to switch to the Global
+  scope first. The key is created without a tenant, and the page says where it is listed afterwards.
+
+### Fixed
+
+- **Host → API Keys in the Global scope showed «Select an organization»** instead of the key list, so the
+  documented way to create a host-level key (e.g. for an MCP assistant that reads the sending identity) was a
+  dead end. The Global scope now lists every key and creates host-level keys.
+
 ## [1.0.0-beta1-build75] - 2026-10-14
 
 ### Added

@@ -129,16 +129,28 @@ else if (IsNew)
                         {
                             <option value="@RelayRoles.TenantViewer">Viewer (read-only)</option>
                             <option value="@RelayRoles.TenantAdmin">Admin (read/write)</option>
+                            @if (canCreateHostKeys)
+                            {
+                                @* A host admin working in a tenant scope can mint a host-level key right here
+                                   instead of switching to Global first; it is created without a tenant. *@
+                                <option value="@RelayRoles.HostAdmin">Host admin (host-level key, not bound to this tenant)</option>
+                            }
                         }
                     </select>
                     @if (ScopeTenantId is not null && canCreateHostKeys)
                     {
-                        @* Host-level keys are minted only in the Global scope — say so, otherwise a host admin
-                           looking for "Host admin" here only ever finds the tenant roles. *@
                         <p class="text-muted" style="font-size:0.8125rem;margin:0.35rem 0 0;">
-                            This key belongs to the current tenant. A <strong>host-level key</strong> (self-check, audit log,
-                            tenants, sending identity, DKIM of every tenant) is created in the <strong>Global</strong> scope —
-                            switch the scope selector at the top to <em>Global</em> and create it there.
+                            @if (newRole == RelayRoles.HostAdmin)
+                            {
+                                <text>This <strong>host-level key</strong> belongs to no tenant: within its scopes it reaches every
+                                tenant plus the self-check, audit log, sending identity and every tenant's DKIM. It is listed
+                                under <em>Host → API Keys</em> in the Global scope, not in this tenant's list.</text>
+                            }
+                            else
+                            {
+                                <text>Viewer and Admin keys belong to the current tenant. Choose <em>Host admin</em> for a key that
+                                works across all tenants (e.g. for an MCP assistant that also checks the sending identity).</text>
+                            }
                         </p>
                     }
                 </div>
@@ -181,10 +193,10 @@ else if (IsNew)
                     <p class="text-muted" style="font-size:0.8125rem;margin:0.4rem 0 0;">
                         <strong>MCP assistant</strong>: diagnose + fix mail flow (read diagnostics &amp; messages,
                         write queue &amp; configuration) — no account access at all, no message bodies.
-                        @if (ScopeTenantId is null)
+                        @if (newRole == RelayRoles.HostAdmin)
                         {
-                            <text>In the Global scope it is a <strong>host-level</strong> key, so it can also read the self-check
-                            and the audit log and manage the sending identity and every tenant's DKIM.</text>
+                            <text>As a <strong>host-level</strong> key it can also read the self-check and the audit log
+                            and manage the sending identity and every tenant's DKIM.</text>
                         }
                         <strong>Standard API</strong>: the same, plus <em>read</em> access to accounts (list
                         tenants, users and keys) for provisioning scripts — still no account <em>management</em>
@@ -446,7 +458,8 @@ else if (key is not null)
         }
 
         // The role must match the scopes' intent: writing needs an admin role, read-only can stay a viewer.
-        if (IsNew)
+        // A deliberately chosen host-level role survives the preset (a host key is HostAdmin either way).
+        if (IsNew && newRole != RelayRoles.HostAdmin)
             newRole = kind == "readonly"
                 ? (ScopeTenantId is null ? RelayRoles.HostAdmin : RelayRoles.TenantViewer)
                 : (ScopeTenantId is null ? RelayRoles.HostAdmin : RelayRoles.TenantAdmin);
@@ -526,10 +539,22 @@ else if (key is not null)
     {
         if (creating) return;   // double-submit guard (before the first await)
 
-        // A tenant-scoped admin may only mint tenant-role keys (newRole is client-supplied).
-        if (ScopeTenantId is not null && newRole is not (RelayRoles.TenantAdmin or RelayRoles.TenantViewer))
+        // newRole is client-supplied: in a tenant scope only the tenant roles are valid, plus HostAdmin for a
+        // caller who holds a host membership. A host-level key is created WITHOUT a tenant.
+        var hostKey = newRole == RelayRoles.HostAdmin;
+        if (ScopeTenantId is not null && !hostKey && newRole is not (RelayRoles.TenantAdmin or RelayRoles.TenantViewer))
         {
             statusMessage = "Invalid role for a tenant API key.";
+            return;
+        }
+        if (ScopeTenantId is null && !hostKey)
+        {
+            statusMessage = "In the Global scope only host-level keys can be created.";
+            return;
+        }
+        if (hostKey && ScopeTenantId is not null && !canCreateHostKeys)
+        {
+            statusMessage = "Only host admins can create host-level keys.";
             return;
         }
 
@@ -538,7 +563,8 @@ else if (key is not null)
         {
             using var scope = ScopeFactory.CreateScope();
             var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
-            var (_, plaintext) = await svc.CreateAsync(ScopeTenantId, newName.Trim(), newRole, BuildScopes(), NewExpiresUtc);
+            var tenantId = hostKey ? null : ScopeTenantId;
+            var (_, plaintext) = await svc.CreateAsync(tenantId, newName.Trim(), newRole, BuildScopes(), NewExpiresUtc);
             // Show the secret on this page; do NOT navigate away before the user can copy it.
             createdSecret = plaintext;
         }
