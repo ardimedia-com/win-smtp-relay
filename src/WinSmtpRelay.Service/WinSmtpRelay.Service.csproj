@@ -16,8 +16,8 @@
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.*" />
     <!-- Overrides the vulnerable transitive 2.0.0 (NU1903 / GHSA-v5pm-xwqc-g5wc, stack-overflow DoS
-         on circular schema references; patched in 2.7.5+). 2.12.0 = minimum required by Microsoft.AspNetCore.OpenApi 10.0.12 (NU1605 otherwise). -->
-    <PackageReference Include="Microsoft.OpenApi" Version="2.12.0" />
+         on circular schema references; patched in 2.7.5+). Floats within 2.x (Microsoft.AspNetCore.OpenApi 10 needs >= 2.12.x and < 3): an exact pin broke the build74 release when 10.0.13 raised the minimum (NU1605). -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.*" />
     <PackageReference Include="System.Drawing.Common" Version="10.*" />
