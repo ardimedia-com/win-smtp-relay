@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Missing space between two sentences in the preset description on the *New API key* page.
+
 ## [1.0.0-beta1-build76] - 2026-10-14
 
 ### Added
