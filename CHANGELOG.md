@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build74] - 2026-10-14
+
 ### Added
 
 - **The self-check warns before an API key expires.** An enabled key whose expiry date is within 30 days
