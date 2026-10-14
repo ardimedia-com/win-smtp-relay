@@ -621,6 +621,7 @@ else
     {
         DmarcAlignmentVerdict.DkimAligned => "badge-success",
         DmarcAlignmentVerdict.SpfConditional => "badge-warning",
+        DmarcAlignmentVerdict.SmartHostDependent => "badge-info",
         _ => "badge-error"
     };
 
@@ -628,6 +629,7 @@ else
     {
         DmarcAlignmentVerdict.DkimAligned => "Passes (DKIM-aligned)",
         DmarcAlignmentVerdict.SpfConditional => "Conditional (SPF only)",
+        DmarcAlignmentVerdict.SmartHostDependent => "Depends on the smart host",
         _ => "Will fail"
     };
 
@@ -635,6 +637,7 @@ else
     {
         DmarcAlignmentVerdict.DkimAligned => "var(--primary)",
         DmarcAlignmentVerdict.SpfConditional => "#d97706",
+        DmarcAlignmentVerdict.SmartHostDependent => "var(--muted-foreground)",
         _ => "#dc2626"
     };
 

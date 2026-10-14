@@ -1,5 +1,4 @@
 using System.Net;
-using DnsClient;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WinSmtpRelay.Core;
@@ -7,7 +6,6 @@ using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Health;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
-using WinSmtpRelay.Security;
 
 namespace WinSmtpRelay.Service.HealthChecks.Checks;
 
@@ -23,7 +21,6 @@ public sealed class DeliverabilityHealthCheck(
     ISendConnectorService connectors,
     IDomainRouteService routes,
     IOptions<DeliveryOptions> deliveryOptions,
-    PublicDnsLookupClient publicDns,
     IHttpClientFactory httpClientFactory,
     ILogger<DeliverabilityHealthCheck> logger) : HealthCheckBase
 {
@@ -54,20 +51,22 @@ public sealed class DeliverabilityHealthCheck(
 
         foreach (var d in domains)
         {
+            // The alignment already accounts for a smart host: its DKIM signature decides when all mail leaves through one.
             var a = d.Alignment;
-            if (smartHostOnly && a.Verdict != DmarcAlignmentVerdict.DkimAligned)
-                f.Add(await SmartHostDmarcAsync(d.Domain, routing!, ct));
-            else
+            f.Add(a.Verdict switch
             {
-                f.Add(a.Verdict switch
-                {
-                    DmarcAlignmentVerdict.DkimAligned => Ok("dmarc-alignment", $"{d.Domain}: mail will pass DMARC", a.Summary, d.Domain),
-                    DmarcAlignmentVerdict.SpfConditional => Warn("dmarc-alignment", $"{d.Domain}: DMARC depends on SPF alignment only", a.Summary, d.Domain,
-                        "Configure a DKIM key for this domain so alignment is robust regardless of the envelope-from."),
-                    _ => Err("dmarc-alignment", $"{d.Domain}: mail will fail DMARC", a.Summary, d.Domain,
-                        "Publish SPF and set up a DKIM key for this domain."),
-                });
-            }
+                DmarcAlignmentVerdict.DkimAligned => Ok("dmarc-alignment",
+                    d.SmartHost is null ? $"{d.Domain}: mail will pass DMARC" : $"{d.Domain}: mail will pass DMARC via the smart host",
+                    a.Summary, d.Domain),
+                DmarcAlignmentVerdict.SpfConditional => Warn("dmarc-alignment", $"{d.Domain}: DMARC depends on SPF alignment only", a.Summary, d.Domain,
+                    "Configure a DKIM key for this domain so alignment is robust regardless of the envelope-from."),
+                DmarcAlignmentVerdict.SmartHostDependent => Info("dmarc-alignment", $"{d.Domain}: DMARC depends on the smart host", a.Summary, d.Domain,
+                    "Check the domain authentication (DKIM) at the smart host."),
+                _ => Err("dmarc-alignment", $"{d.Domain}: mail will fail DMARC", a.Summary, d.Domain,
+                    d.SmartHost is null
+                        ? "Publish SPF and set up a DKIM key for this domain."
+                        : "Authenticate the domain at the smart host's provider and publish the DKIM records it gives you."),
+            });
 
             // SPF/DKIM/DMARC blast radius differs: a missing SPF or a drifted DKIM key is the dangerous one.
             // The relay's SPF expectation is built from this server's sending IPs, which receivers never see when
@@ -166,61 +165,6 @@ public sealed class DeliverabilityHealthCheck(
             f.Add(Info("egress-ip", "Could not detect outbound IP", "Best-effort public-IP lookup failed (no internet, or blocked)."));
 
         return f;
-    }
-
-    /// <summary>
-    /// DMARC for a sender domain when every message leaves through a smart host: it passes on the smart host's
-    /// DKIM signature for the domain. For a known provider that signature exists once the provider's selectors
-    /// are published for the domain; for an unknown one the relay cannot tell which selector it uses.
-    /// </summary>
-    private async Task<HealthFinding> SmartHostDmarcAsync(string domain, OutboundRouting routing, CancellationToken ct)
-    {
-        var hosts = routing.SmartHostList;
-        var providers = routing.SmartHosts.Select(SmartHostProviders.Find).ToList();
-        if (providers.Any(p => p is null))
-            return Info("dmarc-alignment", $"{domain}: DMARC depends on the smart host",
-                $"Every message leaves through {hosts}. Whether it passes DMARC depends on that service signing with a DKIM key "
-                + $"for {domain}; the relay cannot tell which selector it uses.", domain,
-                "Check the domain authentication (DKIM) at the smart host.");
-
-        var missing = new List<string>();
-        var found = new List<string>();
-        foreach (var provider in providers.DistinctBy(p => p!.Name))
-        {
-            var selector = await FindPublishedSelectorAsync(domain, provider!.DkimSelectors, ct);
-            if (selector is null)
-                missing.Add($"{provider.Name} ({string.Join(", ", provider.DkimSelectors.Select(s => $"{s}._domainkey.{domain}"))})");
-            else
-                found.Add($"{provider.Name} ({selector}._domainkey.{domain})");
-        }
-
-        return missing.Count == 0
-            ? Ok("dmarc-alignment", $"{domain}: mail will pass DMARC via the smart host",
-                $"Every message leaves through {hosts}, which signs it with the DKIM key published for {domain}: "
-                + $"{string.Join("; ", found)}. That signature aligns with the From domain.", domain)
-            : Warn("dmarc-alignment", $"{domain}: no smart-host DKIM key found",
-                $"Every message leaves through {hosts}, but no DKIM key of that service is published for {domain}: "
-                + $"{string.Join("; ", missing)}. Without it, mail from {domain} passes DMARC only if SPF happens to align.",
-                domain, "Authenticate the domain at the smart host's provider and publish the DKIM records it gives you.");
-    }
-
-    // The first selector under which a DKIM public key (p=) is published for the domain, following CNAMEs.
-    private async Task<string?> FindPublishedSelectorAsync(string domain, IReadOnlyList<string> selectors, CancellationToken ct)
-    {
-        foreach (var selector in selectors)
-        {
-            try
-            {
-                var result = await publicDns.Client.QueryAsync($"{selector}._domainkey.{domain}", QueryType.TXT, cancellationToken: ct);
-                if (result.Answers.TxtRecords().Any(t => string.Concat(t.Text).Contains("p=", StringComparison.OrdinalIgnoreCase)))
-                    return selector;
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "DKIM selector lookup {Selector}._domainkey.{Domain} failed", selector, domain);
-            }
-        }
-        return null;
     }
 
     private HealthFinding MapRecord(string code, string title, string target, DnsRecordResult rec,

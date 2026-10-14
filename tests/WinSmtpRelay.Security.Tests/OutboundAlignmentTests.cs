@@ -47,6 +47,51 @@ public class OutboundAlignmentTests
         StringAssert.Contains(a.Summary, "No DMARC record is published");
     }
 
+    // ----- DmarcAlignment.Evaluate with a smart host -----
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Evaluate_SmartHostProviderKeyPublished_PassesViaSmartHost()
+    {
+        var smartHost = new SmartHostDkim("smtp-relay.brevo.com", "Brevo", "brevo1", ["brevo1", "brevo2"]);
+        var a = DmarcAlignment.Evaluate(Rec(DnsRecordStatus.NotConfigured), Rec(DnsRecordStatus.NotConfigured), Rec(DnsRecordStatus.Ok), smartHost);
+
+        Assert.AreEqual(DmarcAlignmentVerdict.DkimAligned, a.Verdict);
+        StringAssert.Contains(a.Summary, "Brevo");
+        StringAssert.Contains(a.Summary, "brevo1._domainkey");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Evaluate_SmartHostProviderKeyMissing_Fails_EvenWithRelaySpf()
+    {
+        var smartHost = new SmartHostDkim("smtp-relay.brevo.com", "Brevo", null, ["brevo1", "brevo2"]);
+        var a = DmarcAlignment.Evaluate(Rec(DnsRecordStatus.Ok), Rec(DnsRecordStatus.NotConfigured), Rec(DnsRecordStatus.Ok), smartHost);
+
+        Assert.AreEqual(DmarcAlignmentVerdict.Fail, a.Verdict);
+        StringAssert.Contains(a.Summary, "brevo2._domainkey");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Evaluate_UnknownSmartHost_DependsOnSmartHost()
+    {
+        var smartHost = new SmartHostDkim("mail.example.net", null, null, []);
+        var a = DmarcAlignment.Evaluate(Rec(DnsRecordStatus.Missing), Rec(DnsRecordStatus.NotConfigured), Rec(DnsRecordStatus.Ok), smartHost);
+
+        Assert.AreEqual(DmarcAlignmentVerdict.SmartHostDependent, a.Verdict);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Evaluate_RelaySignsItself_StaysDkimAligned_BehindSmartHost()
+    {
+        var smartHost = new SmartHostDkim("mail.example.net", null, null, []);
+        var a = DmarcAlignment.Evaluate(Rec(DnsRecordStatus.Missing), Rec(DnsRecordStatus.Ok), Rec(DnsRecordStatus.Ok), smartHost);
+
+        Assert.AreEqual(DmarcAlignmentVerdict.DkimAligned, a.Verdict);
+    }
+
     // ----- EnvelopeAlignment (uses the real Public Suffix List) -----
 
     private static readonly PublicSuffixService Psl = new();

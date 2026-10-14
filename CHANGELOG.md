@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Deliverability page judges DMARC by the smart host too** — when every message of a sender domain's tenant
+  leaves through a smart host, its *DMARC outcome* now reads "Passes" once the provider's DKIM key is published
+  (e.g. Brevo's `brevo1._domainkey`), "Will fail" with the missing selectors when it is not, and "Depends on the
+  smart host" for a smart host the relay does not know — instead of "Will fail" based on the relay's own SPF/DKIM.
+  The self-check uses the same evaluation, now per tenant (a tenant without a smart host keeps the direct view).
+
 ## [1.0.0-beta1-build77] - 2026-10-14
 
 ### Security

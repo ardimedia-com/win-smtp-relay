@@ -28,7 +28,13 @@ public enum DmarcAlignmentVerdict
     /// Neither DKIM alignment nor SPF authorisation is in place — DMARC will fail. If the domain
     /// publishes <c>p=quarantine</c>/<c>p=reject</c>, mail is spam-foldered or rejected.
     /// </summary>
-    Fail
+    Fail,
+
+    /// <summary>
+    /// Every message leaves through a smart host the relay does not know, so DMARC depends on that service
+    /// signing with a DKIM key for the domain — which the relay cannot verify.
+    /// </summary>
+    SmartHostDependent
 }
 
 /// <summary>
@@ -47,21 +53,41 @@ public sealed record DmarcAlignment(
     bool DmarcPublished,
     string Summary)
 {
-    public static DmarcAlignment Evaluate(DnsRecordResult spf, DnsRecordResult dkim, DnsRecordResult dmarc)
+    public static DmarcAlignment Evaluate(DnsRecordResult spf, DnsRecordResult dkim, DnsRecordResult dmarc, SmartHostDkim? smartHost = null)
     {
         var dkimAligned = dkim.Status == DnsRecordStatus.Ok;
         var spfAuthorized = spf.Status == DnsRecordStatus.Ok;
         var dmarcPublished = dmarc.Status == DnsRecordStatus.Ok;
-
-        var verdict = dkimAligned ? DmarcAlignmentVerdict.DkimAligned
-            : spfAuthorized ? DmarcAlignmentVerdict.SpfConditional
-            : DmarcAlignmentVerdict.Fail;
 
         // The DMARC-record state only changes whether receivers enforce a policy; it does not change which
         // authentication leg aligns. Mention it so a "passes, but no policy published" gap is visible.
         var policyNote = dmarcPublished
             ? ""
             : " No DMARC record is published yet, so receivers won't enforce a policy — publish one once alignment is in place.";
+
+        // All mail leaves through a smart host and the relay does not sign it itself: receivers see the smart
+        // host's DKIM signature and its return-path, so that signature decides DMARC, not this relay's SPF.
+        if (smartHost is not null && !dkimAligned)
+        {
+            if (smartHost.Provider is null)
+                return new DmarcAlignment(DmarcAlignmentVerdict.SmartHostDependent, false, false, dmarcPublished,
+                    $"Every message leaves through {smartHost.SmartHosts}. DMARC passes when that service signs with a DKIM key "
+                    + "for this domain; the relay cannot verify which selector it uses — check the domain authentication there."
+                    + policyNote);
+
+            return smartHost.PublishedSelector is { } selector
+                ? new DmarcAlignment(DmarcAlignmentVerdict.DkimAligned, true, false, dmarcPublished,
+                    $"DMARC passes via {smartHost.Provider}'s DKIM signature ({selector}._domainkey is published): every message "
+                    + $"leaves through {smartHost.SmartHosts}, which signs with this domain's key." + policyNote)
+                : new DmarcAlignment(DmarcAlignmentVerdict.Fail, false, false, dmarcPublished,
+                    $"DMARC will fail: every message leaves through {smartHost.SmartHosts}, but no {smartHost.Provider} DKIM key is "
+                    + $"published for this domain ({string.Join(", ", smartHost.Selectors.Select(s => s + "._domainkey"))}). "
+                    + $"Authenticate the domain at {smartHost.Provider} and publish the DKIM records it gives you." + policyNote);
+        }
+
+        var verdict = dkimAligned ? DmarcAlignmentVerdict.DkimAligned
+            : spfAuthorized ? DmarcAlignmentVerdict.SpfConditional
+            : DmarcAlignmentVerdict.Fail;
 
         var summary = verdict switch
         {

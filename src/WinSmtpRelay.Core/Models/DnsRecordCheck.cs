@@ -29,13 +29,22 @@ public record DnsRecordResult(
     string Explanation,
     string? Suggested = null);
 
+/// <summary>
+/// The smart-host side of a sender domain whose mail all leaves through a smart host: which hosts, which known
+/// provider runs them (null = not a known provider), and the provider's DKIM selector found published for the
+/// domain (null = none of its selectors is published).
+/// </summary>
+public record SmartHostDkim(string SmartHosts, string? Provider, string? PublishedSelector, IReadOnlyList<string> Selectors);
+
 /// <summary>The full DNS-setup picture for one sender domain.</summary>
-public record DomainDnsSetup(string Domain, DnsRecordResult Spf, DnsRecordResult Dkim, DnsRecordResult Dmarc)
+/// <param name="SmartHost">Set when every message of the domain's tenant leaves through a smart host.</param>
+public record DomainDnsSetup(string Domain, DnsRecordResult Spf, DnsRecordResult Dkim, DnsRecordResult Dmarc, SmartHostDkim? SmartHost = null)
 {
     /// <summary>
     /// The synthesised DMARC-alignment outcome for this domain — the answer to "will mail from this domain,
     /// sent through this relay, actually reach DMARC pass?". Derived purely from the three record checks
-    /// above (it is the missing synthesis the per-leg checks don't give on their own).
+    /// above (it is the missing synthesis the per-leg checks don't give on their own), and from the smart
+    /// host's DKIM signature when the mail leaves through one.
     /// </summary>
-    public DmarcAlignment Alignment => DmarcAlignment.Evaluate(Spf, Dkim, Dmarc);
+    public DmarcAlignment Alignment => DmarcAlignment.Evaluate(Spf, Dkim, Dmarc, SmartHost);
 }

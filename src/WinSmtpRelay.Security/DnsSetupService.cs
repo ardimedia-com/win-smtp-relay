@@ -4,6 +4,7 @@ using DnsClient.Protocol;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WinSmtpRelay.Core.Configuration;
+using WinSmtpRelay.Core.Health;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 
@@ -16,6 +17,9 @@ public class DnsSetupService(
     IDkimDomainService dkimDomains,
     IAcceptedSenderDomainService senderDomains,
     IDnsSettingsService dnsSettings,
+    ISendConnectorService sendConnectors,
+    IDomainRouteService domainRoutes,
+    IOptions<DeliveryOptions> deliveryOptions,
     ILogger<DnsSetupService> logger) : IDnsSetupService
 {
     private readonly DnsOptions _options = options.Value;
@@ -82,7 +86,15 @@ public class DnsSetupService(
     {
         await EnsureEffectiveAsync(ct);
         var dkimRows = await dkimDomains.GetAllAsync(ct);
-        return await CheckCoreAsync(domain, dkimRows, ct);
+
+        // An accepted sender domain belongs to a tenant, whose connectors decide whether mail leaves via a smart
+        // host; an ad-hoc domain that is not accepted here gets the plain relay view.
+        var normalized = domain.Trim().ToLowerInvariant();
+        var sender = (await senderDomains.GetAllAsync(ct)).FirstOrDefault(s => s.Domain == normalized);
+        var routing = sender is null ? null : await LoadRoutingInputsAsync(ct);
+        var smartHost = sender is null || routing is null ? null
+            : await SmartHostDkimAsync(normalized, sender.TenantId, routing.Value.Connectors, routing.Value.Routes, ct);
+        return await CheckCoreAsync(domain, dkimRows, smartHost, ct);
     }
 
     public async Task<IReadOnlyList<DomainDnsSetup>> CheckAllSenderDomainsAsync(CancellationToken ct = default)
@@ -93,21 +105,92 @@ public class DnsSetupService(
         // run sequentially over a shared scoped DbContext (no concurrent EF access).
         var senders = await senderDomains.GetAllAsync(ct);
         var dkimRows = await dkimDomains.GetAllAsync(ct);
+        var routing = await LoadRoutingInputsAsync(ct);
 
         var results = new List<DomainDnsSetup>(senders.Count);
         foreach (var sender in senders)
-            results.Add(await CheckCoreAsync(sender.Domain, dkimRows, ct));
+        {
+            var smartHost = routing is null ? null
+                : await SmartHostDkimAsync(sender.Domain.Trim().ToLowerInvariant(), sender.TenantId, routing.Value.Connectors, routing.Value.Routes, ct);
+            results.Add(await CheckCoreAsync(sender.Domain, dkimRows, smartHost, ct));
+        }
         return results;
     }
 
-    private async Task<DomainDnsSetup> CheckCoreAsync(string domain, IReadOnlyList<DkimDomain> dkimRows, CancellationToken ct)
+    private async Task<DomainDnsSetup> CheckCoreAsync(string domain, IReadOnlyList<DkimDomain> dkimRows, SmartHostDkim? smartHost, CancellationToken ct)
     {
         domain = domain.Trim().ToLowerInvariant();
         return new DomainDnsSetup(
             domain,
             await CheckSpfAsync(domain, ct),
             await CheckDkimAsync(domain, dkimRows, ct),
-            await CheckDmarcAsync(domain, ct));
+            await CheckDmarcAsync(domain, ct),
+            smartHost);
+    }
+
+    // Connectors and domain routes decide how a tenant's mail leaves. Best-effort: without them the checks fall
+    // back to the plain relay view (as if mail were delivered directly).
+    private async Task<(IReadOnlyList<SendConnector> Connectors, IReadOnlyList<DomainRoute> Routes)?> LoadRoutingInputsAsync(CancellationToken ct)
+    {
+        try
+        {
+            return (await sendConnectors.GetAllAsync(ct), await domainRoutes.GetAllAsync(ct));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Loading send connectors / domain routes for the DMARC evaluation failed");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// When every message of the tenant leaves through a smart host, DMARC is decided by the smart host's DKIM
+    /// signature. For a known provider that signature exists once one of its selectors is published for the
+    /// domain; for an unknown smart host the relay cannot tell. Null when mail can also be delivered directly.
+    /// </summary>
+    private async Task<SmartHostDkim?> SmartHostDkimAsync(string domain, int tenantId,
+        IReadOnlyList<SendConnector> connectors, IReadOnlyList<DomainRoute> routes, CancellationToken ct)
+    {
+        var routing = OutboundRouting.Evaluate(
+            [new Tenant { Id = tenantId, IsEnabled = true }], connectors, routes.Where(r => r.TenantId == tenantId),
+            deliveryOptions.Value.SmartHost);
+        if (!routing.SmartHostOnly)
+            return null;
+
+        var providers = routing.SmartHosts.Select(SmartHostProviders.Find).ToList();
+        if (providers.Any(p => p is null))
+            return new SmartHostDkim(routing.SmartHostList, null, null, []);
+
+        string? published = null;
+        foreach (var provider in providers.DistinctBy(p => p!.Name))
+        {
+            var selector = await FindPublishedSelectorAsync(domain, provider!.DkimSelectors, ct);
+            if (selector is null)
+                return new SmartHostDkim(routing.SmartHostList, provider.Name, null, provider.DkimSelectors);
+            published ??= selector;
+        }
+
+        var names = string.Join(" / ", providers.Select(p => p!.Name).Distinct());
+        return new SmartHostDkim(routing.SmartHostList, names, published, [.. providers.SelectMany(p => p!.DkimSelectors).Distinct()]);
+    }
+
+    // The first selector under which a DKIM public key (p=) is published for the domain (CNAMEs are followed).
+    private async Task<string?> FindPublishedSelectorAsync(string domain, IReadOnlyList<string> selectors, CancellationToken ct)
+    {
+        foreach (var selector in selectors)
+        {
+            try
+            {
+                var result = await publicDns.Client.QueryAsync($"{selector}._domainkey.{domain}", QueryType.TXT, cancellationToken: ct);
+                if (result.Answers.TxtRecords().Any(t => string.Concat(t.Text).Contains("p=", StringComparison.OrdinalIgnoreCase)))
+                    return selector;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "DKIM selector lookup {Selector}._domainkey.{Domain} failed", selector, domain);
+            }
+        }
+        return null;
     }
 
     private async Task<DnsRecordResult> CheckSpfAsync(string domain, CancellationToken ct)
