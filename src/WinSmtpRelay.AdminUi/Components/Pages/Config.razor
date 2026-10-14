@@ -144,7 +144,7 @@
                         </tr>
                         <tr>
                             <td class="text-muted">Retry intervals</td>
-                            <td>@string.Join(", ", DeliveryOpts.Value.RetryIntervalsMinutes.Select(m => $"{m}m"))</td>
+                            <td>@string.Join(", ", DeliveryOpts.Value.EffectiveRetryIntervalsMinutes.Select(m => $"{m}m"))</td>
                         </tr>
                     </tbody>
                 </table>

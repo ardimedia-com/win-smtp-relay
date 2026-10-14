@@ -6,7 +6,21 @@ public class DeliveryOptions
 
     public int MaxConcurrentDeliveries { get; set; } = 4;
     public int MaxRetryHours { get; set; } = 48;
-    public int[] RetryIntervalsMinutes { get; set; } = [1, 5, 30, 120, 480, 1440];
+    /// <summary>The retry schedule used when <see cref="RetryIntervalsMinutes"/> is not configured.</summary>
+    public static readonly int[] DefaultRetryIntervalsMinutes = [1, 5, 30, 120, 480, 1440];
+
+    /// <summary>
+    /// Configured retry schedule; empty = <see cref="DefaultRetryIntervalsMinutes"/> (read it through
+    /// <see cref="EffectiveRetryIntervalsMinutes"/>). Deliberately NOT initialised with the defaults: the
+    /// configuration binder APPENDS a configured array to an initialised one, so appsettings'
+    /// [1,5,30,120,480,1440] became a 12-entry list summing to 69 h — longer than the 48 h window, which made
+    /// every transient failure bounce on its first attempt.
+    /// </summary>
+    public int[] RetryIntervalsMinutes { get; set; } = [];
+
+    /// <summary>The schedule in effect: the configured one, or the default when none is configured.</summary>
+    public int[] EffectiveRetryIntervalsMinutes =>
+        RetryIntervalsMinutes.Length > 0 ? RetryIntervalsMinutes : DefaultRetryIntervalsMinutes;
     public string? SmartHost { get; set; }
     public int SmartHostPort { get; set; } = 587;
     public string? SmartHostUsername { get; set; }

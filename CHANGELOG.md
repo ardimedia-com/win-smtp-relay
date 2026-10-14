@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A temporary delivery failure no longer bounces the message at once.** A 421 (destination or DNS momentarily
+  unreachable) is meant to be retried for up to `Delivery:MaxRetryHours`, but every such message bounced after its
+  first attempt. Two causes together: the configuration binder APPENDED appsettings' retry list to the built-in
+  default (12 intervals, 69 h), and the retry check compared the sum of the WHOLE list with the 48 h window. The
+  default schedule is now applied only when none is configured, and the window counts only the delays up to the
+  current retry. Seen on 2026-10-08: a short DNS outage bounced every message queued at that moment.
+
 ## [1.0.0-beta1-build74] - 2026-10-14
 
 ### Added

@@ -353,19 +353,21 @@ public class DeliveryWorker(
         if (retryCount <= 0)
             return DateTimeOffset.UtcNow;
 
-        var intervals = config.RetryIntervalsMinutes;
+        var intervals = config.EffectiveRetryIntervalsMinutes;
         if (intervals.Length == 0)
             return null;
 
         var intervalIndex = Math.Min(retryCount - 1, intervals.Length - 1);
         var delayMinutes = intervals[intervalIndex];
 
-        // Check if total retry time exceeds max window
-        // Sum configured intervals, then add repeated last interval for retries beyond the array
-        var totalMinutes = intervals.Sum();
-        if (retryCount > intervals.Length)
-            totalMinutes += (retryCount - intervals.Length) * intervals[^1];
-        if (totalMinutes > config.MaxRetryHours * 60)
+        // Retry window: the delays up to and including THIS retry (the last interval repeats beyond the array)
+        // must stay within MaxRetryHours. Summing the WHOLE interval list instead made every message bounce on
+        // its first transient failure whenever the list summed to more than the window (e.g. the default
+        // 1,5,30,120,480,1440 = 34.6 h with MaxRetryHours 24).
+        var elapsedMinutes = 0L;
+        for (var i = 0; i < retryCount; i++)
+            elapsedMinutes += intervals[Math.Min(i, intervals.Length - 1)];
+        if (elapsedMinutes > config.MaxRetryHours * 60L)
             return null;
 
         return DateTimeOffset.UtcNow.AddMinutes(delayMinutes);

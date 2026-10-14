@@ -131,7 +131,7 @@ public class ConfigurationSeeder(
             IsDefault = true,
             MaxConcurrentDeliveries = opts.MaxConcurrentDeliveries,
             MaxRetryHours = opts.MaxRetryHours,
-            RetryIntervalsMinutes = string.Join(",", opts.RetryIntervalsMinutes),
+            RetryIntervalsMinutes = string.Join(",", opts.EffectiveRetryIntervalsMinutes),
             ConnectTimeoutSeconds = opts.ConnectTimeoutSeconds
         });
 
