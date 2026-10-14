@@ -17,6 +17,8 @@ namespace WinSmtpRelay.Service.HealthChecks.Checks;
 public sealed class ConnectivityHealthCheck(
     IMxResolver mx,
     ISendConnectorService connectors,
+    ITenantService tenants,
+    IDomainRouteService routes,
     IOptions<DeliveryOptions> deliveryOptions,
     IOptions<HealthCheckOptions> options,
     ILogger<ConnectivityHealthCheck> logger) : HealthCheckBase
@@ -31,6 +33,9 @@ public sealed class ConnectivityHealthCheck(
         var delivery = deliveryOptions.Value;
         var timeout = TimeSpan.FromSeconds(Math.Max(5, opts.ProbeTimeoutSeconds));
         var hasGlobalSmartHost = !string.IsNullOrWhiteSpace(delivery.SmartHost);
+        OutboundRouting? routing = null;
+        try { routing = await OutboundRoutingLoader.LoadAsync(tenants, connectors, routes, delivery, ct); }
+        catch (Exception ex) { logger.LogWarning(ex, "evaluating the outbound routing failed"); }
 
         // --- Outbound port 25 (direct-MX delivery path) ---
         var testDomain = string.IsNullOrWhiteSpace(opts.Outbound25TestDomain) ? "gmail.com" : opts.Outbound25TestDomain.Trim();
@@ -42,7 +47,11 @@ public sealed class ConnectivityHealthCheck(
             else if (await NetworkProbe.CanConnectAsync(mxHost, 25, timeout, ct))
                 f.Add(Ok("outbound-port-25", "Outbound port 25 is open",
                     $"Connected to {mxHost}:25 — this server can deliver directly to recipient mail servers.", mxHost));
-            else if (hasGlobalSmartHost)
+            else if (routing is { SmartHostOnly: true })
+                f.Add(Info("outbound-port-25", "Outbound port 25 is closed — not needed",
+                    $"Could not connect to {mxHost}:25, but every message leaves through a smart host ({routing.SmartHostList}) on its "
+                    + "submission port, so direct delivery to recipient mail servers is never used.", mxHost));
+            else if (hasGlobalSmartHost && routing is not { DirectMxPossible: true })
                 f.Add(Warn("outbound-port-25", "Outbound port 25 appears blocked",
                     $"Could not connect to {mxHost}:25. You relay via a smart host, so direct delivery may be unaffected — but any direct-MX route would fail.",
                     mxHost, "Confirm direct-MX delivery isn't needed, or ask the network/ISP to open outbound TCP 25."));

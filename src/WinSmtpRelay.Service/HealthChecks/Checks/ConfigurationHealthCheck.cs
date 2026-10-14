@@ -11,6 +11,10 @@ namespace WinSmtpRelay.Service.HealthChecks.Checks;
 /// </summary>
 public sealed class ConfigurationHealthCheck(
     IDnsSettingsService dnsSettings,
+    ITenantService tenants,
+    ISendConnectorService connectors,
+    IDomainRouteService routes,
+    IOptions<DeliveryOptions> deliveryOptions,
     IReportingSettingsService reporting,
     IPortalSettingsService portal,
     IOptions<AdminUiOptions> adminUi,
@@ -26,17 +30,37 @@ public sealed class ConfigurationHealthCheck(
         var dns = await dnsSettings.GetAsync(ct);
 
         // --- Sending identity ---
+        // Receivers only ever see this server's hostname and IP when it delivers to their MX directly. When every
+        // message leaves through a smart host, they see the smart host instead, so a missing identity is no problem.
+        var smartHostOnly = false;
+        var smartHosts = "";
+        try
+        {
+            var routing = await OutboundRoutingLoader.LoadAsync(tenants, connectors, routes, deliveryOptions.Value, ct);
+            smartHostOnly = routing.SmartHostOnly;
+            smartHosts = routing.SmartHostList;
+        }
+        catch { /* fall back to the direct-delivery view */ }
+
         if (string.IsNullOrWhiteSpace(dns.PublicHostname))
-            f.Add(Warn("public-hostname-missing", "Public hostname not set",
-                "No public hostname is configured. It's used in SPF (a:) and as the EHLO name; without it, deliverability checks can't validate the hostname.",
-                hint: "Set it under Settings → Sending identity."));
+            f.Add(smartHostOnly
+                ? Info("public-hostname-missing", "Public hostname not set — not needed",
+                    $"Every message leaves through a smart host ({smartHosts}), so receivers judge the smart host's name, not this server's.",
+                    hint: "Set it under Settings → Sending identity only if this server will deliver directly one day.")
+                : Warn("public-hostname-missing", "Public hostname not set",
+                    "No public hostname is configured. It's used in SPF (a:) and as the EHLO name; without it, deliverability checks can't validate the hostname.",
+                    hint: "Set it under Settings → Sending identity."));
         else
             f.Add(Ok("public-hostname", "Public hostname is set", $"Public hostname: {dns.PublicHostname}"));
 
         if (string.IsNullOrWhiteSpace(dns.SendingIpAddresses))
-            f.Add(Warn("sending-ips-missing", "Sending IPs not set",
-                "No sending IP addresses are configured, so SPF coverage, reverse DNS and blocklist status can't be checked.",
-                hint: "Add them under Settings → Sending identity."));
+            f.Add(smartHostOnly
+                ? Info("sending-ips-missing", "Sending IPs not set — not needed",
+                    $"Every message leaves through a smart host ({smartHosts}), so receivers see the smart host's IP addresses; "
+                    + "SPF, reverse DNS and blocklists for this server's IP do not affect delivery.")
+                : Warn("sending-ips-missing", "Sending IPs not set",
+                    "No sending IP addresses are configured, so SPF coverage, reverse DNS and blocklist status can't be checked.",
+                    hint: "Add them under Settings → Sending identity."));
         else
             f.Add(Ok("sending-ips", "Sending IPs are set", $"Configured sending IPs: {dns.SendingIpAddresses}"));
 

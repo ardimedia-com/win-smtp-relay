@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Self-check false alarms when all mail leaves through a smart host** (e.g. Brevo). The relay now works out
+  whether any message can still be delivered directly to a recipient's MX (a tenant without a smart-host default
+  connector and no global smart host, or a domain route to a direct connector). When none can:
+  - a closed outbound port 25, a missing public hostname or sending IPs, the EHLO fallback to the machine name, an
+    outbound-IP drift and the relay's own SPF expectation are reported as information instead of errors/warnings —
+    receivers only ever see the smart host;
+  - DMARC is judged by the smart host's DKIM signature: for a known provider (Brevo, SendGrid, Mailchimp
+    Transactional, Mailjet, Microsoft 365) the self-check confirms that the provider's DKIM key is published for the
+    sender domain (e.g. `brevo1._domainkey`), and warns when it is not; for another smart host it says so as
+    information.
+  These findings no longer trigger the nightly "new setup/health problem" alert.
 - Missing space between two sentences in the preset description on the *New API key* page.
 
 ## [1.0.0-beta1-build76] - 2026-10-14
