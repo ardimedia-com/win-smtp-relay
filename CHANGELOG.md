@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build76] - 2026-10-14
+
 ### Added
 
 - **One API key for host and tenant work** — a host-level key can name the tenant a call acts in: the
