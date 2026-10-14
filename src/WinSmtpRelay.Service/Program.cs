@@ -265,7 +265,7 @@ if (adminUiConfig.Enabled)
     });
 
     // Tenant switcher: re-issues the cookie with an updated active_tenant claim. The target is validated
-    // against the principal's memberships (consent model) — a host admin selects "Global" or a tenant they
+    // against the principal's memberships (consent model) — a host admin selects "Host (all tenants)" or a tenant they
     // are a member of; a tenant user switches only among their tenant memberships. To reach a tenant they
     // are not a member of, a host admin must break-glass (which first creates the membership).
     app.MapPost("/account/switch-tenant", async (HttpContext ctx, [FromForm] string tenant) =>

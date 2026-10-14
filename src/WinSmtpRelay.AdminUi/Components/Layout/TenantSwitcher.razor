@@ -3,7 +3,7 @@
 @using WinSmtpRelay.Core.Models
 @inject IServiceScopeFactory ScopeFactory
 
-@* Shown when the principal can be in more than one scope. A host admin sees "Global" plus the tenants
+@* Shown when the principal can be in more than one scope. A host admin sees "Host (all tenants)" plus the tenants
    they are a member of; a tenant user sees the tenants they are a member of. To reach a tenant they are
    not a member of, a host admin uses break-glass (Host → Tenants), which creates the membership. *@
 @if (options.Count > 1)
@@ -48,7 +48,7 @@
 
         var opts = new List<Option>();
         if (hasHost)
-            opts.Add(new Option("all", "Global", active is null));
+            opts.Add(new Option("all", "Host (all tenants)", active is null));
         foreach (var t in tenants.Where(t => memberIds.Contains(t.Id)))
             opts.Add(new Option(t.Id.ToString(), t.Name == "Default" ? "Default tenant" : t.Name, active == t.Id));
         options = opts;

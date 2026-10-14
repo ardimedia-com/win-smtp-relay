@@ -132,7 +132,7 @@ else if (IsNew)
                             @if (canCreateHostKeys)
                             {
                                 @* A host admin working in a tenant scope can mint a host-level key right here
-                                   instead of switching to Global first; it is created without a tenant. *@
+                                   instead of switching to Host (all tenants) first; it is created without a tenant. *@
                                 <option value="@RelayRoles.HostAdmin">Host admin (host-level key, not bound to this tenant)</option>
                             }
                         }
@@ -144,7 +144,7 @@ else if (IsNew)
                             {
                                 <text>This <strong>host-level key</strong> belongs to no tenant: within its scopes it reaches every
                                 tenant plus the self-check, audit log, sending identity and every tenant's DKIM. It is listed
-                                under <em>Host → API Keys</em> in the Global scope, not in this tenant's list.</text>
+                                under <em>Host → API Keys</em> in the <em>Host (all tenants)</em> view, not in this tenant's list.</text>
                             }
                             else
                             {
@@ -556,7 +556,7 @@ else if (key is not null)
         }
         if (ScopeTenantId is null && !hostKey)
         {
-            statusMessage = "In the Global scope only host-level keys can be created.";
+            statusMessage = "In the Host (all tenants) view only host-level keys can be created.";
             return;
         }
         if (hostKey && ScopeTenantId is not null && !canCreateHostKeys)

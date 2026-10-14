@@ -74,7 +74,7 @@ public class TenantReadinessService(
         var items = new List<SetupItem>
         {
             // ----- Required: needed before any mail can flow -----
-            new("tenant-active", "Organization active", SetupGroup.Required,
+            new("tenant-active", "Tenant active", SetupGroup.Required,
                 tenantActive ? SetupStatus.Done : SetupStatus.Todo,
                 tenantActive ? "Approved and enabled by the host" : "Awaiting host approval",
                 "", ""),

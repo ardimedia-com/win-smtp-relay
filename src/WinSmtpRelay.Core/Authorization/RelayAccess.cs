@@ -13,7 +13,7 @@ namespace WinSmtpRelay.Core.Authorization;
 /// tenant admin, or self-granted by a host admin as an audited break-glass). A host membership alone
 /// never satisfies a tenant-scoped policy.</item>
 /// <item>In <b>host scope</b> (a host admin with no active tenant selected) the tenant-scoped policies
-/// pass so tenant pages can render their "select an organization" guard; no tenant is targeted.</item>
+/// pass so tenant pages can render their "select a tenant" guard; no tenant is targeted.</item>
 /// </list>
 /// </summary>
 public static class RelayAccess
@@ -76,7 +76,7 @@ public static class RelayAccess
         }
 
         // No specific tenant: host scope. A host admin may pass so the tenant pages render their
-        // "select an organization" guard; a sole-tenant member is auto-scoped to their tenant.
+        // "select a tenant" guard; a sole-tenant member is auto-scoped to their tenant.
         if (HasHostMembership(user))
             return true;
         var tenants = TenantMemberships(user);

@@ -145,7 +145,7 @@ else
     @if (!CanAct)
     {
         <p class="text-muted">
-            Select an organization in the switcher to act on these &mdash; accepting a domain or allowing an
+            Select a tenant in the switcher to act on these &mdash; accepting a domain or allowing an
             IP creates configuration that has to belong to a specific tenant.
         </p>
     }
@@ -243,10 +243,10 @@ else
     private string ConfirmDescription => action switch
     {
         RejectionAction.AcceptDomain =>
-            $"Adds {target?.SenderDomain} to this organization's accepted sender domains, so {target?.ClientIp} "
+            $"Adds {target?.SenderDomain} to this tenant's accepted sender domains, so {target?.ClientIp} "
             + "can send as it. Ownership verification, if required, still applies afterwards.",
         RejectionAction.AllowIp =>
-            $"Creates an Allow IP rule for {target?.ClientIp}/32 in this organization. It lets the device connect, "
+            $"Creates an Allow IP rule for {target?.ClientIp}/32 in this tenant. It lets the device connect, "
             + "and binds it to this tenant when tenant-by-IP binding is enabled. Only do this for a device you "
             + "recognise — an allow rule is a security decision.",
         _ =>
@@ -333,7 +333,7 @@ else
 
         if (await svc.ExistsAsync(row.SenderDomain))
         {
-            Fail($"{row.SenderDomain} is already claimed — by another organization, if it is not listed under yours.");
+            Fail($"{row.SenderDomain} is already claimed — by another tenant, if it is not listed under yours.");
             return;
         }
 
@@ -364,7 +364,7 @@ else
         var existing = await svc.GetAllAsync();
         if (existing.Any(r => string.Equals(r.Network, network, StringComparison.OrdinalIgnoreCase)))
         {
-            Fail($"A rule for {network} already exists in this organization.");
+            Fail($"A rule for {network} already exists in this tenant.");
             return;
         }
 

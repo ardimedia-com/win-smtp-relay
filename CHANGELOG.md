@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creating it — the commands show the key shortened, the copy buttons still copy the full command. A screenshot
   of that page (with the secret field covered) no longer leaks the key.
 
+### Changed
+
+- **One name for the all-tenants view: "Host"** — the scope switcher entry "Global" is now **Host (all tenants)**,
+  matching the sidebar's *Host* group and the *Host admin* role; hints and messages follow.
+- **The admin UI says "tenant" throughout** — "organization" remains only on the self-service sign-up and sign-in
+  pages, where visitors create one; everywhere else (tenant selection guard, Setup, Rejections, send connectors,
+  sign-up settings) the same thing is called a tenant.
+
 ### Fixed
 
 - Missing space between two sentences in the preset description on the *New API key* page.

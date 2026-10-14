@@ -20,7 +20,7 @@
 
 <div class="page-header">
     <h1>Self-service signup</h1>
-    <p>Host-level setting — whether anonymous organizations may create their own tenant. Applied immediately — no restart required.</p>
+    <p>Host-level setting — whether anonymous visitors may create their own tenant. Applied immediately — no restart required.</p>
 </div>
 
 @if (isLoading)
@@ -35,7 +35,7 @@ else
                 <div class="settings-group-title">Self-service signup</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
                     <BbSwitch Checked="signupEnabled" CheckedChanged="OnToggleAsync" id="signup-toggle" />
-                    <label for="signup-toggle" style="cursor:pointer;">Allow anonymous organizations to sign up at <span class="mono">/signup</span></label>
+                    <label for="signup-toggle" style="cursor:pointer;">Allow anonymous visitors to sign up at <span class="mono">/signup</span></label>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.75rem;margin-bottom:0;">
                     When enabled, a "Create an organization" link appears on the sign-in page. A new signup creates a

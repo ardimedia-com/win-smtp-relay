@@ -19,7 +19,7 @@
 <div class="page-header page-header-row">
     <div>
         <h1>Setup</h1>
-        <p>A live checklist of what your organization needs to send mail — and the best practices that get it into the inbox.</p>
+        <p>A live checklist of what your tenant needs to send mail — and the best practices that get it into the inbox.</p>
     </div>
     <div class="flex gap-1 items-center">
         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="RefreshAsync" Disabled="@isLoading">
@@ -43,8 +43,8 @@ else if (readiness is null || readiness.IsHostScope)
             <div class="setup-row" style="border:none;">
                 <span class="setup-row-icon s-blocked"><LucideIcon Name="building-2" Size="18" /></span>
                 <div class="setup-row-main">
-                    <div class="setup-row-title">Pick an organization</div>
-                    <div class="setup-row-detail">Setup readiness is shown per organization. Use the tenant switcher at the top right to select one, then return here.</div>
+                    <div class="setup-row-title">Pick a tenant</div>
+                    <div class="setup-row-detail">Setup readiness is shown per tenant. Use the tenant switcher at the top right to select one, then return here.</div>
                 </div>
             </div>
         </BbCardContent>
@@ -110,7 +110,7 @@ else
             <LucideIcon Name="lock" Size="20" />
             <div class="setup-next-body">
                 <div class="setup-next-title">Not ready to send</div>
-                <div class="setup-next-detail">This organization isn't active yet — a host administrator must enable it.</div>
+                <div class="setup-next-detail">This tenant isn't active yet — a host administrator must enable it.</div>
             </div>
         </div>
     }
@@ -210,7 +210,7 @@ else
         </BbCard>
     </AuthorizeView>
 
-    <div class="setup-group-label">Basic <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— your organization and the sending identity it relays with · @basicDone of @basicTotal in place</span></div>
+    <div class="setup-group-label">Basic <span class="text-muted" style="font-weight:400;font-size:0.85rem;">— your tenant and the sending identity it relays with · @basicDone of @basicTotal in place</span></div>
     <BbCard>
         <BbCardContent>
             @* Basic can otherwise read all-green while the org still can't send (no submission path),
@@ -220,7 +220,7 @@ else
                 <div class="setup-cantsend">
                     <LucideIcon Name="triangle-alert" Size="16" />
                     <span>
-                        This organization can't send mail yet — set up <strong>Submission access</strong>
+                        This tenant can't send mail yet — set up <strong>Submission access</strong>
                         (under <em>Recommended</em>): add an <a href="/smtpusers">SMTP user</a>, or allow a
                         client IP under <a href="/ip-rules">IP access rules</a>.
                     </span>
@@ -317,9 +317,9 @@ else
             <BbDialogDescription>How to read this page</BbDialogDescription>
         </BbDialogHeader>
         <div style="font-size:0.875rem;line-height:1.6;">
-            <p>This page checks your organization's configuration in real time and groups it into three tiers:</p>
+            <p>This page checks your tenant's configuration in real time and groups it into three tiers:</p>
             <ul style="padding-left:1.25rem;">
-                <li><strong>Basic</strong> — your organization and the sending identity the rest of the config builds on (public hostname + IP). The <em>Inbound</em> tile turns green once the org is active and clients can submit; the <em>Outbound</em> tile reflects whether mail actually leaves the relay.</li>
+                <li><strong>Basic</strong> — your tenant and the sending identity the rest of the config builds on (public hostname + IP). The <em>Inbound</em> tile turns green once the tenant is active and clients can submit; the <em>Outbound</em> tile reflects whether mail actually leaves the relay.</li>
                 <li><strong>Best practices</strong> — secure submission (SMTP credentials) plus deliverability best practice (verified domains, DKIM, published DNS). Mail can still flow without them, but authenticated submission and these records keep it out of spam.</li>
                 <li><strong>Optional</strong> — refinements where a sensible default already applies (e.g. an empty list means "allow all"); these show as Done with the default noted.</li>
             </ul>

@@ -172,7 +172,7 @@
                 </AuthorizeView>
             }
 
-            @* Global administration — host-wide, NOT per-tenant: host operations (Tenants, Signup, Event
+            @* Host administration — host-wide, NOT per-tenant: host operations (Tenants, Signup, Event
                Log) and server configuration (Settings, cert, listener, rate limits, startup, Update).
                Shown to host admins in ANY scope and set apart with a tinted background, so global config is
                visually distinct from the per-tenant groups above. In a single-tenant deployment the host
@@ -341,9 +341,9 @@
                        in host scope, so these pages would render all tenants' rows merged, and a create would
                        silently land in the Default tenant. The nav already hides them; this covers the URL. *@
                     <div class="page-header">
-                        <h1>Select an organization</h1>
-                        <p>This page manages one organization's configuration. You are in the global (all-tenants)
-                           view — pick an organization in the switcher at the top right, then return here.</p>
+                        <h1>Select a tenant</h1>
+                        <p>This page manages one tenant's configuration. You are in the host (all tenants)
+                           view — pick a tenant in the switcher at the top right, then return here.</p>
                     </div>
                 }
                 else
@@ -389,7 +389,7 @@
     [
         "setup", "deliverability", "health",
         "connectors/send", "domains", "dkim", "ip-rules", "filters",
-        // NOT "apikeys": the Host group links it in the global scope, where the page lists every key and
+        // NOT "apikeys": the Host group links it in the host (all tenants) scope, where the page lists every key and
         // creates host-level keys (a key's tenant is explicit, never stamped from the scope).
         "smtpusers", "suppressions", "tenant-admins",
         // Per-tenant message content: keep it out of the host/all-tenants scope so a host admin
