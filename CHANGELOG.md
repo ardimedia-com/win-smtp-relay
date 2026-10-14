@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build77] - 2026-10-14
+
 ### Security
 
 - **A new API key no longer appears in clear text in the `claude mcp add` commands** on the page shown after
