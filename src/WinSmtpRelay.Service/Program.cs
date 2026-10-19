@@ -211,6 +211,20 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
     await db.Database.MigrateAsync();
+
+    // Data upgrade: a reporting schedule stored as a fixed UTC time (before local-time schedules) is converted
+    // once into the server's local time, keeping the next digest at the same instant. Reading the settings does it.
+    try
+    {
+        var reporting = await scope.ServiceProvider.GetRequiredService<WinSmtpRelay.Core.Interfaces.IReportingSettingsService>().GetAsync();
+        var schedule = WinSmtpRelay.Core.ReportSchedule.From(reporting);
+        app.Logger.LogInformation("Reporting schedule: daily digest at {Report}, self-check at {Check}",
+            schedule.Label(schedule.ReportTime), schedule.Label(schedule.SelfCheckTime));
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Reading/upgrading the reporting schedule failed");
+    }
 }
 
 // Apply an operator-imported admin-UI certificate (stored in the DB via the admin UI) over the startup

@@ -24,6 +24,15 @@ public class DnsSetupService(
 {
     private readonly DnsOptions _options = options.Value;
 
+    // Public resolvers first, the system resolver as fallback; a lookup nobody answers throws
+    // DnsLookupFailedException, which the checks report as "could not verify" (never as "not published").
+    private ResilientDnsQuery? _query;
+    private ResilientDnsQuery Query => _query ??= new ResilientDnsQuery(publicDns.Client, dns, logger);
+
+    private static DnsRecordResult Unverified(string recordType, string recordName, string expected, DnsLookupFailedException ex) =>
+        new(recordType, recordName, expected, null, DnsRecordStatus.Unverified,
+            $"Could not verify: {ex.Message}. The record may well be published — the check is repeated on the next run.");
+
     // The runtime (DB) recommendation inputs, loaded once per scope. Falls back to the appsettings
     // values until loaded (e.g. when only the synchronous Build* methods are exercised).
     private DnsOptions? _effective;
@@ -164,9 +173,9 @@ public class DnsSetupService(
         string? published = null;
         foreach (var provider in providers.DistinctBy(p => p!.Name))
         {
-            var selector = await FindPublishedSelectorAsync(domain, provider!.DkimSelectors, ct);
+            var (selector, lookupFailed) = await FindPublishedSelectorAsync(domain, provider!.DkimSelectors, ct);
             if (selector is null)
-                return new SmartHostDkim(routing.SmartHostList, provider.Name, null, provider.DkimSelectors);
+                return new SmartHostDkim(routing.SmartHostList, provider.Name, null, provider.DkimSelectors, lookupFailed);
             published ??= selector;
         }
 
@@ -174,26 +183,41 @@ public class DnsSetupService(
         return new SmartHostDkim(routing.SmartHostList, names, published, [.. providers.SelectMany(p => p!.DkimSelectors).Distinct()]);
     }
 
-    // The first selector under which a DKIM public key (p=) is published for the domain (CNAMEs are followed).
-    private async Task<string?> FindPublishedSelectorAsync(string domain, IReadOnlyList<string> selectors, CancellationToken ct)
+    // The first selector under which a DKIM public key (p=) is published for the domain (CNAMEs are followed);
+    // LookupFailed when none was found and at least one lookup could not be answered.
+    private async Task<(string? Selector, bool LookupFailed)> FindPublishedSelectorAsync(string domain, IReadOnlyList<string> selectors, CancellationToken ct)
     {
+        var failed = false;
         foreach (var selector in selectors)
         {
             try
             {
-                var result = await publicDns.Client.QueryAsync($"{selector}._domainkey.{domain}", QueryType.TXT, cancellationToken: ct);
+                var result = await Query.QueryAsync($"{selector}._domainkey.{domain}", QueryType.TXT, ct);
                 if (result.Answers.TxtRecords().Any(t => string.Concat(t.Text).Contains("p=", StringComparison.OrdinalIgnoreCase)))
-                    return selector;
+                    return (selector, false);
             }
-            catch (Exception ex)
+            catch (DnsLookupFailedException ex)
             {
-                logger.LogDebug(ex, "DKIM selector lookup {Selector}._domainkey.{Domain} failed", selector, domain);
+                logger.LogWarning("DKIM selector lookup {Selector}._domainkey.{Domain} failed: {Reason}", selector, domain, ex.Reason);
+                failed = true;
             }
         }
-        return null;
+        return (null, failed);
     }
 
     private async Task<DnsRecordResult> CheckSpfAsync(string domain, CancellationToken ct)
+    {
+        try
+        {
+            return await CheckSpfCoreAsync(domain, ct);
+        }
+        catch (DnsLookupFailedException ex)
+        {
+            return Unverified("SPF", domain, HasSpfIdentity ? BuildRecommendedSpf() : "", ex);
+        }
+    }
+
+    private async Task<DnsRecordResult> CheckSpfCoreAsync(string domain, CancellationToken ct)
     {
         var live = await ResolveTxtAsync(domain, t => t.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase), ct);
 
@@ -291,13 +315,8 @@ public class DnsSetupService(
         public Task<string?> GetSpfRecordAsync(string domain, CancellationToken ct) =>
             owner.ResolveTxtAsync(domain, t => t.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase), ct);
 
-        public async Task<IReadOnlyList<System.Net.IPAddress>> GetAddressesAsync(string host, CancellationToken ct)
-        {
-            var list = new List<System.Net.IPAddress>();
-            list.AddRange(await owner.ResolveByTypeAsync(host, QueryType.A, ct));
-            list.AddRange(await owner.ResolveByTypeAsync(host, QueryType.AAAA, ct));
-            return list;
-        }
+        public Task<IReadOnlyList<System.Net.IPAddress>> GetAddressesAsync(string host, CancellationToken ct) =>
+            owner.ResolveAllAddressesAsync(host, ct);
 
         public async Task<IReadOnlyList<string>> GetMxHostsAsync(string domain, CancellationToken ct) =>
             await owner.ResolveMxAsync(domain, ct);
@@ -310,7 +329,9 @@ public class DnsSetupService(
     // so receivers treat it as if no SPF were published.
     private async Task<string> LookupWarningAsync(string record, CancellationToken ct)
     {
-        var count = await EstimateSpfLookupCountAsync(record, ct);
+        int count;
+        try { count = await EstimateSpfLookupCountAsync(record, ct); }
+        catch (DnsLookupFailedException) { return ""; } // the estimate is a hint; a failed lookup just skips it
         return count > SpfMaxLookups
             ? $" Note: this record needs about {count} DNS lookups; SPF allows at most {SpfMaxLookups} (over-limit records fail with a permerror) — consolidate include: mechanisms or rely on ip4/ip6."
             : "";
@@ -386,8 +407,10 @@ public class DnsSetupService(
     private async Task<DnsRecordResult> CheckDmarcAsync(string domain, CancellationToken ct)
     {
         var name = $"_dmarc.{domain}";
-        var live = await ResolveTxtAsync(name, t => t.StartsWith("v=DMARC1", StringComparison.OrdinalIgnoreCase), ct);
         var expected = BuildRecommendedDmarc(domain);
+        string? live;
+        try { live = await ResolveTxtAsync(name, t => t.StartsWith("v=DMARC1", StringComparison.OrdinalIgnoreCase), ct); }
+        catch (DnsLookupFailedException ex) { return Unverified("DMARC", name, expected, ex); }
 
         return live is null
             ? new DnsRecordResult("DMARC", name, expected, null, DnsRecordStatus.Missing, "No DMARC record is published.")
@@ -407,7 +430,9 @@ public class DnsSetupService(
             return new DnsRecordResult("DKIM", name, "", null, DnsRecordStatus.NotConfigured,
                 "The DKIM private key is missing or unreadable.");
 
-        var live = await ResolveTxtAsync(name, t => t.Contains("p=", StringComparison.OrdinalIgnoreCase), ct);
+        string? live;
+        try { live = await ResolveTxtAsync(name, t => t.Contains("p=", StringComparison.OrdinalIgnoreCase), ct); }
+        catch (DnsLookupFailedException ex) { return Unverified("DKIM", name, expected, ex); }
         if (live is null)
             return new DnsRecordResult("DKIM", name, expected, null, DnsRecordStatus.Missing, "No DKIM record is published.");
 
@@ -426,7 +451,9 @@ public class DnsSetupService(
         var expected = TryDeriveDkimTxt(key);
         if (expected is null)
             return false;
-        var live = await ResolveTxtAsync($"{key.Selector}._domainkey.{key.Domain}", t => t.Contains("p=", StringComparison.OrdinalIgnoreCase), ct);
+        string? live;
+        try { live = await ResolveTxtAsync($"{key.Selector}._domainkey.{key.Domain}", t => t.Contains("p=", StringComparison.OrdinalIgnoreCase), ct); }
+        catch (DnsLookupFailedException) { return false; }
         return live is not null && string.Equals(ExtractDkimKey(expected), ExtractDkimKey(live), StringComparison.Ordinal);
     }
 
@@ -438,8 +465,10 @@ public class DnsSetupService(
             return new DnsRecordResult("A / AAAA", "(public hostname)", "", null, DnsRecordStatus.NotConfigured,
                 "Set the relay's public hostname in Settings — it is used in SPF (a:) and as the EHLO name, and should resolve to your sending IP.");
 
-        var ips = await ResolveAddressesAsync(host, ct);
         var expected = Current.SendingIpAddresses.Count > 0 ? string.Join(", ", Current.SendingIpAddresses) : "your sending IP";
+        List<string> ips;
+        try { ips = await ResolveAddressesAsync(host, ct); }
+        catch (DnsLookupFailedException ex) { return Unverified("A / AAAA", host, expected, ex); }
         if (ips.Count == 0)
             return new DnsRecordResult("A / AAAA", host, expected, null, DnsRecordStatus.Missing,
                 "The public hostname does not resolve. Publish an A/AAAA record pointing it at your sending IP.");
@@ -455,6 +484,19 @@ public class DnsSetupService(
     {
         await EnsureEffectiveAsync(ct);
         domain = domain.Trim().ToLowerInvariant();
+        try
+        {
+            return await CheckMxCoreAsync(domain, ct);
+        }
+        catch (DnsLookupFailedException ex)
+        {
+            var publicHost = Current.PublicHostname?.Trim().ToLowerInvariant();
+            return Unverified("MX", domain, string.IsNullOrWhiteSpace(publicHost) ? "this relay" : publicHost, ex);
+        }
+    }
+
+    private async Task<DnsRecordResult> CheckMxCoreAsync(string domain, CancellationToken ct)
+    {
         var host = Current.PublicHostname?.Trim().ToLowerInvariant();
         var mx = await ResolveMxAsync(domain, ct);
         var live = mx.Count > 0 ? string.Join(", ", mx) : null;
@@ -491,8 +533,20 @@ public class DnsSetupService(
                 "Not a valid IP address — fix the sending IPs (Settings) or the tenant's egress IP.");
 
         var host = Current.PublicHostname?.Trim().ToLowerInvariant();
-        var ptr = await ResolvePtrAsync(ipAddress, ct);
         var expected = string.IsNullOrWhiteSpace(host) ? "an FQDN that resolves back to this IP" : host;
+        try
+        {
+            return await CheckReverseDnsCoreAsync(ipAddress, host, expected, ct);
+        }
+        catch (DnsLookupFailedException ex)
+        {
+            return Unverified("PTR (reverse DNS)", ipAddress, expected, ex);
+        }
+    }
+
+    private async Task<DnsRecordResult> CheckReverseDnsCoreAsync(string ipAddress, string? host, string expected, CancellationToken ct)
+    {
+        var ptr = await ResolvePtrAsync(ipAddress, ct);
 
         if (ptr is null)
             return new DnsRecordResult("PTR (reverse DNS)", ipAddress, expected, null, DnsRecordStatus.Missing,
@@ -528,69 +582,51 @@ public class DnsSetupService(
         && list.Any(s => System.Net.IPAddress.TryParse(s.Trim(), out var a) && a.Equals(target));
 
     private async Task<List<string>> ResolveAddressesAsync(string host, CancellationToken ct)
+        => [.. (await ResolveAllAddressesAsync(host, ct)).Select(ip => ip.ToString())];
+
+    // Resolve A and AAAA INDEPENDENTLY: a failed or slow AAAA lookup must never discard a successful A result.
+    // Most hosts have no IPv6 record, and a transient AAAA timeout would otherwise wipe out the A answer —
+    // making a hostname that resolves fine read as "not found" / FCrDNS-incomplete. Only when the A lookup
+    // itself fails and AAAA yields nothing is the answer unknown (DnsLookupFailedException).
+    private async Task<IReadOnlyList<System.Net.IPAddress>> ResolveAllAddressesAsync(string host, CancellationToken ct)
     {
-        // Resolve A and AAAA INDEPENDENTLY: a failed or slow AAAA lookup must never discard a successful
-        // A result. Most hosts have no IPv6 record, and a transient AAAA timeout (or a momentary fallback
-        // to a flaky public resolver) would otherwise throw and wipe out the A answer — making a hostname
-        // that resolves fine read as "not found" / FCrDNS-incomplete.
+        DnsLookupFailedException? aFailure = null;
         var addresses = new List<System.Net.IPAddress>();
-        addresses.AddRange(await ResolveByTypeAsync(host, QueryType.A, ct));
-        addresses.AddRange(await ResolveByTypeAsync(host, QueryType.AAAA, ct));
-        // Dedupe by IPAddress (handles differing IPv6 textual forms), then render canonical strings.
-        return addresses.Distinct().Select(ip => ip.ToString()).ToList();
+        try { addresses.AddRange(await ResolveByTypeAsync(host, QueryType.A, ct)); }
+        catch (DnsLookupFailedException ex) { aFailure = ex; }
+        try { addresses.AddRange(await ResolveByTypeAsync(host, QueryType.AAAA, ct)); }
+        catch (DnsLookupFailedException ex) { logger.LogDebug("AAAA lookup for {Host} failed: {Reason}", host, ex.Reason); }
+
+        if (aFailure is not null && addresses.Count == 0)
+            throw aFailure;
+        // Dedupe by IPAddress (handles differing IPv6 textual forms).
+        return [.. addresses.Distinct()];
     }
 
     private async Task<IReadOnlyList<System.Net.IPAddress>> ResolveByTypeAsync(string host, QueryType type, CancellationToken ct)
     {
-        try
-        {
-            var result = await publicDns.Client.QueryAsync(host, type, cancellationToken: ct);
-            return result.Answers.OfType<AddressRecord>().Select(r => r.Address).ToList();
-        }
-        catch (DnsResponseException) { return []; }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "DNS {Type} lookup failed for {Host}", type, host);
-            return [];
-        }
+        var result = await Query.QueryAsync(host, type, ct);
+        return result.Answers.OfType<AddressRecord>().Select(r => r.Address).ToList();
     }
 
     // Returns MX exchange hostnames (lowercased, trailing dot stripped), ordered by preference.
     private async Task<List<string>> ResolveMxAsync(string domain, CancellationToken ct)
     {
-        try
-        {
-            var result = await publicDns.Client.QueryAsync(domain, QueryType.MX, cancellationToken: ct);
-            return result.Answers.OfType<MxRecord>()
-                .OrderBy(m => m.Preference)
-                .Select(m => m.Exchange.Value.TrimEnd('.').ToLowerInvariant())
-                .ToList();
-        }
-        catch (DnsResponseException) { return []; }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "DNS MX lookup failed for {Domain}", domain);
-            return [];
-        }
+        var result = await Query.QueryAsync(domain, QueryType.MX, ct);
+        return result.Answers.OfType<MxRecord>()
+            .OrderBy(m => m.Preference)
+            .Select(m => m.Exchange.Value.TrimEnd('.').ToLowerInvariant())
+            .ToList();
     }
 
     private async Task<string?> ResolvePtrAsync(string ipAddress, CancellationToken ct)
     {
         if (!System.Net.IPAddress.TryParse(ipAddress, out var addr))
             return null;
-        try
-        {
-            var result = await publicDns.Client.QueryReverseAsync(addr, ct);
-            return result.Answers.OfType<PtrRecord>()
-                .Select(p => p.PtrDomainName.Value.TrimEnd('.').ToLowerInvariant())
-                .FirstOrDefault();
-        }
-        catch (DnsResponseException) { return null; }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Reverse DNS lookup failed for {Ip}", ipAddress);
-            return null;
-        }
+        var result = await Query.QueryReverseAsync(addr, ct);
+        return result.Answers.OfType<PtrRecord>()
+            .Select(p => p.PtrDomainName.Value.TrimEnd('.').ToLowerInvariant())
+            .FirstOrDefault();
     }
 
     // DNS blocklists queried for sending IPs (free, DNS-based). Spamhaus ZEN is the one Microsoft 365
@@ -665,30 +701,28 @@ public class DnsSetupService(
             return false;
 
         var expected = BuildOwnershipRecord(token);
-        var found = await ResolveTxtAsync(domain,
-            txt => txt.Trim().Equals(expected, StringComparison.OrdinalIgnoreCase), ct);
-        return found is not null;
-    }
-
-    private async Task<string?> ResolveTxtAsync(string name, Func<string, bool> predicate, CancellationToken ct)
-    {
         try
         {
-            var result = await publicDns.Client.QueryAsync(name, QueryType.TXT, cancellationToken: ct);
-            return result.Answers
-                .OfType<TxtRecord>()
-                .Select(txt => string.Join("", txt.Text)) // long records arrive as multiple strings
-                .FirstOrDefault(predicate);
+            var found = await ResolveTxtAsync(domain,
+                txt => txt.Trim().Equals(expected, StringComparison.OrdinalIgnoreCase), ct);
+            return found is not null;
         }
-        catch (DnsResponseException)
+        catch (DnsLookupFailedException ex)
         {
-            return null; // NXDOMAIN / no record
+            logger.LogWarning("Ownership lookup for {Domain} failed: {Reason}", domain, ex.Reason);
+            return false;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "DNS TXT lookup failed for {Name}", name);
-            return null;
-        }
+    }
+
+    // The first TXT string at the name matching the predicate; null when none is published (incl. NXDOMAIN).
+    // Throws DnsLookupFailedException when no resolver answered.
+    private async Task<string?> ResolveTxtAsync(string name, Func<string, bool> predicate, CancellationToken ct)
+    {
+        var result = await Query.QueryAsync(name, QueryType.TXT, ct);
+        return result.Answers
+            .OfType<TxtRecord>()
+            .Select(txt => string.Join("", txt.Text)) // long records arrive as multiple strings
+            .FirstOrDefault(predicate);
     }
 
     /// <summary>Derives "v=DKIM1; k=rsa; p=&lt;SubjectPublicKeyInfo base64&gt;" from the domain's private key —

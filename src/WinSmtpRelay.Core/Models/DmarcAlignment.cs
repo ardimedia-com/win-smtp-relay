@@ -34,7 +34,13 @@ public enum DmarcAlignmentVerdict
     /// Every message leaves through a smart host the relay does not know, so DMARC depends on that service
     /// signing with a DKIM key for the domain — which the relay cannot verify.
     /// </summary>
-    SmartHostDependent
+    SmartHostDependent,
+
+    /// <summary>
+    /// A DNS lookup the verdict depends on failed (no resolver answered), so the outcome could not be verified
+    /// this time. Not a failure of the domain's setup.
+    /// </summary>
+    Unverified
 }
 
 /// <summary>
@@ -75,6 +81,11 @@ public sealed record DmarcAlignment(
                     + "for this domain; the relay cannot verify which selector it uses — check the domain authentication there."
                     + policyNote);
 
+            if (smartHost.PublishedSelector is null && smartHost.LookupFailed)
+                return new DmarcAlignment(DmarcAlignmentVerdict.Unverified, false, false, dmarcPublished,
+                    $"Could not verify: the DNS lookup of {smartHost.Provider}'s DKIM key for this domain failed (no resolver answered). "
+                    + "The check is repeated on the next run.");
+
             return smartHost.PublishedSelector is { } selector
                 ? new DmarcAlignment(DmarcAlignmentVerdict.DkimAligned, true, false, dmarcPublished,
                     $"DMARC passes via {smartHost.Provider}'s DKIM signature ({selector}._domainkey is published): every message "
@@ -85,8 +96,12 @@ public sealed record DmarcAlignment(
                     + $"Authenticate the domain at {smartHost.Provider} and publish the DKIM records it gives you." + policyNote);
         }
 
+        // A leg whose lookup failed is unknown, not failed: without DKIM alignment proven, an unverifiable DKIM
+        // (or, without SPF authorisation, an unverifiable SPF) leaves the outcome open.
         var verdict = dkimAligned ? DmarcAlignmentVerdict.DkimAligned
+            : dkim.Status == DnsRecordStatus.Unverified ? DmarcAlignmentVerdict.Unverified
             : spfAuthorized ? DmarcAlignmentVerdict.SpfConditional
+            : spf.Status == DnsRecordStatus.Unverified ? DmarcAlignmentVerdict.Unverified
             : DmarcAlignmentVerdict.Fail;
 
         var summary = verdict switch
@@ -94,6 +109,9 @@ public sealed record DmarcAlignment(
             DmarcAlignmentVerdict.DkimAligned =>
                 "DMARC passes via DKIM (d= aligns with the From domain) for every message, independent of the envelope-from."
                 + policyNote,
+            DmarcAlignmentVerdict.Unverified =>
+                "Could not verify: a DNS lookup for this domain's SPF/DKIM records failed (no resolver answered). "
+                + "The check is repeated on the next run.",
             DmarcAlignmentVerdict.SpfConditional =>
                 "DMARC passes only when the sending app's envelope-from (Return-Path) is on this domain (SPF alignment). "
                 + "A different bounce domain fails DMARC despite the green SPF record — set up DKIM to make it robust."

@@ -37,7 +37,7 @@ public class HealthCheckRunner(
         {
             using var perCheck = CancellationTokenSource.CreateLinkedTokenSource(ct);
             // A generous per-check ceiling so a single hung network probe can't stall the whole run.
-            perCheck.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, opts.ProbeTimeoutSeconds) * 5));
+            perCheck.CancelAfter(check.MaxDuration ?? TimeSpan.FromSeconds(Math.Max(5, opts.ProbeTimeoutSeconds) * 5));
             try
             {
                 findings.AddRange(await check.RunAsync(perCheck.Token));

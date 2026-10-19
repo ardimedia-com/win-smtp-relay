@@ -11,7 +11,12 @@ public enum DnsRecordStatus
     /// <summary>A record is published but differs from the expected value.</summary>
     Mismatch,
     /// <summary>The item is present on a blocklist (DNSBL) — a bad outcome, unlike the others.</summary>
-    Listed
+    Listed,
+    /// <summary>
+    /// The DNS lookup failed (no resolver answered — timeout, SERVFAIL, network down), so the record could not be
+    /// verified. Says nothing about whether it is published; never to be read as "missing".
+    /// </summary>
+    Unverified
 }
 
 /// <summary>One DNS record (SPF/DKIM/DMARC) for a domain: where to publish it, the expected value, the live value, and the diff status.</summary>
@@ -34,7 +39,8 @@ public record DnsRecordResult(
 /// provider runs them (null = not a known provider), and the provider's DKIM selector found published for the
 /// domain (null = none of its selectors is published).
 /// </summary>
-public record SmartHostDkim(string SmartHosts, string? Provider, string? PublishedSelector, IReadOnlyList<string> Selectors);
+/// <param name="LookupFailed">A selector lookup failed (no resolver answered), so "none published" is not proven.</param>
+public record SmartHostDkim(string SmartHosts, string? Provider, string? PublishedSelector, IReadOnlyList<string> Selectors, bool LookupFailed = false);
 
 /// <summary>The full DNS-setup picture for one sender domain.</summary>
 /// <param name="SmartHost">Set when every message of the domain's tenant leaves through a smart host.</param>

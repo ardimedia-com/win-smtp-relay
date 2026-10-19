@@ -13,8 +13,27 @@ public class HealthCheckOptions
     /// <summary>Master switch for the daily run and the page's data. Default on.</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>UTC time of day to run the self-check (HH:mm). Defaults before the digest time so the digest carries fresh results.</summary>
-    public string DailyTimeUtc { get; set; } = "05:30";
+    /// <summary>
+    /// No longer used: the self-check time is set under Settings → Reporting as a local time (default 30 minutes
+    /// before the daily digest). Kept so an existing appsettings.json that still names it binds without error.
+    /// </summary>
+    [Obsolete("The self-check time is ReportingSettings.SelfCheckTimeLocal (Settings → Reporting).")]
+    public string? DailyTimeUtc { get; set; }
+
+    /// <summary>
+    /// After the service starts, the first self-check waits until the network and DNS answer (probing
+    /// <see cref="Outbound25TestDomain"/>), at most this many minutes — a run right after boot or wake-up would
+    /// otherwise report every smart host as unreachable.
+    /// </summary>
+    public int StartupNetworkWaitMinutes { get; set; } = 5;
+
+    // ---- Smart-host probe ----
+
+    /// <summary>Connection attempts per smart host before it is reported unreachable (an ERROR).</summary>
+    public int SmartHostProbeAttempts { get; set; } = 3;
+
+    /// <summary>Pause between two smart-host connection attempts (seconds; 30–60 recommended).</summary>
+    public int SmartHostRetryDelaySeconds { get; set; } = 45;
 
     /// <summary>How many days of snapshots to keep for the history view.</summary>
     public int RetentionDays { get; set; } = 90;

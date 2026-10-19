@@ -17,6 +17,13 @@ public sealed class PublicDnsLookupClient
 {
     public ILookupClient Client { get; }
 
+    // Not a public constructor: DI must keep using the parameterless one (an ILookupClient is registered too —
+    // the system resolver — and would otherwise be injected here).
+    private PublicDnsLookupClient(ILookupClient client) => Client = client;
+
+    /// <summary>Wraps a given client instead of the pinned public resolvers (tests).</summary>
+    public static PublicDnsLookupClient Wrapping(ILookupClient client) => new(client);
+
     public PublicDnsLookupClient()
     {
         Client = new LookupClient(new LookupClientOptions(

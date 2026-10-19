@@ -88,6 +88,7 @@ public static class AdminEndpoints
         MapRateLimitEndpoints(group);
         MapMessageFilterEndpoints(group);
         MapSendingIdentityEndpoints(group);
+        MapReportingScheduleEndpoints(group);
 
         return endpoints;
     }
@@ -800,6 +801,31 @@ public static class AdminEndpoints
         });
     }
 
+    private static void MapReportingScheduleEndpoints(RouteGroupBuilder group)
+    {
+        // Settings → Reporting, read-only: the daily digest and self-check schedule as local times + zone and the
+        // next runs in UTC — lets an operator (or an assistant) confirm the schedule without the admin UI.
+        group.MapGet("/settings/reporting", async (IReportingSettingsService svc, CancellationToken ct) =>
+        {
+            var settings = await svc.GetAsync(ct);
+            var schedule = ReportSchedule.From(settings);
+            var now = DateTime.UtcNow;
+            return Results.Ok(new ReportingScheduleResponse(
+                settings.Enabled,
+                !string.IsNullOrWhiteSpace(settings.RecipientAddress),
+                DailySchedule.Format(schedule.ReportTime),
+                DailySchedule.Format(schedule.SelfCheckTime),
+                schedule.SelfCheckFollowsReport,
+                schedule.ZoneLabel,
+                string.IsNullOrWhiteSpace(settings.TimeZoneId),
+                new DateTimeOffset(schedule.NextReportUtc(now), TimeSpan.Zero),
+                new DateTimeOffset(schedule.NextSelfCheckUtc(now), TimeSpan.Zero),
+                settings.LastDigestSentUtc,
+                settings.BounceRateAlertPercent));
+        }).RequireAuthorization(AuthorizationPolicies.HostAdmin)
+          .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Diag));
+    }
+
     private static void MapSendingIdentityEndpoints(RouteGroupBuilder group)
     {
         // Settings → Sending identity: the PUBLIC hostname and sending IPs receivers see (SPF, PTR, blocklists,
@@ -1086,3 +1112,17 @@ public record ApiKeySummary(
 public record CreateApiKeyRequest(string Name, string Role, int? TenantId, DateTimeOffset? ExpiresUtc, string? Scopes = null);
 public record UpdateApiKeyRequest(string? Scopes);
 public record CreatedApiKeyResponse(int Id, string Name, string KeyPrefix, string Role, string? Scopes, int? TenantId, string Key);
+
+/// <summary>Settings → Reporting schedule (GET /api/settings/reporting). Times are local (HH:mm) in <c>TimeZone</c>.</summary>
+public sealed record ReportingScheduleResponse(
+    bool Enabled,
+    bool RecipientConfigured,
+    string ReportTime,
+    string SelfCheckTime,
+    bool SelfCheckFollowsReport,
+    string TimeZone,
+    bool TimeZoneIsServerDefault,
+    DateTimeOffset NextReportUtc,
+    DateTimeOffset NextSelfCheckUtc,
+    DateTimeOffset? LastReportSentUtc,
+    int BounceRateAlertPercent);

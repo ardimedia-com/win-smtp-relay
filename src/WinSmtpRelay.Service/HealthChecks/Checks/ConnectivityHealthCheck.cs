@@ -1,11 +1,10 @@
-using MailKit.Net.Smtp;
-using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Health;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
+using WinSmtpRelay.Delivery;
 
 namespace WinSmtpRelay.Service.HealthChecks.Checks;
 
@@ -66,70 +65,72 @@ public sealed class ConnectivityHealthCheck(
             f.Add(Info("outbound-port-25", "Could not test outbound port 25", $"The port-25 reachability test failed: {ex.Message}"));
         }
 
-        // --- Global smart host (appsettings Delivery:SmartHost) ---
+        // --- Global smart host (appsettings Delivery:SmartHost) + per-tenant send connectors with a smart host ---
+        // Probed concurrently: with retries a failing host takes minutes, and the probes share no state.
+        var probes = new List<Task<HealthFinding>>();
         if (hasGlobalSmartHost)
-            f.Add(await ProbeSmartHostAsync("smarthost-global", "Global smart host",
+            probes.Add(ProbeSmartHostAsync("smarthost-global", "Global smart host",
                 delivery.SmartHost!, delivery.SmartHostPort, delivery.OpportunisticTls, delivery.RequireTls,
                 delivery.SmartHostUsername, delivery.SmartHostPassword, timeout, ct));
 
-        // --- Per-tenant send connectors with a smart host ---
         IReadOnlyList<SendConnector> all;
         try { all = await connectors.GetAllAsync(ct); }
         catch (Exception ex) { logger.LogWarning(ex, "loading send connectors failed"); all = []; }
 
         foreach (var c in all.Where(c => c.IsEnabled && !string.IsNullOrWhiteSpace(c.SmartHost)))
-            f.Add(await ProbeSmartHostAsync($"smarthost-connector:{c.Id}", $"Send connector '{c.Name}'",
+            probes.Add(ProbeSmartHostAsync($"smarthost-connector:{c.Id}", $"Send connector '{c.Name}'",
                 c.SmartHost!, c.SmartHostPort, c.OpportunisticTls, c.RequireTls, c.Username, c.EncryptedPassword, timeout, ct));
 
+        f.AddRange(await Task.WhenAll(probes));
         return f;
     }
 
-    // Connects to the smart host (and authenticates if credentials are set) without sending anything, to
-    // prove the route works and the credentials are still valid.
+    /// <summary>
+    /// The smart-host probes retry with a 30–60 s pause, so this check may run for minutes when a host is down;
+    /// each single attempt stays bounded by <see cref="HealthCheckOptions.ProbeTimeoutSeconds"/>.
+    /// </summary>
+    public override TimeSpan? MaxDuration => TimeSpan.FromMinutes(15);
+
+    // Connects to the smart host (and authenticates if credentials are set) without sending anything, to prove
+    // the route works and the credentials are still valid. Up to SmartHostProbeAttempts attempts: a single
+    // transient failure (DNS, timeout, TLS while the network wakes up) is a WARNING once a retry succeeds; only
+    // when every attempt fails is the host reported unreachable (ERROR), with the cause of each attempt.
     private async Task<HealthFinding> ProbeSmartHostAsync(string code, string label, string host, int port,
         bool opportunisticTls, bool requireTls, string? username, string? password, TimeSpan timeout, CancellationToken ct)
     {
         var target = $"{host}:{port}";
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(timeout);
-        using var client = new SmtpClient { Timeout = (int)timeout.TotalMilliseconds };
-        try
+        var opts = options.Value;
+        var result = await SmartHostProbe.RunAsync(
+            attemptCt => SmartHostProbe.ConnectOnceAsync(host, port, opportunisticTls, requireTls, username, password, timeout, attemptCt),
+            opts.SmartHostProbeAttempts,
+            TimeSpan.FromSeconds(Math.Clamp(opts.SmartHostRetryDelaySeconds, 1, 300)),
+            SmartHostProbe.Describe,
+            ct);
+
+        var authenticated = string.IsNullOrWhiteSpace(username) ? "" : " and authenticated successfully";
+        switch (result.Outcome)
         {
-            var secure = requireTls ? SecureSocketOptions.StartTls
-                : opportunisticTls ? SecureSocketOptions.StartTlsWhenAvailable
-                : SecureSocketOptions.Auto;
-            await client.ConnectAsync(host, port, secure, cts.Token);
+            case SmartHostProbeOutcome.Reachable:
+                return Ok(code, $"{label} is reachable", $"Connected to {target}{authenticated}.", target);
 
-            if (!string.IsNullOrWhiteSpace(username))
-            {
-                try
-                {
-                    await client.AuthenticateAsync(username, password ?? "", cts.Token);
-                }
-                catch (AuthenticationException)
-                {
-                    await SafeDisconnectAsync(client, cts.Token);
-                    return Err(code, $"{label}: authentication rejected",
-                        $"Connected to {target} but the username/password was rejected. Outbound mail through this smart host will fail.",
-                        target, "Update the smart host credentials.");
-                }
-            }
+            case SmartHostProbeOutcome.ReachableAfterRetry:
+                logger.LogWarning("Self-check: {Label} ({Target}) reachable after retry — {Failures}", label, target, result.DescribeFailures());
+                return Warn(code, $"{label} is reachable after retry (first attempt: {result.FirstFailure})",
+                    $"Connected to {target}{authenticated} on attempt {result.Attempts.Count} of {opts.SmartHostProbeAttempts}. "
+                    + $"Failed before: {result.DescribeFailures()}. A transient problem — delivery retries such failures automatically.",
+                    target, "If this repeats, check the network/DNS of this server (e.g. power saving or standby) and the smart host's status.");
 
-            await SafeDisconnectAsync(client, cts.Token);
-            return Ok(code, $"{label} is reachable",
-                $"Connected to {target}{(string.IsNullOrWhiteSpace(username) ? "" : " and authenticated successfully")}.", target);
+            case SmartHostProbeOutcome.AuthenticationRejected:
+                return Err(code, $"{label}: authentication rejected",
+                    $"Connected to {target} but the username/password was rejected ({result.FirstFailure}). Outbound mail through this smart host will fail.",
+                    target, "Update the smart host credentials.");
+
+            default:
+                logger.LogWarning("Self-check: {Label} ({Target}) unreachable — {Failures}", label, target, result.DescribeFailures());
+                return Err(code, $"{label} is unreachable",
+                    $"Could not connect to {target} in {result.Attempts.Count} attempt(s): {result.DescribeFailures()}. "
+                    + "Outbound mail through this smart host will fail.",
+                    target, "Check the host/port and TLS settings, this server's network/DNS, and that the smart host is up.");
         }
-        catch (Exception ex)
-        {
-            return Err(code, $"{label} is unreachable",
-                $"Could not connect to {target}: {ex.Message}. Outbound mail through this smart host will fail.",
-                target, "Check the host/port and TLS settings, and that the smart host is up.");
-        }
-    }
-
-    private static async Task SafeDisconnectAsync(SmtpClient client, CancellationToken ct)
-    {
-        try { if (client.IsConnected) await client.DisconnectAsync(true, ct); }
-        catch { /* best-effort */ }
     }
 }

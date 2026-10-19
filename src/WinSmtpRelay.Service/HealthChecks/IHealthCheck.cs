@@ -13,6 +13,12 @@ public interface IHealthCheck
     /// <summary>Short name for logging which check ran/failed.</summary>
     string Name { get; }
 
+    /// <summary>
+    /// How long this check may run before the runner abandons it; null = the runner's default ceiling
+    /// (5 × <c>ProbeTimeoutSeconds</c>). A check that retries on purpose (smart-host probes) needs more.
+    /// </summary>
+    TimeSpan? MaxDuration => null;
+
     Task<IReadOnlyList<HealthFinding>> RunAsync(CancellationToken ct);
 }
 
@@ -38,6 +44,9 @@ public sealed record HealthFinding(
 public abstract class HealthCheckBase : IHealthCheck
 {
     public abstract string Name { get; }
+
+    /// <inheritdoc />
+    public virtual TimeSpan? MaxDuration => null;
 
     /// <summary>The category every finding from this check belongs to (one of <see cref="HealthCategories"/>).</summary>
     protected abstract string Category { get; }

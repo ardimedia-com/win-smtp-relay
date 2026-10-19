@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Daily report and self-check run at a local time** — Settings → Reporting now has both times: the daily
+  digest time **and** the self-check time (new; blank = 30 minutes before the digest, so the digest always
+  carries a fresh result), plus the time zone (blank = the server's time zone, or an IANA id such as
+  `Europe/Zurich`). Times are entered and shown as local wall-clock times, labelled with the zone, e.g.
+  "06:00 (Europe/Zurich)", and keep that wall-clock time across daylight-saving changes — a fixed UTC time moved
+  by an hour every spring and autumn (06:00 CEST = 04:00 UTC, 06:00 CET = 05:00 UTC). Every next run is still
+  computed and stored in UTC: a time inside the spring-forward gap runs at the first valid instant after it, a
+  time inside the autumn overlap runs once (first occurrence). The page shows the next self-check and digest in
+  local time and UTC; the digest's own timestamps are shown in the schedule's zone.
+- **Upgrade:** the existing digest time (stored in UTC) is converted once, on the first start of this version, into
+  the server's local time it means today — the next digest goes out at the same instant as before (e.g. 04:00 UTC
+  on a summer day becomes 06:00 local, and then stays 06:00 local in winter). The self-check, which ran at a fixed
+  05:30 UTC from appsettings (`HealthCheck:DailyTimeUtc`, now ignored), follows the digest (30 minutes earlier)
+  until a time of its own is set.
+- **New: `GET /api/settings/reporting`** (host admin, diag:read) — the schedule as local times + zone and the next
+  runs in UTC, read-only.
+
+### Fixed
+
+- **No ERROR for a single transient smart-host failure.** The self-check's smart-host probe now tries up to 3 times,
+  45 s apart (`HealthCheck:SmartHostProbeAttempts`, `HealthCheck:SmartHostRetryDelaySeconds`), before it reports a
+  send connector unreachable, and names the real cause of every failed attempt — DNS ("host unknown"), timeout,
+  connection refused/reset/closed, TLS (with the certificate chain status, e.g. `RevocationStatusUnknown`),
+  authentication. When a retry succeeds the finding is a WARNING "reachable after retry (first attempt: …)",
+  which does not trigger the immediate alert. A rejected login is still reported at once. Smart hosts are probed
+  concurrently.
+- **The first self-check after a service start waits for the network** — up to 5 minutes
+  (`HealthCheck:StartupNetworkWaitMinutes`) until the network is up and DNS answers, instead of reporting every
+  smart host unreachable right after boot or wake-up from standby.
+- **DNS lookup failures are "could not verify", never "record not published".** The deliverability checks (SPF,
+  DKIM, DMARC, the smart-host DKIM selector, public hostname, MX, reverse DNS) fall back to the system resolver
+  when the public resolvers fail (timeout, SERVFAIL, REFUSED); when no resolver answers, the record reads
+  *Could not verify* (a WARNING in the self-check, "Could not verify" on the Deliverability page) instead of
+  *Missing* / "mail will fail DMARC".
+- **"Bounced" in the daily report counts messages that finally failed** — a permanent rejection or retries
+  exhausted — per recipient, not each failed attempt. A message whose first attempt failed (e.g. smart host
+  unreachable) and whose retry was delivered counts as delivered; the new line **"Retried: n attempt(s), all
+  delivered later"** keeps such transient problems visible, and "Deferred" lists recipients still waiting for a
+  retry. The bounce-rate alert and the self-check's bounce-rate finding use the same count.
+
 ## [1.0.0-beta1-build78] - 2026-10-14
 
 ### Fixed

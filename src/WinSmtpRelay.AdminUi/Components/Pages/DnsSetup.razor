@@ -622,6 +622,7 @@ else
         DmarcAlignmentVerdict.DkimAligned => "badge-success",
         DmarcAlignmentVerdict.SpfConditional => "badge-warning",
         DmarcAlignmentVerdict.SmartHostDependent => "badge-info",
+        DmarcAlignmentVerdict.Unverified => "badge-warning",
         _ => "badge-error"
     };
 
@@ -630,6 +631,7 @@ else
         DmarcAlignmentVerdict.DkimAligned => "Passes (DKIM-aligned)",
         DmarcAlignmentVerdict.SpfConditional => "Conditional (SPF only)",
         DmarcAlignmentVerdict.SmartHostDependent => "Depends on the smart host",
+        DmarcAlignmentVerdict.Unverified => "Could not verify (DNS lookup failed)",
         _ => "Will fail"
     };
 
@@ -638,6 +640,7 @@ else
         DmarcAlignmentVerdict.DkimAligned => "var(--primary)",
         DmarcAlignmentVerdict.SpfConditional => "#d97706",
         DmarcAlignmentVerdict.SmartHostDependent => "var(--muted-foreground)",
+        DmarcAlignmentVerdict.Unverified => "#d97706",
         _ => "#dc2626"
     };
 
@@ -647,6 +650,7 @@ else
         DnsRecordStatus.Mismatch => "badge-warning",
         DnsRecordStatus.Missing => "badge-error",
         DnsRecordStatus.Listed => "badge-error",
+        DnsRecordStatus.Unverified => "badge-warning",
         _ => "badge-muted"
     };
 

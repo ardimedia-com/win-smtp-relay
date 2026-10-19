@@ -71,20 +71,22 @@ public sealed class QueueHealthCheck(
                 hint: "Check Connectivity and recent bounces."));
 
         // --- 24h bounce rate ---
-        var (delivered, bounced, deferred) = await CountLast24hAsync(ct);
-        var attempts = delivered + bounced + deferred;
+        // Per recipient: a failed attempt that a retry delivered is not a bounce.
+        var counts = await DeliveryOutcomeCounter.CountAsync(db, DateTimeOffset.UtcNow.AddHours(-24), ct);
+        var (delivered, bounced, deferred) = (counts.Delivered, counts.Bounced, counts.Deferred);
+        var attempts = counts.Recipients;
         if (attempts >= opts.BounceRateMinAttempts)
         {
-            var rate = 100.0 * bounced / attempts;
+            var rate = counts.BounceRatePercent;
             if (rate >= opts.BounceRateErrorPercent)
                 f.Add(Err("bounce-rate", $"Bounce rate {rate:F0}% in the last 24h",
-                    $"{bounced} of {attempts} delivery attempts bounced. A high bounce rate harms reputation and risks blocklisting.",
+                    $"{bounced} of {attempts} recipients finally failed. A high bounce rate harms reputation and risks blocklisting.",
                     hint: "Check recipient lists, sender domain auth (SPF/DKIM), and for a compromised account."));
             else if (rate >= opts.BounceRateWarningPercent)
                 f.Add(Warn("bounce-rate", $"Bounce rate {rate:F0}% in the last 24h",
-                    $"{bounced} of {attempts} delivery attempts bounced.", hint: "Watch for invalid recipients or a sender-domain auth problem."));
+                    $"{bounced} of {attempts} recipients finally failed.", hint: "Watch for invalid recipients or a sender-domain auth problem."));
             else
-                f.Add(Ok("bounce-rate", $"Bounce rate {rate:F0}% in the last 24h", $"{delivered} delivered, {bounced} bounced, {deferred} deferred."));
+                f.Add(Ok("bounce-rate", $"Bounce rate {rate:F0}% in the last 24h", $"{delivered} delivered, {bounced} bounced, {deferred} deferred, {counts.RetriedAttempts} failed attempt(s) delivered on retry."));
         }
 
         // --- Suppression-list spike (a list/domain that went bad) ---
@@ -140,22 +142,6 @@ public sealed class QueueHealthCheck(
         {
             yield return Info("disk", "Database size", $"Database is {sizeMb:F1} MB (free disk space could not be read).");
         }
-    }
-
-    /// <summary>Delivery-log counts over the last 24h (host-wide). Suppressed skips are excluded from bounces.</summary>
-    private async Task<(int delivered, int bounced, int deferred)> CountLast24hAsync(CancellationToken ct)
-    {
-        var since = DateTimeOffset.UtcNow.AddHours(-24);
-        var logs = await db.DeliveryLogs.AsNoTracking().IgnoreQueryFilters()
-            .Where(l => l.TimestampUtc >= since)
-            .Select(l => new { l.StatusCode, l.StatusMessage })
-            .ToListAsync(ct);
-
-        bool IsSuppressed(string? m) => m != null && m.StartsWith("Suppressed", StringComparison.OrdinalIgnoreCase);
-        var delivered = logs.Count(l => l.StatusCode.StartsWith('2'));
-        var deferred = logs.Count(l => l.StatusCode.StartsWith('4'));
-        var bounced = logs.Count(l => l.StatusCode.StartsWith('5') && !IsSuppressed(l.StatusMessage));
-        return (delivered, bounced, deferred);
     }
 
     private static string FormatAge(TimeSpan age) =>

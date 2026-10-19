@@ -15,7 +15,7 @@ namespace WinSmtpRelay.Storage.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.13");
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<int>", b =>
                 {
@@ -1228,6 +1228,9 @@ namespace WinSmtpRelay.Storage.Migrations
                     b.Property<int>("BounceRateAlertPercent")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("DailyTimeLocal")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("DailyTimeUtc")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1241,7 +1244,16 @@ namespace WinSmtpRelay.Storage.Migrations
                     b.Property<DateOnly?>("LastDigestSentDate")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("LastDigestSentUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RecipientAddress")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SelfCheckTimeLocal")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TimeZoneId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("UpdatedUtc")

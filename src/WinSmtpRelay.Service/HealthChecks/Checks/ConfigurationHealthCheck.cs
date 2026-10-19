@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Health;
 using WinSmtpRelay.Core.Interfaces;
@@ -66,6 +67,7 @@ public sealed class ConfigurationHealthCheck(
 
         // --- Reporting can actually send ---
         var report = await reporting.GetAsync(ct);
+        var schedule = ReportSchedule.From(report);
         if (report.Enabled)
         {
             if (string.IsNullOrWhiteSpace(report.RecipientAddress))
@@ -80,7 +82,8 @@ public sealed class ConfigurationHealthCheck(
                         "Email reporting is enabled but no from-address is configured (Reporting or Signup), so the relay can't send the digest or alerts.",
                         hint: "Set a from-address under Settings → Reporting or Host → Signup."));
                 else
-                    f.Add(Ok("reporting", "Reporting is configured", $"Daily digest to {report.RecipientAddress} at {report.DailyTimeUtc} UTC."));
+                    f.Add(Ok("reporting", "Reporting is configured", $"Daily digest to {report.RecipientAddress} at {schedule.Label(schedule.ReportTime)}, "
+                        + $"self-check at {schedule.Label(schedule.SelfCheckTime)}."));
             }
         }
         else

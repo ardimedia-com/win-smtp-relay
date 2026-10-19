@@ -384,10 +384,6 @@ else
                         <BbInput Id="report-from" @bind-Value="reportFrom" Placeholder="(uses the signup from-address)" />
                     </div>
                     <div class="form-group">
-                        <BbLabel For="daily-digest-time">Daily digest time (UTC, HH:mm)</BbLabel>
-                        <BbInput Id="daily-digest-time" @bind-Value="reportDailyTime" Placeholder="06:00" />
-                    </div>
-                    <div class="form-group">
                         <BbLabel For="bounce-rate-alert-threshold">Bounce-rate alert threshold (%)</BbLabel>
                         <BbInput Id="bounce-rate-alert-threshold" Type="InputType.Number" @bind-Value="reportBounceThreshold" />
                     </div>
@@ -395,6 +391,33 @@ else
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">
                     The recipient is required. Leave the from-address blank to use the signup/system from-address.
                     Set the threshold to <span class="mono">0</span> to disable the bounce-rate alert.
+                </p>
+            </div>
+            <div class="settings-group">
+                <div class="settings-group-title">Schedule</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <BbLabel For="daily-digest-time">Daily digest time (HH:mm, @scheduleZoneLabel)</BbLabel>
+                        <BbInput Id="daily-digest-time" @bind-Value="reportDailyTime" Placeholder="06:00" />
+                    </div>
+                    <div class="form-group">
+                        <BbLabel For="self-check-time">Daily self-check time (HH:mm, @scheduleZoneLabel)</BbLabel>
+                        <BbInput Id="self-check-time" @bind-Value="reportSelfCheckTime" Placeholder="@SelfCheckPlaceholder" />
+                    </div>
+                    <div class="form-group">
+                        <BbLabel For="schedule-time-zone">Time zone (IANA id)</BbLabel>
+                        <BbInput Id="schedule-time-zone" @bind-Value="reportTimeZone" Placeholder="@($"server time zone ({serverZoneLabel})")" />
+                    </div>
+                </div>
+                <p class="text-muted" style="font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">
+                    Times are local wall-clock times and stay put across daylight-saving changes. Leave the self-check
+                    time blank to run it 30 minutes before the digest, so the digest carries a fresh result. Leave the
+                    time zone blank to use the server's (<span class="mono">@serverZoneLabel</span>), or enter an IANA id
+                    such as <span class="mono">Europe/Zurich</span>.
+                    @if (!string.IsNullOrEmpty(scheduleSummary))
+                    {
+                        <br />@scheduleSummary
+                    }
                 </p>
             </div>
             <BbButton Variant="ButtonVariant.Default" @onclick="SaveReportingAsync" Class="mt-1">
@@ -458,6 +481,11 @@ else
     private string? reportRecipient;
     private string? reportFrom;
     private string reportDailyTime = "06:00";
+    private string? reportSelfCheckTime;
+    private string? reportTimeZone;
+    private string scheduleZoneLabel = "";
+    private string serverZoneLabel = "";
+    private string? scheduleSummary;
     private string reportBounceThreshold = "10";
     private string? reportingStatus;
 
@@ -511,7 +539,7 @@ else
         reportEnabled = reporting.Enabled;
         reportRecipient = reporting.RecipientAddress;
         reportFrom = reporting.FromAddress;
-        reportDailyTime = reporting.DailyTimeUtc;
+        LoadSchedule(reporting);
         reportBounceThreshold = reporting.BounceRateAlertPercent.ToString();
 
         isLoading = false;
@@ -713,14 +741,46 @@ else
     {
         var threshold = int.TryParse(reportBounceThreshold, out var t) ? Math.Clamp(t, 0, 100) : 10;
         using var scope = ScopeFactory.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IReportingSettingsService>()
-            .UpdateAsync(reportEnabled, reportRecipient, reportFrom, reportDailyTime, threshold);
+        var svc = scope.ServiceProvider.GetRequiredService<IReportingSettingsService>();
+        try
+        {
+            await svc.UpdateAsync(reportEnabled, reportRecipient, reportFrom, reportDailyTime, reportSelfCheckTime,
+                reportTimeZone, threshold);
+        }
+        catch (ArgumentException ex)
+        {
+            reportingStatus = ex.Message.Split(" (Parameter", 2)[0];
+            return;
+        }
         reportBounceThreshold = threshold.ToString();
+        LoadSchedule(await svc.GetAsync());
         reportingStatus = reportEnabled
             ? (string.IsNullOrWhiteSpace(reportRecipient)
                 ? "Saved, but reporting needs a recipient address to send anything."
                 : $"Reporting enabled — sending to {reportRecipient!.Trim()}.")
             : "Reporting disabled.";
     }
+
+    // The schedule as stored: local times + zone, and the next runs it produces (shown in the zone, with UTC).
+    private void LoadSchedule(ReportingSettings reporting)
+    {
+        var schedule = WinSmtpRelay.Core.ReportSchedule.From(reporting);
+        reportDailyTime = WinSmtpRelay.Core.DailySchedule.Format(schedule.ReportTime);
+        reportSelfCheckTime = schedule.SelfCheckFollowsReport ? null : WinSmtpRelay.Core.DailySchedule.Format(schedule.SelfCheckTime);
+        reportTimeZone = reporting.TimeZoneId;
+        scheduleZoneLabel = schedule.ZoneLabel;
+        serverZoneLabel = WinSmtpRelay.Core.ScheduleTimeZone.DisplayId(TimeZoneInfo.Local);
+
+        var now = DateTime.UtcNow;
+        var nextReport = schedule.NextReportUtc(now);
+        var nextCheck = schedule.NextSelfCheckUtc(now);
+        scheduleSummary = $"Next self-check {schedule.FormatLocal(nextCheck)} = {nextCheck:HH:mm} UTC; "
+            + $"next digest {schedule.FormatLocal(nextReport)} = {nextReport:HH:mm} UTC.";
+    }
+
+    private string SelfCheckPlaceholder =>
+        WinSmtpRelay.Core.DailySchedule.TryParseTime(reportDailyTime, out var r)
+            ? $"{WinSmtpRelay.Core.DailySchedule.Format(WinSmtpRelay.Core.ReportSchedule.DefaultSelfCheckFor(r))} (30 min before the digest)"
+            : "30 min before the digest";
 
 }

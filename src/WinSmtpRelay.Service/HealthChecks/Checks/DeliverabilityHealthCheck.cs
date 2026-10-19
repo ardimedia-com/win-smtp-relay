@@ -60,6 +60,8 @@ public sealed class DeliverabilityHealthCheck(
                     a.Summary, d.Domain),
                 DmarcAlignmentVerdict.SpfConditional => Warn("dmarc-alignment", $"{d.Domain}: DMARC depends on SPF alignment only", a.Summary, d.Domain,
                     "Configure a DKIM key for this domain so alignment is robust regardless of the envelope-from."),
+                DmarcAlignmentVerdict.Unverified => Warn("dmarc-alignment", $"{d.Domain}: could not verify the DMARC outcome", a.Summary, d.Domain,
+                    "A DNS lookup failed (no resolver answered) — usually transient; the next run checks again."),
                 DmarcAlignmentVerdict.SmartHostDependent => Info("dmarc-alignment", $"{d.Domain}: DMARC depends on the smart host", a.Summary, d.Domain,
                     "Check the domain authentication (DKIM) at the smart host."),
                 _ => Err("dmarc-alignment", $"{d.Domain}: mail will fail DMARC", a.Summary, d.Domain,
@@ -175,6 +177,9 @@ public sealed class DeliverabilityHealthCheck(
         {
             DnsRecordStatus.Ok => Ok(code, title, rec.Explanation, target),
             DnsRecordStatus.Listed => Err(code, title, rec.Explanation, target),
+            // A failed DNS query proves nothing about the record: a warning, never "not published".
+            DnsRecordStatus.Unverified => Warn(code, $"{title}: could not verify", rec.Explanation, target,
+                "A DNS lookup failed (public resolvers and the system resolver) — usually transient; the next run checks again."),
             DnsRecordStatus.Missing => new HealthFinding(Category, code, missing, title, rec.Explanation, target, hint),
             DnsRecordStatus.Mismatch => new HealthFinding(Category, code, mismatch, title, rec.Explanation, target, hint),
             _ => Info(code, title, rec.Explanation, target), // NotConfigured — nothing expected yet

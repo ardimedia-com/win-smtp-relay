@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Health;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Mail;
@@ -81,18 +82,18 @@ public class ReportingService(
         await CheckBlocklistIncidentsAsync(sp, queue, from, to, ct);
         await CheckBounceRateIncidentAsync(sp, queue, from, to, settings.BounceRateAlertPercent, ct);
 
-        // ---- Daily digest (once per UTC day, at/after the configured time) ----
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        if (settings.LastDigestSentDate != today &&
-            TimeOnly.TryParse(settings.DailyTimeUtc, out var sendAt) &&
-            TimeOnly.FromDateTime(DateTime.UtcNow) >= sendAt)
+        // ---- Daily digest (once per local day, at/after the configured local time) ----
+        var schedule = ReportSchedule.From(settings);
+        var now = DateTime.UtcNow;
+        if (schedule.IsDigestDue(settings, now))
         {
+            var today = schedule.LocalDate(now);
             // Capture the "since last report" cutoff from the CURRENT settings (still the previous send
             // moment) before MarkDigestSentAsync advances it.
-            var content = await BuildDigestAsync(sp, SuppressionReportCutoff(settings), ct);
+            var content = await BuildDigestAsync(sp, schedule, SuppressionReportCutoff(settings), ct);
             await SendAsync(queue, from, to, $"WIN-SMTP-RELAY daily report — {today:yyyy-MM-dd} — {Environment.MachineName}", content, ct);
-            await sp.GetRequiredService<IReportingSettingsService>().MarkDigestSentAsync(today, ct);
-            logger.LogInformation("Daily report sent to {Recipient}", to);
+            await sp.GetRequiredService<IReportingSettingsService>().MarkDigestSentAsync(DateTimeOffset.UtcNow, today, ct);
+            logger.LogInformation("Daily report sent to {Recipient} (scheduled {Time})", to, schedule.Label(schedule.ReportTime));
         }
     }
 
@@ -137,12 +138,13 @@ public class ReportingService(
         if (thresholdPercent <= 0)
             return;
 
-        var (delivered, bounced, deferred, _) = await CountLast24hAsync(sp, ct);
-        var attempts = delivered + bounced + deferred;
+        var counts = await CountLast24hAsync(sp, ct);
+        var attempts = counts.Recipients;
+        var bounced = counts.Bounced;
         if (attempts < MinAttemptsForBounceAlert)
             return;
 
-        var rate = 100.0 * bounced / attempts;
+        var rate = counts.BounceRatePercent;
         if (rate < thresholdPercent)
             return;
 
@@ -156,7 +158,7 @@ public class ReportingService(
                 Title = $"Bounce rate {rate:F0}% over the last 24 hours",
                 Paragraphs =
                 [
-                    $"The outbound bounce rate over the last 24 hours is {rate:F1}% ({bounced} bounced of {attempts} attempts), " +
+                    $"The outbound bounce rate over the last 24 hours is {rate:F1}% ({bounced} of {attempts} recipients finally failed), " +
                     $"above the {thresholdPercent}% alert threshold.",
                     "A high bounce rate harms sending reputation and can lead to blocklisting. Check for invalid " +
                     "recipient lists, a misconfigured sender domain (SPF/DKIM), or a compromised account. The " +
@@ -167,11 +169,9 @@ public class ReportingService(
         logger.LogWarning("Reporting: 24h bounce rate {Rate:F1}% exceeds {Threshold}% — alert sent", rate, thresholdPercent);
     }
 
-    private async Task<SystemEmailContent> BuildDigestAsync(IServiceProvider sp, DateTimeOffset newlySuppressedSince, CancellationToken ct)
+    private async Task<SystemEmailContent> BuildDigestAsync(IServiceProvider sp, ReportSchedule schedule, DateTimeOffset newlySuppressedSince, CancellationToken ct)
     {
-        var (delivered, bounced, deferred, suppressed) = await CountLast24hAsync(sp, ct);
-        var attempts = delivered + bounced + deferred;
-        var rate = attempts > 0 ? 100.0 * bounced / attempts : 0;
+        var counts = await CountLast24hAsync(sp, ct);
 
         var queueDepth = await sp.GetRequiredService<IMessageQueue>().GetQueueDepthAsync(ct);
         var db = sp.GetRequiredService<RelayDbContext>();
@@ -187,10 +187,11 @@ public class ReportingService(
 
         var sb = new StringBuilder();
         sb.AppendLine("Last 24 hours (all tenants):");
-        sb.AppendLine($"  Delivered:  {delivered}");
-        sb.AppendLine($"  Bounced:    {bounced}  (bounce rate {rate:F1}%)");
-        sb.AppendLine($"  Deferred:   {deferred}");
-        sb.AppendLine($"  Suppressed: {suppressed} (skipped — on the suppression list)");
+        sb.AppendLine($"  Delivered:  {counts.Delivered}");
+        sb.AppendLine($"  Bounced:    {counts.Bounced}  (bounce rate {counts.BounceRatePercent:F1}% — finally failed: rejected or retries exhausted)");
+        sb.AppendLine($"  Retried:    {DescribeRetried(counts)}");
+        sb.AppendLine($"  Deferred:   {counts.Deferred}{(counts.Deferred > 0 ? " (still queued for another attempt)" : "")}");
+        sb.AppendLine($"  Suppressed: {counts.Suppressed} (skipped — on the suppression list)");
         sb.AppendLine();
         sb.AppendLine($"Queue depth now:       {queueDepth}");
         sb.AppendLine($"Suppression list size: {suppressionCount}");
@@ -202,7 +203,7 @@ public class ReportingService(
             var shown = newlySuppressed.Take(MaxNewSuppressionsListed).ToList();
             var addrWidth = Math.Min(50, shown.Max(e => e.Address.Length));
             foreach (var e in shown)
-                sb.AppendLine($"  {e.Address.PadRight(addrWidth)}  {e.Reason,-10}  {e.CreatedUtc.UtcDateTime:yyyy-MM-dd HH:mm} UTC");
+                sb.AppendLine($"  {e.Address.PadRight(addrWidth)}  {e.Reason,-10}  {schedule.FormatLocal(e.CreatedUtc)}");
             if (newlySuppressed.Count > shown.Count)
                 sb.AppendLine($"  … and {newlySuppressed.Count - shown.Count} more — see the Suppression List page.");
         }
@@ -232,12 +233,12 @@ public class ReportingService(
         }
 
         await AppendRejectedSubmissionsSectionAsync(db, sb, ct);
-        await AppendHealthSectionAsync(sp, sb, ct);
+        await AppendHealthSectionAsync(sp, schedule, sb, ct);
 
         return new SystemEmailContent
         {
             Title = "Daily report",
-            Paragraphs = [$"Activity summary as of {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC, host {Environment.MachineName}."],
+            Paragraphs = [$"Activity summary as of {schedule.FormatLocal(DateTimeOffset.UtcNow)}, host {Environment.MachineName}."],
             MonospaceBlock = sb.ToString(),
             FooterNote = "Sent by WIN-SMTP-RELAY email reporting — configure under Settings → Reporting.",
             // The digest is the one mail whose block is fixed-width tabular output; at the default card
@@ -300,7 +301,7 @@ public class ReportingService(
     }
 
     /// <summary>Appends the latest daily self-check summary (Setup &amp; Health) to the digest body.</summary>
-    private static async Task AppendHealthSectionAsync(IServiceProvider sp, StringBuilder sb, CancellationToken ct)
+    private static async Task AppendHealthSectionAsync(IServiceProvider sp, ReportSchedule schedule, StringBuilder sb, CancellationToken ct)
     {
         var snapshot = await sp.GetRequiredService<IHealthCheckSnapshotService>().GetLatestAsync(ct);
         sb.AppendLine();
@@ -310,7 +311,7 @@ public class ReportingService(
             return;
         }
 
-        sb.AppendLine($"Setup & health self-check (as of {snapshot.RunUtc:yyyy-MM-dd HH:mm} UTC):");
+        sb.AppendLine($"Setup & health self-check (as of {schedule.FormatLocal(snapshot.RunUtc)}):");
         sb.AppendLine($"  Errors:   {snapshot.ErrorCount}");
         sb.AppendLine($"  Warnings: {snapshot.WarningCount}");
         sb.AppendLine($"  OK:       {snapshot.OkCount}");
@@ -336,36 +337,28 @@ public class ReportingService(
             sb.AppendLine($"  … and {snapshot.IssueCount - issues.Count} more — see Diagnostics in the admin UI.");
     }
 
-    /// <summary>Delivery-log counts over the last 24h (host-wide). Suppressed skips are excluded from bounces.</summary>
-    private static async Task<(int delivered, int bounced, int deferred, int suppressed)> CountLast24hAsync(IServiceProvider sp, CancellationToken ct)
-    {
-        var db = sp.GetRequiredService<RelayDbContext>();
-        var since = DateTimeOffset.UtcNow.AddHours(-24);
-        var logs = await db.DeliveryLogs.AsNoTracking().IgnoreQueryFilters()
-            .Where(l => l.TimestampUtc >= since)
-            .Select(l => new { l.StatusCode, l.StatusMessage })
-            .ToListAsync(ct);
+    /// <summary>
+    /// Per-recipient delivery outcomes over the last 24h (host-wide): a recipient counts as bounced only when its
+    /// message finally failed, not for single failed attempts that a retry delivered (those are "retried").
+    /// </summary>
+    private static Task<DeliveryOutcomeCounts> CountLast24hAsync(IServiceProvider sp, CancellationToken ct) =>
+        DeliveryOutcomeCounter.CountAsync(sp.GetRequiredService<RelayDbContext>(), DateTimeOffset.UtcNow.AddHours(-24), ct);
 
-        var suppressed = logs.Count(l => l.StatusMessage != null && l.StatusMessage.StartsWith("Suppressed", StringComparison.OrdinalIgnoreCase));
-        var delivered = logs.Count(l => l.StatusCode.StartsWith('2'));
-        var deferred = logs.Count(l => l.StatusCode.StartsWith('4'));
-        var bounced = logs.Count(l => l.StatusCode.StartsWith('5')
-            && !(l.StatusMessage != null && l.StatusMessage.StartsWith("Suppressed", StringComparison.OrdinalIgnoreCase)));
-        return (delivered, bounced, deferred, suppressed);
-    }
+    /// <summary>The digest's "Retried" line: failed attempts whose recipient was delivered by a later attempt.</summary>
+    internal static string DescribeRetried(DeliveryOutcomeCounts counts) => counts.RetriedAttempts switch
+    {
+        0 => "0",
+        var n => $"{n} attempt(s), all delivered later",
+    };
 
     /// <summary>
     /// Start of the "newly suppressed since the last report" window: the moment the previous daily digest
-    /// was sent (its date at the configured send time, UTC). Falls back to the last 24h on the very first
-    /// report. Deriving it from the previous send moment — rather than a fixed 24h window — means a skipped
-    /// day is still covered: the next report lists everything suppressed since the last one actually went out.
+    /// was sent. Falls back to the last 24h on the very first report. Deriving it from the previous send
+    /// moment — rather than a fixed 24h window — means a skipped day is still covered: the next report lists
+    /// everything suppressed since the last one actually went out.
     /// </summary>
-    private static DateTimeOffset SuppressionReportCutoff(ReportingSettings settings)
-    {
-        if (settings.LastDigestSentDate is { } last && TimeOnly.TryParse(settings.DailyTimeUtc, out var t))
-            return new DateTimeOffset(last.ToDateTime(t), TimeSpan.Zero);
-        return DateTimeOffset.UtcNow.AddHours(-24);
-    }
+    private static DateTimeOffset SuppressionReportCutoff(ReportingSettings settings) =>
+        settings.LastDigestSentUtc ?? DateTimeOffset.UtcNow.AddHours(-24);
 
     private bool ShouldAlert(string key, TimeSpan cooldown)
     {

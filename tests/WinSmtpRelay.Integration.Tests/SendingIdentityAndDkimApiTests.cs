@@ -150,6 +150,38 @@ public class SendingIdentityAndDkimApiTests
         Assert.AreEqual(HttpStatusCode.Forbidden, (await _hostDiagOnly.GetAsync("/api/settings/sending-identity")).StatusCode);
     }
 
+    // ---- Reporting schedule (T225) ----
+
+    [TestMethod]
+    [TestCategory("Integration")]
+    public async Task ReportingSchedule_LegacyUtcRow_IsUpgradedToLocalTime_AndReadable()
+    {
+        // A row as build78 wrote it: only the fixed UTC digest time, no local time / zone columns filled.
+        using (var scope = _app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO ReportingSettings (Id, Enabled, RecipientAddress, DailyTimeUtc, BounceRateAlertPercent, UpdatedUtc) " +
+                "VALUES (1, 1, 'ops@example.com', '04:00', 10, '2026-10-01T00:00:00.0000000Z')");
+        }
+
+        var today0400Utc = DateTime.SpecifyKind(DateTime.UtcNow.Date.AddHours(4), DateTimeKind.Utc);
+        var expectedLocal = TimeOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(today0400Utc, TimeZoneInfo.Local));
+
+        var schedule = await _hostDiagOnly.GetFromJsonAsync<ReportingScheduleResponse>("/api/settings/reporting");
+        Assert.IsNotNull(schedule);
+        Assert.IsTrue(schedule.Enabled);
+        Assert.IsTrue(schedule.RecipientConfigured);
+        Assert.AreEqual(expectedLocal.ToString("HH:mm"), schedule.ReportTime, "the old UTC time keeps its instant, as local time");
+        Assert.AreEqual(expectedLocal.AddMinutes(-30).ToString("HH:mm"), schedule.SelfCheckTime, "self-check 30 min before the digest");
+        Assert.IsTrue(schedule.SelfCheckFollowsReport);
+        Assert.IsTrue(schedule.TimeZoneIsServerDefault);
+        Assert.IsTrue(schedule.NextSelfCheckUtc > DateTimeOffset.UtcNow && schedule.NextReportUtc > DateTimeOffset.UtcNow);
+
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await _tenantAdmin.GetAsync("/api/settings/reporting")).StatusCode,
+            "host-level setting");
+    }
+
     // ---- DKIM keys (T7) ----
 
     private async Task AcceptSenderDomainAsync(HttpClient client, string domain)

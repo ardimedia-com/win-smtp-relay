@@ -13,10 +13,14 @@ using WinSmtpRelay.Core.Models;
 namespace WinSmtpRelay.Service.HealthChecks;
 
 /// <summary>
-/// Runs the daily self-check on a schedule (and once shortly after startup so the page/digest always have
-/// data), then — if a NEW blocking finding appeared since the previous run — sends an immediate alert through
+/// Runs the daily self-check on a schedule (and once shortly after startup — when the network and DNS answer —
+/// so the page/digest always have data), then — if a NEW blocking finding appeared since the previous run — sends an immediate alert through
 /// the relay's own pipeline to the configured reporting recipient. The daily digest itself carries the full
 /// summary; this service exists so a brand-new blocking problem doesn't wait until the next digest.
+/// <para>
+/// The run time is a local time of day from Settings → Reporting (default: 30 minutes before the digest), read
+/// on every wake-up so a change applies without a restart; the next run is computed in UTC, DST-safe.
+/// </para>
 /// </summary>
 public class HealthCheckService(
     IServiceScopeFactory scopeFactory,
@@ -41,20 +45,40 @@ public class HealthCheckService(
             return;
         }
 
-        logger.LogInformation("Self-check service starting (daily at {Time} UTC)", opts.DailyTimeUtc);
+        logger.LogInformation("Self-check service starting");
 
         // Initial run a short while after startup: populates the page/digest and verifies a fresh install,
-        // without competing with the rest of startup.
-        try { await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); }
+        // without competing with the rest of startup — and only once the network and DNS answer (bounded), so a
+        // start right after boot or wake-up does not report every smart host as unreachable.
+        try
+        {
+            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            var ready = await StartupGate.WaitUntilReadyAsync(NetworkReadyAsync,
+                TimeSpan.FromMinutes(Math.Max(0, opts.StartupNetworkWaitMinutes)), TimeSpan.FromSeconds(15), stoppingToken);
+            if (!ready)
+                logger.LogWarning("Self-check: network/DNS still not ready after {Minutes} min — running anyway", opts.StartupNetworkWaitMinutes);
+        }
         catch (OperationCanceledException) { return; }
         await RunOnceAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (!await WaitForNextRunAsync(opts.DailyTimeUtc, stoppingToken))
+            if (!await WaitForNextRunAsync(stoppingToken))
                 break;
             await RunOnceAsync(stoppingToken);
         }
+    }
+
+    // Network up + a public name resolves through the system resolver.
+    private async Task<bool> NetworkReadyAsync(CancellationToken ct)
+    {
+        if (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
+            return false;
+        var probeHost = string.IsNullOrWhiteSpace(options.Value.Outbound25TestDomain) ? "gmail.com" : options.Value.Outbound25TestDomain.Trim();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+        var addresses = await System.Net.Dns.GetHostAddressesAsync(probeHost, cts.Token);
+        return addresses.Length > 0;
     }
 
     private async Task RunOnceAsync(CancellationToken ct)
@@ -154,23 +178,48 @@ public class HealthCheckService(
 
     /// <summary>
     /// Sleeps (in capped chunks, for responsive shutdown) until the next configured run time. The target is
-    /// fixed when the wait starts — re-computing it on every wake-up would always yield tomorrow once the
-    /// target minute is reached, so the scheduled run never happened (only the startup run did).
+    /// measured from the moment the wait STARTED — re-computing it from "now" on every wake-up would always yield
+    /// tomorrow once the target minute is reached, so the scheduled run never happened (only the startup run
+    /// did). The configured time is re-read on every wake-up, so a change under Settings → Reporting applies to
+    /// the current wait.
     /// </summary>
-    private async Task<bool> WaitForNextRunAsync(string dailyTimeUtc, CancellationToken ct)
+    private async Task<bool> WaitForNextRunAsync(CancellationToken ct)
     {
-        var nextRun = DailySchedule.NextRunUtc(dailyTimeUtc, new TimeOnly(5, 30), DateTime.UtcNow);
-        logger.LogInformation("Next self-check at {Time} UTC (in ~{Delay})", dailyTimeUtc, nextRun - DateTime.UtcNow);
-
+        var waitStartedUtc = DateTime.UtcNow;
+        string? logged = null;
         while (!ct.IsCancellationRequested)
         {
+            ReportSchedule schedule;
+            try { schedule = await GetScheduleAsync(ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return false; }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Self-check: reading the schedule failed — using the default");
+                schedule = ReportSchedule.From(new ReportingSettings());
+            }
+
+            var nextRun = schedule.NextSelfCheckUtc(waitStartedUtc);
             var wait = nextRun - DateTime.UtcNow;
             if (wait <= TimeSpan.Zero)
                 return true;
+
+            var label = schedule.Label(schedule.SelfCheckTime);
+            if (logged != label)
+            {
+                logger.LogInformation("Next self-check at {Time} = {Utc:yyyy-MM-dd HH:mm} UTC (in ~{Delay})", label, nextRun, wait);
+                logged = label;
+            }
 
             try { await Task.Delay(wait < PollInterval ? wait : PollInterval, ct); }
             catch (OperationCanceledException) { return false; }
         }
         return false;
+    }
+
+    private async Task<ReportSchedule> GetScheduleAsync(CancellationToken ct)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var settings = await scope.ServiceProvider.GetRequiredService<IReportingSettingsService>().GetAsync(ct);
+        return ReportSchedule.From(settings);
     }
 }
