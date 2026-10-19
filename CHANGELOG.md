@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build79] - 2026-10-19
+
 ### Changed
 
 - **Daily report and self-check run at a local time** — Settings → Reporting now has both times: the daily
