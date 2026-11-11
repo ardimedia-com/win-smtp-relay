@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build81] - 2026-11-11
+
 ### Fixed
 - The upgrade to build80 kept a network-reachable admin UI bound to the network but removed its firewall rule, so
   the admin UI could no longer be reached from other computers (the recorded choice had moved to the installer's own
