@@ -3,14 +3,27 @@
   <PropertyGroup>
     <!--
       Single source of truth for the product version.
-      CI overrides this via -p:Version=x.y.z when building from a git tag.
-      Increment manually here when starting work on a new version.
+
+      Version      - the semantic product version (major.minor.patch), shown with the suffix in the admin UI.
+      BuildNumber  - a counter that grows with EVERY release build (build79, build80, ...). It is the third
+                     field of the MSI ProductVersion, so every release is a strictly greater Windows Installer
+                     version and a normal MajorUpgrade replaces the previous build (decision T1077). Never
+                     reuse or lower it.
+      VersionSuffix - the pre-release label; for builds it ends in "-build<BuildNumber>".
+
+      CI overrides all three from the git tag (vX.Y.Z-<label>-build<N>), see .github/workflows/release.yml.
+      Increment BuildNumber (and the suffix) here when preparing the next release.
     -->
     <Version>1.0.0</Version>
-    <VersionSuffix Condition="'$(VersionSuffix)' == ''">beta1-build79</VersionSuffix>
+    <BuildNumber Condition="'$(BuildNumber)' == ''">79</BuildNumber>
+    <VersionSuffix Condition="'$(VersionSuffix)' == ''">beta1-build$(BuildNumber)</VersionSuffix>
 
-    <!-- File version: full version for Windows file properties -->
-    <FileVersion>$(Version).0</FileVersion>
+    <!-- Windows Installer version: major.minor.BuildNumber (each field <= 65535; MSI compares only the
+         first three fields, which is why the build number lives in the third one). -->
+    <MsiProductVersion>$([System.Version]::Parse('$(Version)').Major).$([System.Version]::Parse('$(Version)').Minor).$(BuildNumber)</MsiProductVersion>
+
+    <!-- File version follows the MSI version, so binaries of a later build always carry a higher version. -->
+    <FileVersion>$(MsiProductVersion).0</FileVersion>
 
     <!-- Prevent .NET from appending the git commit hash to InformationalVersion -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
@@ -22,6 +35,24 @@
     <Product>WinSmtpRelay</Product>
     <Company>ARDIMEDIA</Company>
     <Copyright>Copyright (c) 2026 ARDIMEDIA</Copyright>
+  </PropertyGroup>
+
+  <!--
+    Reproducible restores (review finding M21): every project restores against a committed packages.lock.json.
+    The floating versions in the project files (10.*, 4.*, ...) only move when a developer runs
+    "dotnet restore" with the force-evaluate switch and commits the changed lock files. CI restores in locked mode, so a
+    package version that is not in a lock file fails the build instead of slipping in silently.
+  -->
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(GITHUB_ACTIONS)' == 'true'">true</RestoreLockedMode>
+  </PropertyGroup>
+
+  <!-- The service is published for win-x64 (self-contained and framework-dependent), and "dotnet publish -r win-x64"
+       restores every referenced src project for that RID too. Declaring the RID on all src projects lets their lock
+       files carry the win-x64 graph, so the locked-mode publish restore in CI resolves without changes. -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src'))">
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
 </Project>

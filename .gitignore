@@ -50,10 +50,15 @@ ehthumbs.db
 Desktop.ini
 .DS_Store
 
-## SQLite databases (local dev)
+## SQLite databases (local dev) and their backups - they hold mail bodies, never commit them
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
+*.db.bak*
+
+## Machine-local secrets (appsettings.Local.json is loaded optionally, never committed)
+appsettings.Local.json
 
 ## Key material — never commit certificates or private keys (see code-signing rules)
 *.pfx

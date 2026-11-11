@@ -4,6 +4,32 @@
 
   <Fragment>
 
+    <!-- ============================================================
+         Folder layout (decision T1076)
+           Program folder  [INSTALLFOLDER]                       binaries only; NetworkService: Read & Execute
+           Data folder     %ProgramData%\Ardimedia\WinSmtpRelay\ everything the service writes; NetworkService: Modify
+               appsettings.json                  configuration (installed once, then the operator's file)
+               appsettings.Production.json       admin port / bind address (written by WriteAdminConfig)
+               appsettings.Local.json            optional machine-local secrets (operator)
+               winsmtprelay.db (+ -wal, -shm)    the mail database
+               keys\                             ASP.NET Core Data Protection key ring
+               admin-cert.pfx                    generated self-signed admin-UI certificate
+               updates\                          update drop folder (service downloads here)
+               updater-work\                     SYSTEM-only copy the updater verifies and installs
+               .migrated                         marker: data of an older install was moved here
+         The ACLs are set by the HardenFolders custom action (Package.wxs), not with PermissionEx, so every folder gets
+         an explicit list with inheritance broken. The data folder Id is not a public property on purpose: the service
+         always uses %ProgramData%\Ardimedia\WinSmtpRelay, so it must not be redirected from the command line.
+         ============================================================ -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="WsrArdimediaFolder" Name="Ardimedia">
+        <Directory Id="WsrDataFolder" Name="WinSmtpRelay">
+          <Directory Id="UpdateDropFolder" Name="updates" />
+          <Directory Id="UpdaterWorkFolder" Name="updater-work" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
     <!-- Windows Service registration -->
     <Component Id="ServiceComponent" Directory="INSTALLFOLDER">
       <File Id="ServiceExe" Source="$(var.HarvestPath)\WinSmtpRelay.Service.exe" KeyPath="yes" />
@@ -25,8 +51,7 @@
       </ServiceInstall>
 
       <!-- Stop on both install (for file replacement) and uninstall.
-           Remove service definition only on uninstall.
-           Service start is handled by the exit dialog checkbox + deferred CA for upgrades. -->
+           Remove service definition only on uninstall. -->
       <ServiceControl Id="StopWinSmtpRelay"
                       Name="WinSmtpRelay"
                       Stop="both"
@@ -34,66 +59,124 @@
                       Wait="yes" />
 
       <!-- Start the service during install via MSI's StartServices action, which runs in the ELEVATED
-           execute sequence. (The previous mechanism started it from the ExitDlg in the un-elevated UI
-           sequence, where sc.exe start is denied, so the service silently never started.) Wait="no" so a
-           slow/failed start can't roll back the install — the service is auto-start with restart recovery. -->
+           execute sequence. Wait="no" so a slow/failed start can't roll back the install — the service is
+           auto-start with restart recovery. -->
       <ServiceControl Id="StartWinSmtpRelay"
                       Name="WinSmtpRelay"
                       Start="install"
                       Wait="no" />
     </Component>
 
-    <!-- Configuration file — preserved on upgrade, kept on uninstall -->
-    <Component Id="ConfigComponent" Directory="INSTALLFOLDER" NeverOverwrite="yes" Permanent="yes">
+    <!-- The data folder itself (removed on uninstall only when empty; REMOVEDATA=1 deletes its content). -->
+    <Component Id="DataFolderComponent" Directory="WsrDataFolder" Guid="5f0c7a3e-91d4-4b6a-a8e2-3c4d5e6f7a81">
+      <CreateFolder />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="DataFolder"
+                     Type="string" Value="[WsrDataFolder]" KeyPath="yes" />
+    </Component>
+
+    <!-- Configuration file in the data folder — installed once, then it is the operator's file: never overwritten on
+         upgrade, kept on uninstall. On the first upgrade from a version that kept it in the program folder, the
+         MigrateLegacyData custom action moves the existing file here BEFORE InstallFiles, so the operator's file wins. -->
+    <Component Id="ConfigComponent" Directory="WsrDataFolder" Guid="0e6b3c2d-7a49-4f18-9b5c-d2e1f0a3b4c6"
+               NeverOverwrite="yes" Permanent="yes">
       <File Id="AppSettings" Source="$(var.HarvestPath)\appsettings.json" KeyPath="yes" />
     </Component>
 
-    <!-- Windows Firewall inbound rules for SMTP and Admin UI -->
-    <Component Id="FirewallRules" Directory="INSTALLFOLDER" Guid="a1e7c3f9-2d4b-4e8a-9f6c-5b3d1a0e7f2c">
-      <RegistryKey Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" ForceCreateOnInstall="yes">
-        <RegistryValue Name="FirewallConfigured" Type="integer" Value="1" KeyPath="yes" />
-        <!-- Persist the chosen admin port so a major upgrade (where CheckPorts/ReadExistingConfig don't
-             run) can recover it via the WSR_SAVEDPORT RegistrySearch in Package.wxs. -->
+    <!-- ============================================================
+         Installer state: HKLM\SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup. A sibling of the service's key, NOT a sub-key,
+         so it inherits only the default HKLM\SOFTWARE permissions (Administrators/SYSTEM write, Users read). The
+         service account cannot change it, which is why the next upgrade may restore the admin port, network access
+         and firewall choices from it (review finding H14). FirewallState marks that the choices below are recorded.
+         ============================================================ -->
+    <Component Id="InstallerState" Directory="INSTALLFOLDER" Guid="7c2e9d41-3b5a-4f6e-8a17-0d9c4b2e5f63">
+      <RegistryKey Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" ForceCreateOnInstall="yes">
+        <RegistryValue Name="FirewallState" Type="integer" Value="1" KeyPath="yes" />
         <RegistryValue Name="AdminUiPort" Type="string" Value="[ADMINUIPORT]" />
-        <!-- Grant NetworkService write access so the service can write the ServiceRunning flag -->
-        <util:PermissionEx User="NT AUTHORITY\NetworkService" GenericAll="yes" />
       </RegistryKey>
-
-      <fw:FirewallException Id="SmtpPort25"
-                            Name="WinSmtpRelay SMTP (25)"
-                            Port="25"
-                            Protocol="tcp"
-                            Scope="any"
-                            Profile="all" />
-
-      <fw:FirewallException Id="SmtpPort587"
-                            Name="WinSmtpRelay Submission (587)"
-                            Port="587"
-                            Protocol="tcp"
-                            Scope="any"
-                            Profile="all" />
-
-      <fw:FirewallException Id="SmtpPort465"
-                            Name="WinSmtpRelay SMTPS (465)"
-                            Port="465"
-                            Protocol="tcp"
-                            Scope="any"
-                            Profile="all" />
-
     </Component>
 
-    <!-- Admin-UI firewall rule — opened ONLY when the operator chose network access (NETWORKACCESS=1).
-         Without it the admin UI binds to 127.0.0.1 and needs no firewall opening (secure default). -->
-    <Component Id="AdminUiFirewall" Directory="INSTALLFOLDER" Guid="d8c1f4a2-7b6e-4a3c-9e2f-1c5b8a0d4f6e"
-               Condition="NETWORKACCESS = &quot;1&quot;">
-      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" Name="AdminUiFirewall"
+    <!-- The service's own state key (ServiceRunning, ResetAdminPassword). The service may read and write it; the
+         installer only reads ServiceRunning to decide whether to restart the service after an upgrade. Nothing that
+         configures the installation is read from here any more. -->
+    <Component Id="ServiceStateRegistry" Directory="INSTALLFOLDER" Guid="3a8f6d2c-5e14-4b97-9c0a-e7b1d4f2a856">
+      <RegistryKey Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" ForceCreateOnInstall="yes">
+        <RegistryValue Name="ServiceStateKey" Type="integer" Value="1" KeyPath="yes" />
+        <util:PermissionEx User="NT AUTHORITY\NetworkService" GenericRead="yes" GenericWrite="yes" />
+      </RegistryKey>
+    </Component>
+
+    <!-- ============================================================
+         Windows Firewall (review finding M22). Only the ports chosen through installer properties are opened, on
+         the Domain and Private profiles; the Public profile only with FIREWALLPUBLIC=1.
+           FIREWALLSMTP=1        port 25   (default on — the default listener)
+           FIREWALLSUBMISSION=1  port 587  (default off — open it when a 587 listener is configured)
+           FIREWALLSMTPS=1       port 465  (default off — open it when an implicit-TLS listener is configured)
+           FIREWALLPUBLIC=1      also on the Public profile (default off)
+         The choices are recorded in the installer key and restored on the next upgrade (Package.wxs). Transitive
+         re-evaluates the conditions on a Repair/Change with new property values.
+         ============================================================ -->
+    <Component Id="FirewallSmtp" Directory="INSTALLFOLDER" Guid="9b4d2e61-0c3f-4a85-b7e9-1f6a2c8d3e04"
+               Condition="FIREWALLSMTP = &quot;1&quot;" Transitive="yes">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="FirewallSmtp" Type="integer" Value="1" KeyPath="yes" />
+      <fw:FirewallException Id="Smtp25Domain" Name="WinSmtpRelay SMTP (25) - Domain" Port="25" Protocol="tcp" Scope="any" Profile="domain" />
+      <fw:FirewallException Id="Smtp25Private" Name="WinSmtpRelay SMTP (25) - Private" Port="25" Protocol="tcp" Scope="any" Profile="private" />
+    </Component>
+    <Component Id="FirewallSmtpPublic" Directory="INSTALLFOLDER" Guid="2e7f1a93-6d58-4c0b-9e24-8b3a5d1f7c96"
+               Condition="FIREWALLSMTP = &quot;1&quot; AND FIREWALLPUBLIC = &quot;1&quot;" Transitive="yes">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="FirewallSmtpPublic" Type="integer" Value="1" KeyPath="yes" />
+      <fw:FirewallException Id="Smtp25Public" Name="WinSmtpRelay SMTP (25) - Public" Port="25" Protocol="tcp" Scope="any" Profile="public" />
+    </Component>
+
+    <Component Id="FirewallSubmission" Directory="INSTALLFOLDER" Guid="c6a03f28-4b1e-4d97-8f5a-2e9b7c0d1a35"
+               Condition="FIREWALLSUBMISSION = &quot;1&quot;" Transitive="yes">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="FirewallSubmission" Type="integer" Value="1" KeyPath="yes" />
+      <fw:FirewallException Id="Smtp587Domain" Name="WinSmtpRelay Submission (587) - Domain" Port="587" Protocol="tcp" Scope="any" Profile="domain" />
+      <fw:FirewallException Id="Smtp587Private" Name="WinSmtpRelay Submission (587) - Private" Port="587" Protocol="tcp" Scope="any" Profile="private" />
+    </Component>
+    <Component Id="FirewallSubmissionPublic" Directory="INSTALLFOLDER" Guid="81d5b7e4-2a96-4f3c-b0e8-6c4f9a2d5b17"
+               Condition="FIREWALLSUBMISSION = &quot;1&quot; AND FIREWALLPUBLIC = &quot;1&quot;" Transitive="yes">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="FirewallSubmissionPublic" Type="integer" Value="1" KeyPath="yes" />
+      <fw:FirewallException Id="Smtp587Public" Name="WinSmtpRelay Submission (587) - Public" Port="587" Protocol="tcp" Scope="any" Profile="public" />
+    </Component>
+
+    <Component Id="FirewallSmtps" Directory="INSTALLFOLDER" Guid="e4f92c17-8d3b-4a60-a5c1-7b2e9f4d0c58"
+               Condition="FIREWALLSMTPS = &quot;1&quot;" Transitive="yes">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="FirewallSmtps" Type="integer" Value="1" KeyPath="yes" />
+      <fw:FirewallException Id="Smtp465Domain" Name="WinSmtpRelay SMTPS (465) - Domain" Port="465" Protocol="tcp" Scope="any" Profile="domain" />
+      <fw:FirewallException Id="Smtp465Private" Name="WinSmtpRelay SMTPS (465) - Private" Port="465" Protocol="tcp" Scope="any" Profile="private" />
+    </Component>
+    <Component Id="FirewallSmtpsPublic" Directory="INSTALLFOLDER" Guid="5a1c8e39-f7d2-4b64-9a03-d8e6b2c4f719"
+               Condition="FIREWALLSMTPS = &quot;1&quot; AND FIREWALLPUBLIC = &quot;1&quot;" Transitive="yes">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="FirewallSmtpsPublic" Type="integer" Value="1" KeyPath="yes" />
+      <fw:FirewallException Id="Smtp465Public" Name="WinSmtpRelay SMTPS (465) - Public" Port="465" Protocol="tcp" Scope="any" Profile="public" />
+    </Component>
+
+    <!-- Records FIREWALLPUBLIC itself, so an upgrade restores the choice. -->
+    <Component Id="FirewallPublicState" Directory="INSTALLFOLDER" Guid="d07b3e85-1c4a-4f29-8e6d-a3f5c9b2e140"
+               Condition="FIREWALLPUBLIC = &quot;1&quot;" Transitive="yes">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="FirewallPublic" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- Admin-UI firewall rule — opened ONLY when the operator chose network access (NETWORKACCESS=1), on the
+         Domain and Private profiles. Scope: the local subnet by default; ADMINUIFIREWALLSCOPE=any opens it to every
+         remote address. Without network access the admin UI binds to 127.0.0.1 and needs no rule. -->
+    <Component Id="AdminUiFirewall" Directory="INSTALLFOLDER" Guid="4b9e2d07-6f1a-4c38-b5d2-9e0f7a3c1b64"
+               Condition="NETWORKACCESS = &quot;1&quot; AND NOT (ADMINUIFIREWALLSCOPE = &quot;any&quot;)" Transitive="yes">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="AdminUiFirewall"
                      Type="integer" Value="1" KeyPath="yes" />
-      <fw:FirewallException Id="AdminUiPort"
-                            Name="WinSmtpRelay Admin UI ([ADMINUIPORT])"
-                            Port="[ADMINUIPORT]"
-                            Protocol="tcp"
-                            Scope="any"
-                            Profile="all" />
+      <fw:FirewallException Id="AdminUiDomain" Name="WinSmtpRelay Admin UI ([ADMINUIPORT]) - Domain"
+                            Port="[ADMINUIPORT]" Protocol="tcp" Scope="localSubnet" Profile="domain" />
+      <fw:FirewallException Id="AdminUiPrivate" Name="WinSmtpRelay Admin UI ([ADMINUIPORT]) - Private"
+                            Port="[ADMINUIPORT]" Protocol="tcp" Scope="localSubnet" Profile="private" />
+    </Component>
+    <Component Id="AdminUiFirewallAny" Directory="INSTALLFOLDER" Guid="a8c51f3d-0e27-4b96-8d4a-6f2b1e9c7d35"
+               Condition="NETWORKACCESS = &quot;1&quot; AND ADMINUIFIREWALLSCOPE = &quot;any&quot;" Transitive="yes">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="AdminUiFirewallAny"
+                     Type="integer" Value="1" KeyPath="yes" />
+      <fw:FirewallException Id="AdminUiAnyDomain" Name="WinSmtpRelay Admin UI ([ADMINUIPORT]) - Domain"
+                            Port="[ADMINUIPORT]" Protocol="tcp" Scope="any" Profile="domain" />
+      <fw:FirewallException Id="AdminUiAnyPrivate" Name="WinSmtpRelay Admin UI ([ADMINUIPORT]) - Private"
+                            Port="[ADMINUIPORT]" Protocol="tcp" Scope="any" Profile="private" />
     </Component>
 
     <!-- Register Windows Event Log source (requires elevation — done at install time) -->
@@ -108,55 +191,25 @@
                      KeyPath="yes" />
     </Component>
 
-    <!-- Grant NetworkService full access for SQLite database (needs create, write, lock, WAL journals) -->
-    <Component Id="InstallDirPermissions" Directory="INSTALLFOLDER" Guid="b2f8d4e0-3c5a-4f9b-a0d7-6c4e2b1f8a3d">
-      <CreateFolder>
-        <util:PermissionEx User="NT AUTHORITY\NetworkService" GenericAll="yes" />
-      </CreateFolder>
-    </Component>
-
     <!-- ============================================================
          Unattended self-update support. The relay service runs as the low-privilege NetworkService and
-         cannot install an MSI; it downloads + verifies the package, stages it here, and triggers the
-         elevated SYSTEM updater task (registered in Package.wxs), which RE-VERIFIES the signature before
-         installing. See update-task.xml.
+         cannot install an MSI; it downloads + verifies the package, stages it in updates\, and triggers the
+         elevated SYSTEM updater task (registered by the RegisterUpdateTask custom action from resources embedded in
+         the custom-action assembly), which re-verifies everything before installing.
          ============================================================ -->
-
-    <!-- Staging folder for the verified MSI (ProgramData), writable by the service account so the service
-         can hand the package to the SYSTEM updater task. -->
-    <StandardDirectory Id="CommonAppDataFolder">
-      <Directory Id="WsrProgramData" Name="WinSmtpRelay">
-        <Directory Id="UpdateDropFolder" Name="updates" />
-        <Directory Id="UpdaterWorkFolder" Name="updater-work" />
-      </Directory>
-    </StandardDirectory>
-
-    <Component Id="UpdateDropFolderComponent" Directory="UpdateDropFolder" Guid="e3f1a8b4-2c6d-4e9a-bf01-7a2c5d8e9f01">
-      <CreateFolder>
-        <util:PermissionEx User="NT AUTHORITY\NetworkService" GenericAll="yes" />
-      </CreateFolder>
-      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" Name="UpdateDropConfigured"
-                     Type="integer" Value="1" KeyPath="yes" />
-    </Component>
-
-    <!-- SYSTEM-only staging-copy folder: the updater task copies pending.msi here (the service account
-         CANNOT write it) and verifies + installs the copy, which closes the time-of-check/time-of-use gap.
-         Its ACL is tightened to SYSTEM + Administrators (inheritance broken) by HardenUpdaterWorkAcl in
-         Package.wxs — so it grants NO write to NetworkService here. -->
-    <Component Id="UpdaterWorkFolderComponent" Directory="UpdaterWorkFolder" Guid="b4c2d9e6-3f70-4a1c-8d52-9e0a1b2c3d4f">
+    <Component Id="UpdateDropFolderComponent" Directory="UpdateDropFolder" Guid="6e2b9a45-c8d1-4f73-a0e6-3b7d5f1c2a98">
       <CreateFolder />
-      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay" Name="UpdaterWorkConfigured"
-                     Type="integer" Value="1" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="UpdateDropFolder"
+                     Type="string" Value="[UpdateDropFolder]" KeyPath="yes" />
     </Component>
 
-    <!-- The updater scheduled-task definition, installed next to the binaries. The MSI reads it once to
-         register the SYSTEM task; the registered task is independent of this file afterward. -->
-    <Component Id="UpdaterTaskFile" Directory="INSTALLFOLDER" Guid="a7b2c9d4-5e6f-4a1b-9c8d-2e3f4a5b6c7d">
-      <File Id="UpdateTaskXml" Source="update-task.xml" KeyPath="yes" />
+    <Component Id="UpdaterWorkFolderComponent" Directory="UpdaterWorkFolder" Guid="f19d4c62-5a8e-4b30-9d7f-c2e6a1b8d043">
+      <CreateFolder />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\ARDIMEDIA\WinSmtpRelay.Setup" Name="UpdaterWorkFolder"
+                     Type="string" Value="[UpdaterWorkFolder]" KeyPath="yes" />
     </Component>
 
-    <!-- Start menu shortcut to the admin UI (opens the URL in the default browser). The URL is the
-         default admin endpoint; a future installer step can substitute the chosen port. -->
+    <!-- Start menu shortcut to the admin UI (opens the URL in the default browser). -->
     <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="f4a2c1d7-8b3e-4c5a-9d6f-2e1b7c0a5d3e">
       <!-- KeyPath must be under HKCU because the shortcut installs to a (per-user) Start-menu folder (ICE38). -->
       <RegistryValue Root="HKCU" Key="Software\ARDIMEDIA\WinSmtpRelay" Name="StartMenuShortcut"

@@ -1,230 +1,65 @@
 name: CI
 
+# Build + test on every push and pull request to main (review finding M21). Also builds the framework-dependent MSI,
+# unsigned, so a broken installer is caught before a release tag. Releases are built by release.yml.
+#
+# Restores run in NuGet locked mode (Directory.Build.props sets RestoreLockedMode when GITHUB_ACTIONS=true): a package
+# that is not in a committed packages.lock.json fails the build. After changing a PackageReference, run
+# "dotnet restore winsmtprelay.slnx --force-evaluate" locally and commit the changed lock files.
+#
+# Third-party actions are pinned to full commit SHAs (the comment names the release).
+
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-test:
     runs-on: windows-latest
-
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Determine version
-        shell: bash
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            # Tag build: v1.0.0-beta1-build20 → VERSION=1.0.0, VERSION_SUFFIX=beta1-build20, TAG_LABEL=1.0.0-beta1-build20
-            TAG="${GITHUB_REF_NAME#v}"
-            echo "VERSION=${TAG%%-*}" >> "$GITHUB_ENV"
-            if [[ "$TAG" == *-* ]]; then
-              echo "VERSION_SUFFIX=${TAG#*-}" >> "$GITHUB_ENV"
-            else
-              echo "VERSION_SUFFIX=" >> "$GITHUB_ENV"
-            fi
-            echo "TAG_LABEL=$TAG" >> "$GITHUB_ENV"
-          else
-            # Non-tag build: read Version and VersionSuffix from Directory.Build.props
-            VERSION=$(sed -n 's/.*<Version>\([^<]*\)<.*/\1/p' Directory.Build.props | head -1)
-            VERSION_SUFFIX=$(sed -n 's/.*<VersionSuffix[^>]*>\([^<]*\)<.*/\1/p' Directory.Build.props | head -1)
-            echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-            echo "VERSION_SUFFIX=${VERSION_SUFFIX}" >> "$GITHUB_ENV"
-            if [ -n "$VERSION_SUFFIX" ]; then
-              echo "TAG_LABEL=${VERSION}-${VERSION_SUFFIX}" >> "$GITHUB_ENV"
-            else
-              echo "TAG_LABEL=${VERSION}-dev" >> "$GITHUB_ENV"
-            fi
-          fi
-
-      # Fail fast (before the long build) if a tagged release has no matching CHANGELOG section. This
-      # makes it impossible to publish a release whose CHANGELOG entry was forgotten — promote the
-      # [Unreleased] section to "## [<version>] - <date>" in the release-prep commit before tagging.
-      - name: Verify CHANGELOG has an entry for this release
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          if ! grep -qF "## [${TAG_LABEL}]" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no '## [${TAG_LABEL}]' section. Promote the [Unreleased] section to '## [${TAG_LABEL}] - <date>' before tagging this release."
-            exit 1
-          fi
-          echo "CHANGELOG.md has a section for ${TAG_LABEL}."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: '11.0.x'
           dotnet-quality: 'ga'
 
-      - name: Restore
+      - name: Restore (locked)
         run: dotnet restore winsmtprelay.slnx
 
       - name: Build
-        run: >
-          dotnet build winsmtprelay.slnx --no-restore --configuration Release
-          -p:Version=${{ env.VERSION }}
-          -p:VersionSuffix=${{ env.VERSION_SUFFIX }}
+        run: dotnet build winsmtprelay.slnx --no-restore --configuration Release
 
       - name: Test
         run: dotnet test winsmtprelay.slnx --no-build --configuration Release --verbosity normal
 
-      # Publish both variants for MSI packaging
-      - name: Publish Service (self-contained)
-        run: >
-          dotnet publish src/WinSmtpRelay.Service/WinSmtpRelay.Service.csproj
-          -c Release -r win-x64 --self-contained true
-          -p:Version=${{ env.VERSION }}
-          -p:VersionSuffix=${{ env.VERSION_SUFFIX }}
-          -o ${{ github.workspace }}/publish-sc/
-
+      # Installer smoke build (framework-dependent, unsigned): proves the WiX sources, the custom actions and the
+      # harvest still fit together.
       - name: Publish Service (framework-dependent)
         run: >
           dotnet publish src/WinSmtpRelay.Service/WinSmtpRelay.Service.csproj
           -c Release -r win-x64 --self-contained false
-          -p:Version=${{ env.VERSION }}
-          -p:VersionSuffix=${{ env.VERSION_SUFFIX }}
           -o ${{ github.workspace }}/publish-fd/
 
-      # Code signing — runs only when the signing secrets are present (skipped on forks / PRs without
-      # them). Sign the EXEs BEFORE the MSI build so the harvested copies inside the MSI are signed too.
-      # Requires repo secrets: CODE_SIGNING_CERTIFICATE (base64 PFX), CODE_SIGNING_PASSWORD.
-      - name: Set up code signing
-        id: signing
-        shell: pwsh
-        env:
-          CERT_B64: ${{ secrets.CODE_SIGNING_CERTIFICATE }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:CERT_B64)) {
-            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Host "No CODE_SIGNING_CERTIFICATE secret — skipping signing."
-            return
-          }
-          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
-          $st = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
-                Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $st) { throw "signtool.exe not found on the runner." }
-          "enabled=true"              | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "pfx=$pfx"                  | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "signtool=$($st.FullName)"  | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Signing enabled using $($st.FullName)"
-
-      - name: Sign service executables
-        if: steps.signing.outputs.enabled == 'true'
-        shell: pwsh
-        env:
-          PW: ${{ secrets.CODE_SIGNING_PASSWORD }}
-        run: |
-          & "${{ steps.signing.outputs.signtool }}" sign /f "${{ steps.signing.outputs.pfx }}" /p "$env:PW" `
-            /fd sha256 /tr http://timestamp.digicert.com /td sha256 `
-            "publish-sc\WinSmtpRelay.Service.exe" "publish-fd\WinSmtpRelay.Service.exe"
-
-      # Verify publish output before MSI build
-      - name: Verify publish output
-        shell: bash
-        run: |
-          echo "=== Self-contained publish ==="
-          ls -la publish-sc/ | head -20
-          echo "File count: $(find publish-sc/ -type f | wc -l)"
-          echo ""
-          echo "=== Framework-dependent publish ==="
-          ls -la publish-fd/ | head -20
-          echo "File count: $(find publish-fd/ -type f | wc -l)"
-
-      # Build MSI installers into separate output directories
-      # Note: HarvestPath must use backslashes — WiX HarvestDirectory fails with mixed slashes on Windows
-      - name: Build MSI (self-contained)
-        shell: pwsh
-        run: >
-          dotnet build setup/WinSmtpRelay.Setup/WinSmtpRelay.Setup.wixproj
-          -c Release
-          -p:HarvestPath=${{ github.workspace }}\publish-sc\
-          -p:ProductVersion=${{ env.VERSION }}
-          -p:VersionSuffix=${{ env.VERSION_SUFFIX }}
-          -p:SelfContained=true
-          -p:IntermediateOutputPath=${{ github.workspace }}\obj-msi-sc\
-          -p:OutputPath=${{ github.workspace }}\msi-sc\
-
-      - name: Build MSI (framework-dependent)
+      - name: Build MSI (framework-dependent, unsigned)
         shell: pwsh
         run: >
           dotnet build setup/WinSmtpRelay.Setup/WinSmtpRelay.Setup.wixproj
           -c Release
           -p:HarvestPath=${{ github.workspace }}\publish-fd\
-          -p:ProductVersion=${{ env.VERSION }}
-          -p:VersionSuffix=${{ env.VERSION_SUFFIX }}
           -p:SelfContained=false
-          -p:IntermediateOutputPath=${{ github.workspace }}\obj-msi-fd\
-          -p:OutputPath=${{ github.workspace }}\msi-fd\
-
-      # Rename MSIs from default project name to descriptive filenames
-      - name: Rename MSI files
-        shell: bash
-        run: |
-          find msi-sc -name "WinSmtpRelay.Setup.msi" -exec mv {} "msi-sc/WinSmtpRelay-${TAG_LABEL}-x64-self-contained.msi" \;
-          find msi-fd -name "WinSmtpRelay.Setup.msi" -exec mv {} "msi-fd/WinSmtpRelay-${TAG_LABEL}-x64.msi" \;
-
-      # Sign the built MSIs (after rename). The unattended self-update verifies THIS signature, so it is
-      # the one that must match the publisher (O=ARDIMEDIA) on target machines.
-      - name: Sign MSI installers
-        if: steps.signing.outputs.enabled == 'true'
-        shell: pwsh
-        env:
-          PW: ${{ secrets.CODE_SIGNING_PASSWORD }}
-        run: |
-          Get-ChildItem msi-sc, msi-fd -Filter *.msi | ForEach-Object {
-            & "${{ steps.signing.outputs.signtool }}" sign /f "${{ steps.signing.outputs.pfx }}" /p "$env:PW" `
-              /fd sha256 /tr http://timestamp.digicert.com /td sha256 $_.FullName
-          }
-
-      - name: Clean up signing certificate
-        if: always() && steps.signing.outputs.enabled == 'true'
-        shell: pwsh
-        run: Remove-Item "${{ steps.signing.outputs.pfx }}" -Force -ErrorAction SilentlyContinue
-
-      # Upload MSI artifacts (always available for download from workflow run)
-      - name: Upload MSI (self-contained)
-        uses: actions/upload-artifact@v4
-        with:
-          name: WinSmtpRelay-${{ env.TAG_LABEL }}-x64-self-contained
-          path: msi-sc/WinSmtpRelay-${{ env.TAG_LABEL }}-x64-self-contained.msi
-
-      - name: Upload MSI (framework-dependent)
-        uses: actions/upload-artifact@v4
-        with:
-          name: WinSmtpRelay-${{ env.TAG_LABEL }}-x64
-          path: msi-fd/WinSmtpRelay-${{ env.TAG_LABEL }}-x64.msi
-
-      # Create GitHub Release with MSI assets on tag push
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          IS_PRERELEASE=""
-          if echo "$TAG_LABEL" | grep -qE "(alpha|beta|rc|preview)"; then
-            IS_PRERELEASE="--prerelease"
-          fi
-
-          # Release notes are the matching CHANGELOG.md section (single source of truth): the body
-          # between "## [<version>]" and the next "## [" header. The guard step above guarantees it exists.
-          awk -v ver="## [${TAG_LABEL}]" 'index($0, ver) == 1 { f = 1; next } /^## \[/ { if (f) exit } f { print }' CHANGELOG.md > RELEASE_NOTES.md
-
-          if [ -s RELEASE_NOTES.md ]; then
-            NOTES_ARG=(--notes-file RELEASE_NOTES.md)
-          else
-            # Should not happen (guard ensures the section exists), but never publish empty notes.
-            NOTES_ARG=(--generate-notes)
-          fi
-
-          gh release create "$GITHUB_REF_NAME" \
-            --title "WinSmtpRelay $TAG_LABEL" \
-            "${NOTES_ARG[@]}" \
-            $IS_PRERELEASE \
-            "msi-sc/WinSmtpRelay-${TAG_LABEL}-x64-self-contained.msi#WinSmtpRelay ${TAG_LABEL} (x64, self-contained)" \
-            "msi-fd/WinSmtpRelay-${TAG_LABEL}-x64.msi#WinSmtpRelay ${TAG_LABEL} (x64, requires .NET 10)"

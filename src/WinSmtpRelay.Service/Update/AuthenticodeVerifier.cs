@@ -5,15 +5,18 @@ using System.Security.Cryptography.X509Certificates;
 namespace WinSmtpRelay.Service.Update;
 
 /// <summary>
-/// Verifies an MSI's Authenticode signature via WinVerifyTrust (signature present + valid + chain trusted)
-/// and pins the publisher (the signer subject must contain the expected organisation). This is the
+/// Verifies an MSI's Authenticode signature via WinVerifyTrust (signature present + valid + chain trusted +
+/// not revoked, checked online over the whole chain) and pins the publisher twice: the signer's Organization RDN must
+/// equal the expected organisation AND the signer certificate's thumbprint must be one of the pinned thumbprints
+/// (decision T1084 D). This is the
 /// service-side pre-check; the elevated SYSTEM updater task re-verifies before installing, so this account
 /// being compromised cannot get an unsigned/foreign package installed.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal static class AuthenticodeVerifier
 {
-    public static bool Verify(string filePath, string expectedPublisher, out string? signerSubject, out string? error)
+    public static bool Verify(string filePath, string expectedPublisher, IEnumerable<string> pinnedThumbprints,
+        out string? signerSubject, out string? error)
     {
         signerSubject = null;
         error = null;
@@ -36,9 +39,11 @@ internal static class AuthenticodeVerifier
             {
                 cbStruct = (uint)Marshal.SizeOf<WINTRUST_DATA>(),
                 dwUIChoice = WTD_UI_NONE,
-                // Skip online revocation so a momentarily offline CRL/OCSP can't block a legitimate update;
-                // chain-trust + publisher pinning remain enforced.
-                fdwRevocationChecks = WTD_REVOKE_NONE,
+                // Online revocation check over the whole chain except the root (decision T1077). Fails closed:
+                // when the CRL/OCSP servers cannot be reached the update is refused with a clear message and can
+                // simply be retried later — an update is never urgent enough to skip revocation.
+                fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN,
+                dwProvFlags = WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT,
                 dwUnionChoice = WTD_CHOICE_FILE,
                 pFile = pFile,
                 dwStateAction = WTD_STATEACTION_VERIFY,
@@ -52,7 +57,7 @@ internal static class AuthenticodeVerifier
 
             if (result != 0)
             {
-                error = $"The installer's Authenticode signature is not valid or not trusted (0x{result:X8}).";
+                error = DescribeTrustError(result);
                 return false;
             }
         }
@@ -74,6 +79,11 @@ internal static class AuthenticodeVerifier
             if (!HasOrganization(cert, expectedPublisher))
             {
                 error = $"The installer is signed, but its Organization (O) is not '{expectedPublisher}' (signer: {signerSubject}).";
+                return false;
+            }
+            if (!UpdatePackageIdentity.IsPinnedThumbprint(cert.Thumbprint, pinnedThumbprints))
+            {
+                error = $"The installer is signed by '{signerSubject}', but its certificate (thumbprint {cert.Thumbprint}) is not one of the pinned release certificates. The update was NOT installed.";
                 return false;
             }
         }
@@ -107,12 +117,26 @@ internal static class AuthenticodeVerifier
         return false;
     }
 
+    // Plain-language reasons for the WinVerifyTrust results an operator can act on.
+    internal static string DescribeTrustError(int result) => unchecked((uint)result) switch
+    {
+        0x80092013 => "The revocation status of the installer's signing certificate could not be checked: the certificate revocation servers (CRL/OCSP) are unreachable from this server. The update was NOT installed; allow outbound HTTP to the certificate authority's revocation endpoints or retry later (0x80092013).",
+        0x80092012 => "The revocation status of the installer's signing certificate could not be determined. The update was NOT installed (0x80092012).",
+        0x800B010C => "The installer's signing certificate has been REVOKED. The update was NOT installed (0x800B010C).",
+        0x800B0100 => "The installer is not signed. The update was NOT installed (0x800B0100).",
+        0x80096010 => "The installer's signature does not match its content (the file was modified after signing). The update was NOT installed (0x80096010).",
+        0x800B0109 => "The installer's signature chains to a root certificate this server does not trust. The update was NOT installed (0x800B0109).",
+        0x800B0101 => "The installer's signing certificate has expired and the signature carries no valid timestamp. The update was NOT installed (0x800B0101).",
+        _ => $"The installer's Authenticode signature is not valid or not trusted (0x{result:X8}). The update was NOT installed.",
+    };
+
     // ---- WinVerifyTrust interop ----
 
     private static Guid WINTRUST_ACTION_GENERIC_VERIFY_V2 = new("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
 
     private const uint WTD_UI_NONE = 2;
-    private const uint WTD_REVOKE_NONE = 0;
+    private const uint WTD_REVOKE_WHOLECHAIN = 1;
+    private const uint WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT = 0x00000080;
     private const uint WTD_CHOICE_FILE = 1;
     private const uint WTD_STATEACTION_VERIFY = 1;
     private const uint WTD_STATEACTION_CLOSE = 2;

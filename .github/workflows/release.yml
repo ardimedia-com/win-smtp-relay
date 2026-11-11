@@ -1,0 +1,302 @@
+name: Release
+
+# Tag-driven release: push vX.Y.Z-<label>-build<N> (e.g. v1.0.0-beta1-build80) on a release-prep commit that has
+# promoted the matching "## [X.Y.Z-<label>-build<N>]" CHANGELOG section. The build number N becomes the third field
+# of the MSI version (X.Y.N, decision T1077), so every release is a strictly greater Windows Installer version.
+#
+# Jobs and permissions (least privilege, review finding M21):
+#   build    contents: read   build, test, publish, SIGN, build the MSIs, SIGN them, VERIFY every signature
+#   publish  contents: write  create the GitHub Release with the MSIs and the CHANGELOG section as notes
+# A tag release is NEVER published unsigned: missing signing secrets, a failed signtool call or a signature that does
+# not verify fails the build job, and the publish job does not run.
+#
+# ---------------------------------------------------------------------------------------------------------------
+# Code signing (decision T1084 D)
+#
+# Releases are signed with the ARDIMEDIA code-signing certificate "CN=ARDIMEDIA, O=ARDIMEDIA, C=LI",
+# thumbprint 11E81500C908EC01E783ACBBB2E00ABAAA603AC3, valid 2026-06-26 to 2031-06-26 (self-signed; Azure Artifact
+# Signing is not available for a Liechtenstein organisation). Repository settings:
+#   secret   CODE_SIGNING_CERTIFICATE   the PFX, base64-encoded
+#   secret   CODE_SIGNING_PASSWORD      the PFX password
+#   variable CODE_SIGNING_THUMBPRINT    optional; the expected thumbprint (defaults to the one above)
+# The PFX is imported into the runner's CurrentUser\My store and signtool signs by thumbprint (/sha1), so the password
+# never appears on a command line. Timestamps: DigiCert RFC 3161 (http://timestamp.digicert.com), SHA-256.
+#
+# Signed: every first-party binary of both publish outputs (WinSmtpRelay.Service.exe, WinSmtpRelay.*.dll), the
+# custom-action assembly (signed before it is packed) and the packed WinSmtpRelay.Setup.CustomActions.CA.dll, then the
+# two MSIs. Verification: "signtool verify /pa" cannot be used because the runner does not trust the self-signed root;
+# instead every file must carry a timestamped signature whose signer thumbprint equals CODE_SIGNING_THUMBPRINT, with
+# status Valid or exactly the "untrusted root" UnknownError. NotSigned, HashMismatch or another certificate fails.
+#
+# The target hosts trust the certificate (Trusted Root + Trusted Publishers), and the self-update pins it twice:
+# O=ARDIMEDIA AND the thumbprint list in src/WinSmtpRelay.Service/Update/UpdatePackageIdentity.cs and
+# setup/WinSmtpRelay.Setup/updater/Update-WinSmtpRelay.ps1.
+#
+# Certificate rollover (before 2031-06-26, or when the key must be replaced):
+#   1. Add the NEW thumbprint next to the old one in UpdatePackageIdentity.DefaultSignerThumbprints and in
+#      $SignerThumbprints of Update-WinSmtpRelay.ps1; release that build signed with the OLD certificate. Installed
+#      hosts self-update to it and now accept both certificates.
+#   2. Deploy the new certificate to the hosts' Trusted Root + Trusted Publishers stores.
+#   3. Replace CODE_SIGNING_CERTIFICATE / CODE_SIGNING_PASSWORD and set CODE_SIGNING_THUMBPRINT to the new thumbprint;
+#      release the next build (signed with the NEW certificate).
+#   4. Remove the old thumbprint from both lists in a later release.
+# ---------------------------------------------------------------------------------------------------------------
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    env:
+      EXPECTED_THUMBPRINT: ${{ vars.CODE_SIGNING_THUMBPRINT || '11E81500C908EC01E783ACBBB2E00ABAAA603AC3' }}
+      TIMESTAMP_URL: http://timestamp.digicert.com
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Determine version
+        shell: bash
+        run: |
+          # v1.0.0-beta1-build80 -> VERSION=1.0.0, VERSION_SUFFIX=beta1-build80, BUILD_NUMBER=80, MSI_VERSION=1.0.80
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG%%-*}"
+          if ! [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' does not start with vX.Y.Z."
+            exit 1
+          fi
+          MAJOR="${BASH_REMATCH[1]}"; MINOR="${BASH_REMATCH[2]}"
+          if ! [[ "$TAG" =~ build([0-9]+)$ ]]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' has no '-build<N>' suffix. The build number is the third MSI version field (T1077); every release needs a new, higher one."
+            exit 1
+          fi
+          BUILD_NUMBER="${BASH_REMATCH[1]}"
+          if [ "$BUILD_NUMBER" -gt 65535 ] || [ "$MAJOR" -gt 255 ] || [ "$MINOR" -gt 255 ]; then
+            echo "::error::Version out of the Windows Installer range (major/minor <= 255, build <= 65535)."
+            exit 1
+          fi
+          VERSION_SUFFIX=""
+          if [[ "$TAG" == *-* ]]; then VERSION_SUFFIX="${TAG#*-}"; fi
+          {
+            echo "VERSION=$VERSION"
+            echo "VERSION_SUFFIX=$VERSION_SUFFIX"
+            echo "BUILD_NUMBER=$BUILD_NUMBER"
+            echo "MSI_VERSION=$MAJOR.$MINOR.$BUILD_NUMBER"
+            echo "TAG_LABEL=$TAG"
+          } >> "$GITHUB_ENV"
+          echo "Release $TAG -> MSI version $MAJOR.$MINOR.$BUILD_NUMBER"
+
+      # Fail fast (before the long build) if the tagged release has no matching CHANGELOG section. Promote the
+      # [Unreleased] section to "## [<version>] - <date>" in the release-prep commit before tagging.
+      - name: Verify CHANGELOG has an entry for this release
+        shell: bash
+        run: |
+          if ! grep -qF "## [${TAG_LABEL}]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [${TAG_LABEL}]' section. Promote the [Unreleased] section to '## [${TAG_LABEL}] - <date>' before tagging this release."
+            exit 1
+          fi
+          echo "CHANGELOG.md has a section for ${TAG_LABEL}."
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '11.0.x'
+          dotnet-quality: 'ga'
+
+      # Locked mode (Directory.Build.props): only the package versions in the committed lock files are restored.
+      - name: Restore (locked)
+        run: dotnet restore winsmtprelay.slnx
+
+      - name: Build
+        run: >
+          dotnet build winsmtprelay.slnx --no-restore --configuration Release
+          -p:Version=${{ env.VERSION }} -p:VersionSuffix=${{ env.VERSION_SUFFIX }} -p:BuildNumber=${{ env.BUILD_NUMBER }}
+
+      - name: Test
+        run: dotnet test winsmtprelay.slnx --no-build --configuration Release --verbosity normal
+
+      - name: Publish Service (self-contained)
+        run: >
+          dotnet publish src/WinSmtpRelay.Service/WinSmtpRelay.Service.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:Version=${{ env.VERSION }} -p:VersionSuffix=${{ env.VERSION_SUFFIX }} -p:BuildNumber=${{ env.BUILD_NUMBER }}
+          -o ${{ github.workspace }}/publish-sc/
+
+      - name: Publish Service (framework-dependent)
+        run: >
+          dotnet publish src/WinSmtpRelay.Service/WinSmtpRelay.Service.csproj
+          -c Release -r win-x64 --self-contained false
+          -p:Version=${{ env.VERSION }} -p:VersionSuffix=${{ env.VERSION_SUFFIX }} -p:BuildNumber=${{ env.BUILD_NUMBER }}
+          -o ${{ github.workspace }}/publish-fd/
+
+      # ---- Signing. Every step below fails the job on any error: a release is never published unsigned. ----
+
+      - name: Import the code-signing certificate
+        id: signing
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.CODE_SIGNING_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.CODE_SIGNING_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CERT_B64) -or [string]::IsNullOrEmpty($env:CERT_PASSWORD)) {
+            throw "Release signing is not configured: the repository secrets CODE_SIGNING_CERTIFICATE and CODE_SIGNING_PASSWORD are required. A tag release is never published unsigned."
+          }
+          $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]'PersistKeySet,UserKeySet'
+          $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            [Convert]::FromBase64String($env:CERT_B64), $env:CERT_PASSWORD, $flags)
+          if ($cert.Thumbprint -ne $env:EXPECTED_THUMBPRINT) {
+            throw "The certificate in CODE_SIGNING_CERTIFICATE has thumbprint $($cert.Thumbprint), expected $($env:EXPECTED_THUMBPRINT) (repository variable CODE_SIGNING_THUMBPRINT)."
+          }
+          if (-not $cert.HasPrivateKey) { throw "CODE_SIGNING_CERTIFICATE contains no private key." }
+          $store = [System.Security.Cryptography.X509Certificates.X509Store]::new('My', 'CurrentUser')
+          $store.Open('ReadWrite'); $store.Add($cert); $store.Close()
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found on the runner." }
+          "signtool=$($signtool.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Signing with $($cert.Subject) ($($cert.Thumbprint)), valid until $($cert.NotAfter.ToString('yyyy-MM-dd'))."
+
+      - name: Sign first-party binaries (both publish outputs)
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem publish-sc, publish-fd -Recurse -File |
+            Where-Object { $_.Name -like 'WinSmtpRelay*' -and $_.Extension -in '.exe', '.dll' } | ForEach-Object FullName)
+          if ($files.Count -lt 4) { throw "Expected the first-party binaries in both publish outputs, found: $($files -join ', ')" }
+          & "${{ steps.signing.outputs.signtool }}" sign /sha1 $env:EXPECTED_THUMBPRINT /s My /fd sha256 /tr $env:TIMESTAMP_URL /td sha256 /d WinSmtpRelay $files
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed ($LASTEXITCODE)." }
+
+      # The custom-action project signs its managed assembly after compiling and BEFORE packing it, then the packed
+      # .CA.dll (targets SignCustomActionAssembly / SignCustomActionPackage, driven by CustomActionSignCommand).
+      - name: Build and sign the custom actions
+        shell: pwsh
+        run: |
+          $env:CustomActionSignCommand = '"${{ steps.signing.outputs.signtool }}" sign /sha1 ' + $env:EXPECTED_THUMBPRINT + ' /s My /fd sha256 /tr ' + $env:TIMESTAMP_URL + ' /td sha256 /d WinSmtpRelay'
+          dotnet build setup/WinSmtpRelay.Setup.CustomActions/WinSmtpRelay.Setup.CustomActions.csproj -c Release --no-incremental `
+            -p:Version=${{ env.VERSION }} -p:VersionSuffix=${{ env.VERSION_SUFFIX }} -p:BuildNumber=${{ env.BUILD_NUMBER }}
+          if ($LASTEXITCODE -ne 0) { throw "Building/signing the custom actions failed ($LASTEXITCODE)." }
+
+      # Build the MSIs from the signed files. BuildProjectReferences=false keeps the signed custom-action package.
+      # HarvestPath must use backslashes (WiX harvesting fails with mixed slashes).
+      - name: Build MSIs
+        shell: pwsh
+        run: |
+          foreach ($variant in @(
+              @{ Name = 'sc'; SelfContained = 'true';  File = "WinSmtpRelay-$($env:TAG_LABEL)-x64-self-contained.msi" },
+              @{ Name = 'fd'; SelfContained = 'false'; File = "WinSmtpRelay-$($env:TAG_LABEL)-x64.msi" })) {
+            dotnet build setup/WinSmtpRelay.Setup/WinSmtpRelay.Setup.wixproj -c Release -t:Rebuild `
+              -p:BuildProjectReferences=false `
+              "-p:HarvestPath=${{ github.workspace }}\publish-$($variant.Name)\" `
+              -p:ProductVersion=${{ env.MSI_VERSION }} -p:Version=${{ env.VERSION }} `
+              -p:VersionSuffix=${{ env.VERSION_SUFFIX }} -p:BuildNumber=${{ env.BUILD_NUMBER }} `
+              -p:SelfContained=$($variant.SelfContained)
+            if ($LASTEXITCODE -ne 0) { throw "MSI build ($($variant.Name)) failed ($LASTEXITCODE)." }
+            New-Item -ItemType Directory -Force -Path "msi-$($variant.Name)" | Out-Null
+            Move-Item -Force setup/WinSmtpRelay.Setup/bin/x64/Release/WinSmtpRelay.Setup.msi "msi-$($variant.Name)/$($variant.File)"
+          }
+
+      # The self-update verifies THIS signature (WinVerifyTrust + O=ARDIMEDIA + pinned thumbprint) on the hosts.
+      - name: Sign MSIs
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem msi-sc, msi-fd -Filter *.msi | ForEach-Object FullName)
+          & "${{ steps.signing.outputs.signtool }}" sign /sha1 $env:EXPECTED_THUMBPRINT /s My /fd sha256 /tr $env:TIMESTAMP_URL /td sha256 /d WinSmtpRelay $files
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed ($LASTEXITCODE)." }
+
+      - name: Verify every signature
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem publish-sc, publish-fd -Recurse -File |
+              Where-Object { $_.Name -like 'WinSmtpRelay*' -and $_.Extension -in '.exe', '.dll' } | ForEach-Object FullName) +
+            @(Get-Item setup/WinSmtpRelay.Setup.CustomActions/obj/Release/net48/WinSmtpRelay.Setup.CustomActions.dll,
+                       setup/WinSmtpRelay.Setup.CustomActions/bin/Release/net48/WinSmtpRelay.Setup.CustomActions.CA.dll | ForEach-Object FullName) +
+            @(Get-ChildItem msi-sc, msi-fd -Filter *.msi | ForEach-Object FullName)
+          $failures = @()
+          foreach ($file in $files) {
+            $sig = Get-AuthenticodeSignature -LiteralPath $file
+            $thumbprint = if ($sig.SignerCertificate) { $sig.SignerCertificate.Thumbprint } else { '(none)' }
+            # The runner does not trust the self-signed root: accept Valid, or UnknownError for exactly that reason.
+            $statusOk = $sig.Status -eq 'Valid' -or
+              ($sig.Status -eq 'UnknownError' -and $sig.StatusMessage -match 'root certificate which is not trusted')
+            if (-not $statusOk -or $thumbprint -ne $env:EXPECTED_THUMBPRINT -or -not $sig.TimeStamperCertificate) {
+              $failures += "$file : status=$($sig.Status) thumbprint=$thumbprint timestamp=$([bool]$sig.TimeStamperCertificate) ($($sig.StatusMessage))"
+            } else {
+              Write-Host "OK  $file"
+            }
+          }
+          if ($failures) { $failures | ForEach-Object { Write-Host "::error::$_" }; throw "$($failures.Count) file(s) are not correctly signed." }
+          Write-Host "$($files.Count) files signed by $($env:EXPECTED_THUMBPRINT) and timestamped."
+
+      - name: Remove the code-signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          $store = [System.Security.Cryptography.X509Certificates.X509Store]::new('My', 'CurrentUser')
+          $store.Open('ReadWrite')
+          $store.Certificates | Where-Object Thumbprint -eq $env:EXPECTED_THUMBPRINT | ForEach-Object { $store.Remove($_) }
+          $store.Close()
+
+      - name: Upload MSIs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: msi
+          path: |
+            msi-sc/*.msi
+            msi-fd/*.msi
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download MSIs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: msi
+          path: msi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG_LABEL="${GITHUB_REF_NAME#v}"
+          IS_PRERELEASE=""
+          if echo "$TAG_LABEL" | grep -qE "(alpha|beta|rc|preview)"; then
+            IS_PRERELEASE="--prerelease"
+          fi
+
+          # Release notes are the matching CHANGELOG.md section (single source of truth): the body between
+          # "## [<version>]" and the next "## [" header. The build job's guard guarantees it exists.
+          awk -v ver="## [${TAG_LABEL}]" 'index($0, ver) == 1 { f = 1; next } /^## \[/ { if (f) exit } f { print }' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "::error::The CHANGELOG section for ${TAG_LABEL} is empty."
+            exit 1
+          fi
+
+          SC=$(find msi -name "WinSmtpRelay-${TAG_LABEL}-x64-self-contained.msi")
+          FD=$(find msi -name "WinSmtpRelay-${TAG_LABEL}-x64.msi")
+          if [ -z "$SC" ] || [ -z "$FD" ]; then
+            echo "::error::MSI artifacts missing."
+            exit 1
+          fi
+
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "WinSmtpRelay $TAG_LABEL" \
+            --notes-file RELEASE_NOTES.md \
+            $IS_PRERELEASE \
+            "$SC#WinSmtpRelay ${TAG_LABEL} (x64, self-contained)" \
+            "$FD#WinSmtpRelay ${TAG_LABEL} (x64, requires .NET 10)"
