@@ -36,6 +36,7 @@ public class ConfigurationSeeder(
         await SeedAcceptedDomainsAsync(db, cancellationToken);
         await SeedIpAccessRulesAsync(db, cancellationToken);
         await SeedSendConnectorsAsync(db, cancellationToken);
+        await RepairDoubledRetryIntervalsAsync(db, cancellationToken);
         await SeedDkimDomainsAsync(db, cancellationToken);
         await SeedRateLimitSettingsAsync(db, cancellationToken);
         await SeedPortalSettingsAsync(db, cancellationToken);
@@ -157,6 +158,54 @@ public class ConfigurationSeeder(
         }
 
         logger.LogInformation("Seeded default send connector from appsettings");
+    }
+
+    // Repairs the default send connector of an install seeded while the configuration binder APPENDED the configured
+    // Delivery:RetryIntervalsMinutes onto the pre-filled default array (fixed at the root in DeliveryOptions). Such a row
+    // reads "1,5,30,120,480,1440,1,5,30,120,480,1440": the default schedule followed by the configured one. Only that
+    // exact signature is repaired, so a schedule an administrator set deliberately is never touched or shortened.
+    private async Task RepairDoubledRetryIntervalsAsync(RelayDbContext db, CancellationToken ct)
+    {
+        var connector = await db.SendConnectors.FirstOrDefaultAsync(c => c.IsDefault, ct);
+        if (connector is null)
+            return;
+
+        var repaired = RepairDoubledRetryIntervals(connector.RetryIntervalsMinutes, deliveryOpts.Value.EffectiveRetryIntervalsMinutes);
+        if (repaired is null)
+            return;
+
+        logger.LogWarning(
+            "Send connector {Connector}: retry intervals {Old} were the default schedule followed by the configured one " +
+            "(a seeding defect); repaired to {New}", connector.Name, connector.RetryIntervalsMinutes, repaired);
+        connector.RetryIntervalsMinutes = repaired;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Returns the repaired retry schedule when <paramref name="stored"/> is exactly
+    /// <see cref="DeliveryOptions.DefaultRetryIntervalsMinutes"/> followed by <paramref name="configured"/> (the
+    /// signature of the old binder-append defect), otherwise <c>null</c> (leave the value alone).
+    /// </summary>
+    public static string? RepairDoubledRetryIntervals(string? stored, IReadOnlyList<int> configured)
+    {
+        if (string.IsNullOrWhiteSpace(stored) || configured.Count == 0)
+            return null;
+
+        var values = new List<int>();
+        foreach (var part in stored.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!int.TryParse(part, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var minutes))
+                return null;
+            values.Add(minutes);
+        }
+
+        var defaults = DeliveryOptions.DefaultRetryIntervalsMinutes;
+        if (values.Count != defaults.Length + configured.Count)
+            return null;
+        if (!values.Take(defaults.Length).SequenceEqual(defaults) || !values.Skip(defaults.Length).SequenceEqual(configured))
+            return null;
+
+        return string.Join(",", configured);
     }
 
     private async Task SeedDkimDomainsAsync(RelayDbContext db, CancellationToken ct)

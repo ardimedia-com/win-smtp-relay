@@ -25,6 +25,9 @@ public class SuppressionPolicyTests
     [DataRow("550", "No such user here")]
     [DataRow("551", "User not local")]
     [DataRow("550", "mailbox unavailable")]
+    [DataRow("550", "5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors [AM0PR01MB1234.eurprd01.prod.exchangelabs.com]")]
+    [DataRow("554", "5.4.1 Recipient address rejected: Access denied")]
+    [DataRow("550", "5.4.1 RECIPIENT ADDRESS REJECTED: ACCESS DENIED")]
     public void AddressDoesNotExist_Suppresses(string code, string text) =>
         Assert.IsTrue(SuppressionPolicy.ShouldSuppress(Rejected(code, text)), $"{code} {text}");
 
@@ -38,7 +41,11 @@ public class SuppressionPolicyTests
     [DataRow("552", "5.2.2 Mailbox full")]
     [DataRow("550", "5.1.1 user unknown — but also: SPF check failed")]
     [DataRow("550", "5.1.8 Bad sender's system address")]
-    [DataRow("554", "5.4.1 Recipient address rejected: Access denied")]
+    [DataRow("550", "5.4.1 Relay access denied")]
+    [DataRow("550", "5.4.1 Access denied")]
+    [DataRow("550", "5.4.1 Recipient address rejected: Access denied by policy")]
+    [DataRow("550", "5.4.1 Recipient address rejected: Access denied. 5.7.1 blocked")]
+    [DataRow("550", "5.4.6 Recipient address rejected: routing loop")]
     [DataRow("421", "4.7.0 Try again later")]
     [DataRow("450", "4.2.1 Mailbox busy")]
     [DataRow("554", "Transaction failed")]

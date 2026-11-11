@@ -66,6 +66,8 @@ public class SuppressionPolicyMigrationTests
                     (1,'unknown@x.test',0,'550 5.1.1 user unknown','2026-11-01T10:00:00.0000000Z'),
                     (1,'blocked@x.test',0,'550 5.7.1 client host blocked using Spamhaus','2026-11-01T10:00:00.0000000Z'),
                     (1,'policy@x.test',0,'550 Message rejected due to local policy','2026-11-01T10:00:00.0000000Z'),
+                    (1,'exo@x.test',0,'550 5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors','2026-11-01T10:00:00.0000000Z'),
+                    (1,'relaydenied@x.test',0,'554 5.4.1 Relay access denied','2026-11-01T10:00:00.0000000Z'),
                     (1,'manual@x.test',2,'550 5.7.1 blocked','2026-11-01T10:00:00.0000000Z');
                 """);
         }
@@ -79,10 +81,11 @@ public class SuppressionPolicyMigrationTests
             Assert.AreEqual(new DateTimeOffset(2026, 11, 2, 10, 0, 0, TimeSpan.Zero), messages[1].NextRetryUtc);
             Assert.IsTrue(messages.All(m => m.Origin == MessageOrigin.Submitted));
 
-            CollectionAssert.AreEquivalent(new[] { "unknown@x.test", "manual@x.test" },
-                await db.SuppressionEntries.Select(e => e.Address).ToListAsync(), "policy/blocklist hard bounces lifted, manual kept");
+            CollectionAssert.AreEquivalent(new[] { "unknown@x.test", "exo@x.test", "manual@x.test" },
+                await db.SuppressionEntries.Select(e => e.Address).ToListAsync(),
+                "policy/blocklist hard bounces lifted; Exchange Online's unknown-recipient 5.4.1 and manual entries kept");
             var audit = await db.AdminAuditEvents.AsNoTracking().SingleAsync(e => e.Action == "suppression.removed");
-            StringAssert.Contains(audit.Detail, "Lifted 2 ");
+            StringAssert.Contains(audit.Detail, "Lifted 3 ");
 
             Assert.AreEqual(30, (await db.DataRetentionSettings.AsNoTracking().SingleAsync()).SuppressionDays);
             Assert.IsTrue((await db.Tenants.AsNoTracking().SingleAsync()).DsnEnabled);

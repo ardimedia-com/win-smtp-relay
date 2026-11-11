@@ -9,7 +9,8 @@ namespace WinSmtpRelay.Core;
 /// nothing about the mailbox, and suppressing on it would silently stop mail to valid addresses.
 /// <para>
 /// Qualifies: a RCPT TO rejection by the recipient's own mail server with enhanced status 5.1.1, 5.1.10 or another
-/// 5.1.x address status (except 5.1.7 / 5.1.8, which are about the sender), or 5.2.1 (mailbox disabled); or — when
+/// 5.1.x address status (except 5.1.7 / 5.1.8, which are about the sender), 5.2.1 (mailbox disabled), or Exchange
+/// Online's 5.4.1 when the text says "Recipient address rejected" (its answer for an unknown recipient); or — when
 /// no enhanced status is given — a plain 550 / 551 / 553. In every case the response text must not carry policy
 /// wording (<see cref="PolicyWords"/>), and any 5.7.x disqualifies.
 /// </para>
@@ -28,6 +29,9 @@ public static partial class SuppressionPolicy
         "temporarily",
     ];
 
+    private const string RecipientAddressRejected = "Recipient address rejected";
+    private const string ExchangeAccessDenied = "Access denied";
+
     /// <summary>True when <paramref name="result"/> should put the recipient on the suppression list.</summary>
     public static bool ShouldSuppress(DeliveryResult result) =>
         result is { RecipientRejected: true, Success: false, ViaSmartHost: false }
@@ -40,10 +44,19 @@ public static partial class SuppressionPolicy
             return false;
 
         var text = statusMessage ?? "";
+        var enhanced = EnhancedCode().Match(text);
+
+        // Exchange Online answers an unknown recipient with "550 5.4.1 Recipient address rejected: Access denied"
+        // (Directory-Based Edge Blocking). 5.4.x is otherwise routing, and "denied" policy wording — so this exact
+        // shape is recognised on its own: 5.4.1 plus "Recipient address rejected". The "Access denied" phrase is
+        // part of that answer, any OTHER policy wording still disqualifies.
+        if (enhanced.Success && enhanced.Value == "5.4.1"
+            && text.Contains(RecipientAddressRejected, StringComparison.OrdinalIgnoreCase))
+            return !HasPolicyWording(text.Replace(ExchangeAccessDenied, "", StringComparison.OrdinalIgnoreCase));
+
         if (HasPolicyWording(text))
             return false;
 
-        var enhanced = EnhancedCode().Match(text);
         if (enhanced.Success)
         {
             if (enhanced.Groups["class"].Value != "5")
