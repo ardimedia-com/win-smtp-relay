@@ -7,6 +7,7 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ILogger<DkimDomainDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -36,11 +37,11 @@ else
 {
     <BbCard>
         <BbCardContent>
-            <div class="form-group" style="max-width:420px;">
+            <div class="form-group field-narrow">
                 <BbLabel For="domain">Domain</BbLabel>
                 <BbInput Id="domain" @bind-Value="domain" Placeholder="example.com" Disabled="@(!IsNew)" />
             </div>
-            <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+            <div class="row-flex">
                 <div class="form-group">
                     <BbLabel For="selector">Selector</BbLabel>
                     <BbInput Id="selector" @bind-Value="selector" Placeholder="default" />
@@ -72,35 +73,61 @@ else
                     <div class="dns-record-row">
                         <span class="dns-record-label">Value</span>
                         <code class="mono dns-record-value dns-record-suggested">@dnsTxt</code>
-                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => CopyAsync(dnsTxt)" title="Copy">
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => CopyAsync(dnsTxt)" title="Copy" aria-label="Copy the DNS record value">
                             <LucideIcon Name="copy" /> Copy
                         </BbButton>
                     </div>
-                    <p class="text-muted" style="font-size:0.78rem;margin-top:0.4rem;">
+                    <p class="hint">
                         Publish this TXT record at your DNS provider. Regenerating the key changes this value —
                         you must republish it.
                     </p>
-                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="RegenerateAsync">
-                        <LucideIcon Name="refresh-cw" /> Regenerate key
+                    <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" Disabled="@busy" @onclick="() => showRegenerateConfirm = true">
+                        <LucideIcon Name="refresh-cw" /> Regenerate key…
                     </BbButton>
                 </div>
+            }
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <p class="form-error" role="alert">@errorMessage</p>
             }
         </BbCardContent>
         <BbCardFooter>
             <div class="flex gap-1 items-center">
                 <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync"
-                        Disabled="@(string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(selector))">
+                        Disabled="@(busy || string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(selector))">
                     <LucideIcon Name="save" /> Save
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">@(IsNew ? "Cancel" : "Done")</BbButton>
                 @if (!string.IsNullOrEmpty(statusMessage))
                 {
-                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                    <span class="status-note" role="status">@statusMessage</span>
                 }
             </div>
         </BbCardFooter>
     </BbCard>
 }
+
+<BbAlertDialog @bind-Open="showRegenerateConfirm">
+    <BbAlertDialogContent>
+        <BbAlertDialogHeader>
+            <BbAlertDialogTitle>Regenerate the DKIM key for @domain?</BbAlertDialogTitle>
+            <BbAlertDialogDescription>
+                A new @(keyBits)-bit key pair replaces the current one immediately. Mail is signed with the new key
+                from now on, so receivers fail the DKIM check until you publish the new TXT record at
+                <span class="mono wrap-anywhere">@(selector)._domainkey.@(domain)</span>. The old key cannot be restored.
+            </BbAlertDialogDescription>
+        </BbAlertDialogHeader>
+        <BbAlertDialogFooter>
+            <BbAlertDialogCancel>
+                <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
+            </BbAlertDialogCancel>
+            <BbAlertDialogAction>
+                <BbButton Variant="ButtonVariant.Destructive" Disabled="@busy" @onclick="RegenerateAsync">Regenerate key</BbButton>
+            </BbAlertDialogAction>
+        </BbAlertDialogFooter>
+    </BbAlertDialogContent>
+</BbAlertDialog>
+
 
 @code {
     [Parameter] public int? Id { get; set; }
@@ -108,17 +135,20 @@ else
 
     private bool isLoading = true;
     private bool notFound;
+    private bool busy;
+    private bool showRegenerateConfirm;
     private string? statusMessage;
+    private string? errorMessage;
 
     private string domain = "";
     private string selector = "default";
     private string keySize = "2048";
     private string enabled = "true";
 
-    // Held across an edit so Update doesn't wipe the stored key.
-    private string? existingPem;
-    private string? existingPath;
+    // The private key is never held in this component: Save and Regenerate re-read the stored entity on the
+    // server. Only what the page displays is kept — the public DNS value and the current key size.
     private string? dnsTxt;
+    private int keyBits = 2048;
 
     protected override async Task OnInitializedAsync()
     {
@@ -128,89 +158,155 @@ else
             return;
         }
 
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IDkimDomainService>();
-        var d = (await svc.GetAllAsync()).FirstOrDefault(x => x.Id == Id!.Value);
-        if (d is null)
+        try
         {
-            notFound = true;
-            isLoading = false;
-            return;
-        }
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IDkimDomainService>();
+            var d = (await svc.GetAllAsync()).FirstOrDefault(x => x.Id == Id!.Value);
+            if (d is null)
+            {
+                notFound = true;
+                return;
+            }
 
-        domain = d.Domain;
-        selector = d.Selector;
-        enabled = d.IsEnabled.ToString().ToLowerInvariant();
-        existingPem = d.PrivateKeyPem;
-        existingPath = d.PrivateKeyPath;
-        dnsTxt = DeriveDnsTxt(d);
-        isLoading = false;
+            domain = d.Domain;
+            selector = d.Selector;
+            enabled = d.IsEnabled.ToString().ToLowerInvariant();
+            (dnsTxt, keyBits) = DescribeKey(d);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Loading DKIM domain {DkimId} failed", Id);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            isLoading = false;
+        }
     }
 
     private async Task SaveAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IDkimDomainService>();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        errorMessage = null;
 
-        if (IsNew)
+        if (!InputValidation.TryNormalizeDomain(domain, out var normalized, out var domainError))
         {
-            var normalized = domain.ToLowerInvariant().Trim();
-            if (await svc.GetByDomainAsync(normalized) is not null)
-            {
-                statusMessage = $"DKIM for '{normalized}' already exists";
-                return;
-            }
-
-            var (priv, _, _) = WinSmtpRelay.Security.DkimKeyGenerator.GenerateKeyPair(
-                normalized, selector.Trim(), int.TryParse(keySize, out var ks) ? ks : 2048);
-
-            var created = await svc.CreateAsync(new DkimDomain
-            {
-                Domain = normalized,
-                Selector = selector.Trim(),
-                PrivateKeyPem = priv,
-                IsEnabled = enabled == "true"
-            });
-
-            // Land on the detail page so the operator sees the DNS record to publish.
-            Nav.NavigateTo($"/dkim/{created.Id}");
+            errorMessage = domainError;
+            return;
+        }
+        var sel = selector.Trim();
+        if (!IsValidSelector(sel))
+        {
+            errorMessage = "Selector: use letters, digits, hyphens and dots only (e.g. default or s2026).";
             return;
         }
 
-        await svc.UpdateAsync(new DkimDomain
+        busy = true;
+        try
         {
-            Id = Id!.Value,
-            Domain = domain.ToLowerInvariant().Trim(),
-            Selector = selector.Trim(),
-            PrivateKeyPem = existingPem,
-            PrivateKeyPath = existingPath,
-            IsEnabled = enabled == "true"
-        });
-        Nav.NavigateTo("/dkim");
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IDkimDomainService>();
+
+            if (IsNew)
+            {
+                if (await svc.GetByDomainAsync(normalized) is not null)
+                {
+                    errorMessage = $"DKIM for '{normalized}' already exists";
+                    return;
+                }
+
+                var bits = int.TryParse(keySize, out var ks) && ks is 2048 or 4096 ? ks : 2048;
+                var (priv, _, _) = WinSmtpRelay.Security.DkimKeyGenerator.GenerateKeyPair(normalized, sel, bits);
+
+                var created = await svc.CreateAsync(new DkimDomain
+                {
+                    Domain = normalized,
+                    Selector = sel,
+                    PrivateKeyPem = priv,
+                    IsEnabled = enabled == "true"
+                });
+
+                // Land on the detail page so the operator sees the DNS record to publish.
+                Nav.NavigateTo($"/dkim/{created.Id}");
+                return;
+            }
+
+            // Keep the stored key: copy it from the entity as it is in the database right now.
+            var stored = (await svc.GetAllAsync()).FirstOrDefault(x => x.Id == Id!.Value);
+            if (stored is null)
+            {
+                notFound = true;
+                return;
+            }
+
+            await svc.UpdateAsync(new DkimDomain
+            {
+                Id = Id!.Value,
+                Domain = normalized,
+                Selector = sel,
+                PrivateKeyPem = stored.PrivateKeyPem,
+                PrivateKeyPath = stored.PrivateKeyPath,
+                IsEnabled = enabled == "true"
+            });
+            Nav.NavigateTo("/dkim");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving DKIM domain {Domain} failed", normalized);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task RegenerateAsync()
     {
-        var (priv, _, txt) = WinSmtpRelay.Security.DkimKeyGenerator.GenerateKeyPair(
-            domain.ToLowerInvariant().Trim(), selector.Trim(), 2048);
-        existingPem = priv;
-        existingPath = null; // the stored key now supersedes any legacy file
-        dnsTxt = txt;
-
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IDkimDomainService>();
-        await svc.UpdateAsync(new DkimDomain
+        if (busy) return;                                   // double-submit guard (before the first await)
+        busy = true;
+        errorMessage = null;
+        statusMessage = null;
+        try
         {
-            Id = Id!.Value,
-            Domain = domain.ToLowerInvariant().Trim(),
-            Selector = selector.Trim(),
-            PrivateKeyPem = existingPem,
-            IsEnabled = enabled == "true"
-        });
-        statusMessage = "Key regenerated — republish the DNS record below.";
+            var normalized = domain.ToLowerInvariant().Trim();
+            var sel = selector.Trim();
+
+            // Keep the key size the domain had (a 4096-bit domain stays 4096-bit).
+            var bits = keyBits is 1024 or 2048 or 3072 or 4096 ? Math.Max(keyBits, 2048) : 2048;
+            var (priv, _, txt) = WinSmtpRelay.Security.DkimKeyGenerator.GenerateKeyPair(normalized, sel, bits);
+
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IDkimDomainService>();
+            await svc.UpdateAsync(new DkimDomain
+            {
+                Id = Id!.Value,
+                Domain = normalized,
+                Selector = sel,
+                PrivateKeyPem = priv,
+                PrivateKeyPath = null, // the stored key now supersedes any legacy file
+                IsEnabled = enabled == "true"
+            });
+
+            dnsTxt = txt;
+            keyBits = bits;
+            statusMessage = "Key regenerated — republish the DNS record above.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Regenerating the DKIM key for {Domain} failed", domain);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+            showRegenerateConfirm = false;
+        }
     }
 
-    private static string? DeriveDnsTxt(DkimDomain d)
+    /// <summary>The DNS TXT value and the RSA key size of the stored key (null value when it cannot be read).</summary>
+    private static (string? DnsTxt, int KeyBits) DescribeKey(DkimDomain d)
     {
         try
         {
@@ -220,22 +316,26 @@ else
             else if (!string.IsNullOrWhiteSpace(d.PrivateKeyPath) && File.Exists(d.PrivateKeyPath))
                 pem = File.ReadAllText(d.PrivateKeyPath);
             else
-                return null;
+                return (null, 2048);
 
             using var rsa = RSA.Create();
             rsa.ImportFromPem(pem);
-            return "v=DKIM1; k=rsa; p=" + Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+            return ("v=DKIM1; k=rsa; p=" + Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo()), rsa.KeySize);
         }
         catch
         {
-            return null;
+            return (null, 2048);
         }
     }
 
+    private static bool IsValidSelector(string value) =>
+        value.Length is > 0 and <= 63
+        && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_')
+        && !value.StartsWith('.') && !value.EndsWith('.');
+
     private async Task CopyAsync(string value)
     {
-        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); }
-        catch { /* best-effort */ }
+        statusMessage = await JS.CopyToClipboardAsync(value) ? "Copied." : UiMessages.CopyFailed;
     }
 
     private void Cancel() => Nav.NavigateTo("/dkim");

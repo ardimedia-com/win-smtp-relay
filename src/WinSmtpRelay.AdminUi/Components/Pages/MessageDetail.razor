@@ -6,6 +6,8 @@
 @using WinSmtpRelay.Core.Models
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject IAuthorizationService AuthorizationService
+@inject ILogger<MessageDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -43,14 +45,14 @@ else
             <div class="form-grid">
                 <div><strong class="text-muted">Status</strong><br /><span class="badge-status @GetBadgeCss(vm.Status)">@vm.Status</span></div>
                 <div><strong class="text-muted">Created</strong><br /><LocalTime Utc="@vm.CreatedUtc" /></div>
-                <div><strong class="text-muted">Sender</strong><br />@vm.Sender</div>
+                <div class="wrap-anywhere"><strong class="text-muted">Sender</strong><br />@vm.Sender</div>
                 <div><strong class="text-muted">Size</strong><br />@FormatSize(vm.SizeBytes)</div>
                 <div><strong class="text-muted">Retries</strong><br />@vm.RetryCount</div>
-                <div><strong class="text-muted">Message-ID</strong><br /><span class="mono" style="word-break:break-all;">@vm.MessageId</span></div>
+                <div><strong class="text-muted">Message-ID</strong><br /><span class="mono wrap-anywhere">@vm.MessageId</span></div>
             </div>
             @if (!string.IsNullOrWhiteSpace(vm.LastError))
             {
-                <div style="margin-top:0.75rem;"><strong class="text-muted">Last error</strong><br /><span class="mono" style="word-break:break-word;">@vm.LastError</span></div>
+                <div class="mt-1"><strong class="text-muted">Last error</strong><br /><span class="mono wrap-anywhere">@vm.LastError</span></div>
             }
         </BbCardContent>
     </BbCard>
@@ -64,11 +66,12 @@ else
             </p>
             @if (undelivered.Count > 0)
             {
-                <div style="display:flex;flex-wrap:wrap;gap:0.4rem;">
+                <div class="row-flex">
                     @foreach (var r in undelivered)
                     {
-                        <span class="badge-status @(IsSuppressed(r) ? "badge-error" : "badge-warning")"
-                              title="@(IsSuppressed(r) ? "On the suppression list" : "Not delivered")">@r</span>
+                        @* The colour is not the only cue: suppressed addresses carry a text marker as well. *@
+                        <span class="badge-status wrap-anywhere @(IsSuppressed(r) ? "badge-error" : "badge-warning")"
+                              title="@(IsSuppressed(r) ? "On the suppression list" : "Not delivered")">@r@(IsSuppressed(r) ? " (suppressed)" : "")</span>
                     }
                 </div>
             }
@@ -77,18 +80,22 @@ else
                 <p class="text-muted" style="margin:0;">Every recipient was delivered.</p>
             }
 
-            <div style="margin-top:1rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-                <BbButton Variant="ButtonVariant.Default" Disabled="@(!vm.HasBody)" @onclick="OpenResend">
-                    <LucideIcon Name="send" /> Resend…
-                </BbButton>
-                @if (!vm.HasBody)
-                {
-                    <span class="text-muted" style="font-size:0.85rem;">
-                        Resend unavailable — the message body is no longer retained. Increase the resend-retention
-                        window under <a href="/settings?tab=statistics">Settings → Data retention</a> to keep bodies longer.
-                    </span>
-                }
-            </div>
+            @* Resend queues new mail and can lift suppressions: AdminFull only. The handlers re-check the
+               policy — hiding the button alone is not a permission check. *@
+            <AuthorizeView Policy="@AuthorizationPolicies.AdminFull" Context="resendAuth">
+                <div class="row-flex mt-1">
+                    <BbButton Variant="ButtonVariant.Default" Disabled="@(!vm.HasBody)" @onclick="OpenResend">
+                        <LucideIcon Name="send" /> Resend…
+                    </BbButton>
+                    @if (!vm.HasBody)
+                    {
+                        <span class="hint">
+                            Resend unavailable — the message body is no longer retained. Increase the resend-retention
+                            window under <a href="/settings?tab=statistics">Settings → Data retention</a> to keep bodies longer.
+                        </span>
+                    }
+                </div>
+            </AuthorizeView>
         </BbCardContent>
     </BbCard>
 
@@ -116,10 +123,10 @@ else
                     {
                         <BbTableRow Item="@log">
                             <BbTableCell><LocalTime Utc="@log.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /></BbTableCell>
-                            <BbTableCell>@log.Recipient</BbTableCell>
+                            <BbTableCell class="wrap-anywhere">@log.Recipient</BbTableCell>
                             <BbTableCell><span class="badge-status @GetStatusCss(log.StatusCode)">@log.StatusCode</span></BbTableCell>
                             <BbTableCell>@(log.RemoteServer ?? "-")</BbTableCell>
-                            <BbTableCell style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@log.StatusMessage">@log.StatusMessage</BbTableCell>
+                            <BbTableCell class="cell-ellipsis" title="@log.StatusMessage">@log.StatusMessage</BbTableCell>
                         </BbTableRow>
                     }
                 </BbTableBody>
@@ -138,25 +145,24 @@ else
             </BbDialogDescription>
         </BbDialogHeader>
 
-        <div class="form-group" style="min-width:0;">
+        <div class="form-group wrap-anywhere">
             <BbLabel For="resend-recipients">Recipients</BbLabel>
-            <textarea id="resend-recipients" rows="5"
-                      style="width:100%;max-width:100%;box-sizing:border-box;font-family:var(--font-mono,monospace);font-size:0.875rem;padding:0.5rem;border:1px solid var(--border);border-radius:var(--radius,0.375rem);background:var(--background);color:var(--foreground);"
+            <textarea id="resend-recipients" rows="5" class="form-textarea"
                       value="@resendRecipients" @oninput="@(e => resendRecipients = e.Value?.ToString() ?? "")"></textarea>
         </div>
 
         @if (suppressedInList.Count > 0)
         {
-            <div style="font-size:0.85rem;color:var(--warning);margin-top:0.25rem;min-width:0;">
-                <p style="display:flex;gap:0.4rem;align-items:flex-start;margin:0 0 0.4rem;">
+            <div class="resend-suppressed">
+                <p class="row-flex-start">
                     <LucideIcon Name="triangle-alert" Size="14" />
                     <span>These recipients are on the suppression list and will be skipped unless you remove them first:</span>
                 </p>
                 @foreach (var addr in suppressedInList)
                 {
-                    <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;margin:0 0 0.3rem 1.4rem;min-width:0;">
-                        <code style="min-width:0;overflow-wrap:anywhere;">@addr</code>
-                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Outline" Disabled="@unsuppressing"
+                    <div class="row-flex resend-suppressed-row">
+                        <code class="wrap-anywhere">@addr</code>
+                        <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Outline" Disabled="@(unsuppressing || resending)"
                                   @onclick="() => UnsuppressAsync(addr)">Remove from suppression list</BbButton>
                     </div>
                 }
@@ -170,7 +176,7 @@ else
 
         <BbDialogFooter>
             <BbButton Variant="ButtonVariant.Outline" @onclick="() => showResend = false">Cancel</BbButton>
-            <BbButton Variant="ButtonVariant.Default" Disabled="@(resending || ParseRecipients(resendRecipients).Count == 0)" @onclick="DoResendAsync">
+            <BbButton Variant="ButtonVariant.Default" Disabled="@(resending || unsuppressing || ParseRecipients(resendRecipients).Count == 0)" @onclick="DoResendAsync">
                 <LucideIcon Name="send" /> @(resending ? "Resending…" : "Resend")
             </BbButton>
         </BbDialogFooter>
@@ -209,7 +215,16 @@ else
             int.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out currentUserId);
             currentEmail = user.Identity?.Name;
         }
-        await LoadAsync();
+        try
+        {
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Loading message {MessageId} failed", Id);
+            resendStatus = UiMessages.Unexpected;
+            isLoading = false;
+        }
     }
 
     private async Task LoadAsync()
@@ -252,6 +267,8 @@ else
 
     private bool IsSuppressed(string address) => suppressedIdByAddress.ContainsKey(address.Trim());
 
+    private Task<bool> CanChangeAsync() => AuthorizationService.IsAllowedAsync(AuthState, AuthorizationPolicies.AdminFull);
+
     private void OpenResend()
     {
         // Pre-fill with the recipients that still need delivering; fall back to all recipients.
@@ -263,14 +280,25 @@ else
 
     private async Task UnsuppressAsync(string address)
     {
-        if (unsuppressing) return;
+        if (unsuppressing) return;                   // double-submit guard (before the first await)
         if (!suppressedIdByAddress.TryGetValue(address.Trim(), out var id)) return;
         unsuppressing = true;
+        resendError = null;
         try
         {
+            if (!await CanChangeAsync())
+            {
+                resendError = UiMessages.Forbidden;
+                return;
+            }
             using var scope = ScopeFactory.CreateScope();
             await scope.ServiceProvider.GetRequiredService<ISuppressionService>().RemoveAsync(id);
             await LoadSuppressedAsync(scope.ServiceProvider);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Removing suppression {SuppressionId} from message {MessageId} failed", id, Id);
+            resendError = UiMessages.Unexpected;
         }
         finally { unsuppressing = false; }
     }
@@ -284,6 +312,11 @@ else
         resendError = null;
         try
         {
+            if (!await CanChangeAsync())
+            {
+                resendError = UiMessages.Forbidden;
+                return;
+            }
             using var scope = ScopeFactory.CreateScope();
             var sp = scope.ServiceProvider;
             var outcome = await sp.GetRequiredService<IMessageResendService>().ResendAsync(Id, recipients);
@@ -300,6 +333,11 @@ else
             showResend = false;
             resendStatus = $"Re-queued as message {outcome.NewMessageId} for {recipients.Count} recipient(s). It will be delivered shortly.";
             await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Resending message {MessageId} failed", Id);
+            resendError = UiMessages.Unexpected;
         }
         finally { resending = false; }
     }

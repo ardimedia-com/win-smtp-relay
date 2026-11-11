@@ -7,6 +7,7 @@
 @inject IPublicSuffixService PublicSuffix
 @inject WinSmtpRelay.AdminUi.Services.PublicIpDetector IpDetector
 @inject IJSRuntime JS
+@inject ILogger<DnsSetup> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -81,9 +82,13 @@ else
                             <div class="dns-record-row">
                                 <span class="dns-record-label">Expected</span>
                                 <code class="mono dns-record-value">@rec.Expected</code>
-                                <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => CopyAsync(rec.Expected)" title="Copy">
+                                <BbButton Variant="ButtonVariant.Ghost" Size="ButtonSize.Small" @onclick="() => CopyAsync(rec.Expected)" title="Copy" AriaLabel="Copy the expected value">
                                     <LucideIcon Name="copy" />
                                 </BbButton>
+                                @if (copyStatus is not null && copiedValue == rec.Expected)
+                                {
+                                    <span class="hint" role="status">@copyStatus</span>
+                                }
                             </div>
                         }
                         <div class="dns-record-row">
@@ -98,6 +103,10 @@ else
                                 <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => CopyAsync(rec.Suggested!)" title="Copy">
                                     <LucideIcon Name="copy" /> Copy
                                 </BbButton>
+                                @if (copyStatus is not null && copiedValue == rec.Suggested)
+                                {
+                                    <span class="hint" role="status">@copyStatus</span>
+                                }
                             </div>
                         }
                     </div>
@@ -180,13 +189,13 @@ else
                         <BbInput Id="domain" @bind-Value="adHocDomain" Placeholder="example.com" />
                         @if (adHocError is not null)
                         {
-                            <p class="text-danger" style="font-size:0.8rem;margin-top:0.25rem;">@adHocError</p>
+                            <p class="form-error" role="alert">@adHocError</p>
                         }
                     </div>
                 </BbCardContent>
                 <BbCardFooter>
-                    <BbButton Variant="ButtonVariant.Default" @onclick="CheckAdHocAsync" Disabled="@string.IsNullOrWhiteSpace(adHocDomain)">
-                        <LucideIcon Name="search" /> Check
+                    <BbButton Variant="ButtonVariant.Default" @onclick="CheckAdHocAsync" Disabled="@(checkingDomain || string.IsNullOrWhiteSpace(adHocDomain))">
+                        <LucideIcon Name="search" /> @(checkingDomain ? "Checking…" : "Check")
                     </BbButton>
                 </BbCardFooter>
             </BbCard>
@@ -261,16 +270,16 @@ else
             <BbDialogTitle>About Deliverability</BbDialogTitle>
             <BbDialogDescription>What to verify so your mail is accepted</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p><strong>IP addresses</strong></p>
-            <ul style="padding-left:1.25rem;">
+            <ul>
                 <li><strong>Public hostname (A/AAAA)</strong> — must resolve to your sending IP; used in SPF (<code>a:</code>) and as the EHLO name.</li>
                 <li><strong>Reverse DNS (PTR)</strong> — each sending IP should have a PTR matching the hostname (FCrDNS). Missing/mismatched reverse DNS is a top reason mail is rejected or spam-foldered.</li>
                 <li><strong>SPF coverage</strong> — a tenant's egress IP must be listed in your sending IPs, or mail from it fails SPF.</li>
                 <li><strong>Blocklist (DNSBL)</strong> — each sending IP is checked against Spamhaus ZEN and SpamCop. <strong>Listed</strong> (red) means receivers like Microsoft 365 will reject your mail (SMTP 5.7.1) — use the delisting link and send from a clean IP. A <strong>&ldquo;could not query&rdquo;</strong> result is <em>not</em> a clean pass: Spamhaus refuses lookups from public resolvers (e.g. 8.8.8.8 / 1.1.1.1) with a special code, which this page reports honestly rather than as &ldquo;not listed&rdquo;. To get a real answer, run the relay where its DNS resolver is the server&rsquo;s own/ISP resolver (or use a Spamhaus DQS key).</li>
             </ul>
             <p><strong>Check DNS</strong></p>
-            <ul style="padding-left:1.25rem;">
+            <ul>
                 <li><strong>SPF / DKIM / DMARC</strong> (per sender domain) — TXT records that let receivers verify mail you send <em>as</em> that domain.</li>
                 <li><strong>MX</strong> (per recipient / backup-MX domain) — must point to this relay so it can receive mail <em>for</em> that domain.</li>
                 <li><strong>Used in your configuration</strong> — domains found in your settings (the public hostname's registrable domain, DKIM domains, the DMARC report address) offered as one-click checks, plus an ad-hoc box for anything else.</li>
@@ -307,6 +316,9 @@ else
     private List<string> candidateIps = [];
     private string adHocDomain = "";
     private string? adHocError;
+    private bool checkingDomain;
+    private string? copyStatus;
+    private string? copiedValue;
     private bool isLoading = true;
     private string? loadError;
     private bool showHelp;
@@ -547,10 +559,11 @@ else
 
     private async Task CheckAdHocAsync()
     {
-        var domain = adHocDomain.Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(domain) || Uri.CheckHostName(domain) != UriHostNameType.Dns)
+        if (checkingDomain) return;
+        // IDN input (bücher.ch) is converted to punycode — DNS only knows the ASCII form.
+        if (!InputValidation.TryNormalizeDomain(adHocDomain, out var domain, out var error))
         {
-            adHocError = "Enter a valid domain name (e.g. example.com).";
+            adHocError = error;
             return;
         }
         adHocError = null;
@@ -562,14 +575,29 @@ else
 
     private async Task RunDomainCheckAsync(string rawDomain, string subtitle)
     {
-        var domain = rawDomain.Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(domain) || Uri.CheckHostName(domain) != UriHostNameType.Dns) return;
-        using var scope = ScopeFactory.CreateScope();
-        var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
-        var setup = await dns.CheckDomainAsync(domain, _cts.Token);
-        adHocGroups.RemoveAll(g => g.Title == domain);
-        adHocGroups.Insert(0, new CheckGroup(domain, subtitle, [setup.Spf, setup.Dkim, setup.Dmarc], Alignment: setup.Alignment));
-        activeTab = "dns";
+        if (checkingDomain) return;                          // one lookup at a time (before the first await)
+        if (!InputValidation.TryNormalizeDomain(rawDomain, out var domain, out _)) return;
+        checkingDomain = true;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var dns = scope.ServiceProvider.GetRequiredService<IDnsSetupService>();
+            var setup = await dns.CheckDomainAsync(domain, _cts.Token);
+            adHocGroups.RemoveAll(g => g.Title == domain);
+            adHocGroups.Insert(0, new CheckGroup(domain, subtitle, [setup.Spf, setup.Dkim, setup.Dmarc], Alignment: setup.Alignment));
+            activeTab = "dns";
+        }
+        catch (OperationCanceledException) { /* circuit gone while the DNS lookup was in flight */ }
+        catch (ObjectDisposedException) { /* circuit gone while the DNS lookup was in flight */ }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "DNS check for {Domain} failed", domain);
+            adHocError = $"The DNS check for {domain} failed. " + UiMessages.Unexpected;
+        }
+        finally
+        {
+            checkingDomain = false;
+        }
     }
 
     private static string? EmailDomain(string? email)
@@ -613,8 +641,9 @@ else
 
     private async Task CopyAsync(string value)
     {
-        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); }
-        catch { /* best-effort copy */ }
+        // The helper never throws: it falls back on plain HTTP and reports a refusal as false.
+        copiedValue = value;
+        copyStatus = await JS.CopyToClipboardAsync(value) ? "Copied." : UiMessages.CopyFailed;
     }
 
     private static string AlignmentBadge(DmarcAlignmentVerdict v) => v switch

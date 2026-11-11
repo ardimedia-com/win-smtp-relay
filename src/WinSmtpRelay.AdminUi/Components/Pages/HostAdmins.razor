@@ -6,6 +6,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
 @inject IJSRuntime JS
+@inject ILogger<HostAdmins> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -41,13 +42,17 @@
             </div>
             <div class="form-group">
                 <BbLabel For="otp">One-time password</BbLabel>
-                <div style="display:flex;gap:0.5rem;align-items:center;">
+                <div class="row-flex">
                     <BbInput Id="otp" Value="@createdPassword" ReadOnly="true" Class="mono" />
                     <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="CopyAsync"><LucideIcon Name="copy" /> Copy</BbButton>
                 </div>
+                @if (copyStatus is not null)
+                {
+                    <p class="hint" role="status">@copyStatus</p>
+                }
             </div>
         </BbCardContent>
-        <BbCardFooter><BbButton @onclick="@(() => { createdPassword = null; })">Done</BbButton></BbCardFooter>
+        <BbCardFooter><BbButton @onclick="@(() => { createdPassword = null; copyStatus = null; })">Done</BbButton></BbCardFooter>
     </BbCard>
 }
 else if (creating)
@@ -91,7 +96,7 @@ else
             {
                 <BbTableRow Item="@r">
                     <BbTableCell>@r.Email</BbTableCell>
-                    <BbTableCell><span class="badge-status @(r.Enabled ? "" : "badge-muted")">@(r.Enabled ? "Enabled" : "Disabled")</span></BbTableCell>
+                    <BbTableCell><span class="badge-status @(r.Enabled ? "badge-success" : "badge-muted")">@(r.Enabled ? "Enabled" : "Disabled")</span></BbTableCell>
                     <BbTableCell>
                         <div class="list-row-actions">
                             @if (r.IsSelf)
@@ -100,9 +105,24 @@ else
                             }
                             else
                             {
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Reset password" @onclick="() => ResetAsync(r.Id)"><LucideIcon Name="key-round" /></BbButton>
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="@(r.Enabled ? "Disable" : "Enable")" @onclick="() => ToggleAsync(r.Id)"><LucideIcon Name="@(r.Enabled ? "pause" : "play")" /></BbButton>
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete" @onclick="() => { deleteId = r.Id; showDelete = true; }"><LucideIcon Name="trash-2" /></BbButton>
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Reset password"
+                                          AriaLabel="@($"Reset password of {r.Email}")" Disabled="@busy"
+                                          @onclick="() => AskConfirm(PendingAction.Reset, r)"><LucideIcon Name="key-round" /></BbButton>
+                                @if (r.Enabled)
+                                {
+                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Disable"
+                                              AriaLabel="@($"Disable {r.Email}")" Disabled="@busy"
+                                              @onclick="() => AskConfirm(PendingAction.Disable, r)"><LucideIcon Name="pause" /></BbButton>
+                                }
+                                else
+                                {
+                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Enable"
+                                              AriaLabel="@($"Enable {r.Email}")" Disabled="@busy"
+                                              @onclick="() => ToggleAsync(r.Id)"><LucideIcon Name="play" /></BbButton>
+                                }
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                          AriaLabel="@($"Delete {r.Email}")" Disabled="@busy"
+                                          @onclick="() => { deleteId = r.Id; deleteEmail = r.Email; showDelete = true; }"><LucideIcon Name="trash-2" /></BbButton>
                             }
                         </div>
                     </BbTableCell>
@@ -116,11 +136,38 @@ else
     <BbAlertDialogContent>
         <BbAlertDialogHeader>
             <BbAlertDialogTitle>Delete host admin</BbAlertDialogTitle>
-            <BbAlertDialogDescription>This permanently removes the login account and its memberships.</BbAlertDialogDescription>
+            <BbAlertDialogDescription>This permanently removes the login account <strong>@deleteEmail</strong> and its memberships.</BbAlertDialogDescription>
         </BbAlertDialogHeader>
         <BbAlertDialogFooter>
             <BbAlertDialogCancel><BbButton Variant="ButtonVariant.Outline">Cancel</BbButton></BbAlertDialogCancel>
-            <BbAlertDialogAction><BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteAsync">Delete</BbButton></BbAlertDialogAction>
+            <BbAlertDialogAction><BbButton Variant="ButtonVariant.Destructive" Disabled="@busy" @onclick="ConfirmDeleteAsync">Delete</BbButton></BbAlertDialogAction>
+        </BbAlertDialogFooter>
+    </BbAlertDialogContent>
+</BbAlertDialog>
+
+<BbAlertDialog @bind-Open="showConfirm">
+    <BbAlertDialogContent>
+        <BbAlertDialogHeader>
+            <BbAlertDialogTitle>@(pendingAction == PendingAction.Reset ? "Reset password" : "Disable host admin")</BbAlertDialogTitle>
+            <BbAlertDialogDescription>
+                @if (pendingAction == PendingAction.Reset)
+                {
+                    <span>The current password of <strong>@pendingEmail</strong> stops working immediately. A one-time password
+                        is shown once; they must change it at the next sign-in.</span>
+                }
+                else
+                {
+                    <span><strong>@pendingEmail</strong> can no longer sign in until an administrator enables the account again.</span>
+                }
+            </BbAlertDialogDescription>
+        </BbAlertDialogHeader>
+        <BbAlertDialogFooter>
+            <BbAlertDialogCancel><BbButton Variant="ButtonVariant.Outline">Cancel</BbButton></BbAlertDialogCancel>
+            <BbAlertDialogAction>
+                <BbButton Variant="ButtonVariant.Destructive" Disabled="@busy" @onclick="ConfirmPendingAsync">
+                    @(pendingAction == PendingAction.Reset ? "Reset password" : "Disable")
+                </BbButton>
+            </BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
 </BbAlertDialog>
@@ -138,8 +185,34 @@ else
     private string? createdPassword;
     private string? createdEmail;
     private string? errorMessage;
+    private string? copyStatus;
     private bool showDelete;
     private int deleteId;
+    private string deleteEmail = "";
+
+    // Reset and disable lock a person out of their current access, so both go through a confirmation.
+    private enum PendingAction { Reset, Disable }
+    private bool showConfirm;
+    private PendingAction pendingAction;
+    private int pendingUserId;
+    private string pendingEmail = "";
+
+    private void AskConfirm(PendingAction action, Row row)
+    {
+        pendingAction = action;
+        pendingUserId = row.Id;
+        pendingEmail = row.Email;
+        showConfirm = true;
+    }
+
+    private async Task ConfirmPendingAsync()
+    {
+        showConfirm = false;
+        if (pendingAction == PendingAction.Reset)
+            await ResetAsync(pendingUserId);
+        else
+            await ToggleAsync(pendingUserId);
+    }
     private int currentUserId;
     private string? currentEmail;
 
@@ -175,10 +248,16 @@ else
     private async Task CreateAsync()
     {
         if (busy) return;
+        var email = newEmail.Trim();
+        if (!InputValidation.IsPlausibleEmail(email))
+        {
+            errorMessage = $"'{email}' is not a valid email address.";
+            return;
+        }
         busy = true;
+        errorMessage = null;
         try
         {
-            var email = newEmail.Trim();
             using var scope = ScopeFactory.CreateScope();
             var sp = scope.ServiceProvider;
             var um = sp.GetRequiredService<UserManager<AdminUser>>();
@@ -208,76 +287,117 @@ else
             creating = false;
             await RefreshAsync();
         }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Creating a host admin failed");
+            errorMessage = UiMessages.Unexpected;
+        }
         finally { busy = false; }
     }
 
     private async Task ResetAsync(int id)
     {
-        using var scope = ScopeFactory.CreateScope();
-        var sp = scope.ServiceProvider;
-        var um = sp.GetRequiredService<UserManager<AdminUser>>();
-        var audit = sp.GetRequiredService<IAdminAuditService>();
-        var user = await um.FindByIdAsync(id.ToString());
-        if (user is null || user.Id == currentUserId) return;
+        if (busy) return;                                    // double-submit guard (before the first await)
+        busy = true;
+        errorMessage = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var um = sp.GetRequiredService<UserManager<AdminUser>>();
+            var audit = sp.GetRequiredService<IAdminAuditService>();
+            var user = await um.FindByIdAsync(id.ToString());
+            if (user is null || user.Id == currentUserId) return;
 
-        var password = TempPassword.Generate();
-        var token = await um.GeneratePasswordResetTokenAsync(user);
-        var result = await um.ResetPasswordAsync(user, token, password);
-        if (!result.Succeeded) { errorMessage = string.Join(" ", result.Errors.Select(e => e.Description)); return; }
-        user.MustChangePassword = true;
-        await um.UpdateAsync(user);
-        await audit.WriteAsync(AdminAuditActions.AdminPasswordReset, currentUserId, currentEmail, targetUserId: user.Id);
-        createdPassword = password;
-        createdEmail = user.Email;
+            var password = TempPassword.Generate();
+            var token = await um.GeneratePasswordResetTokenAsync(user);
+            var result = await um.ResetPasswordAsync(user, token, password);
+            if (!result.Succeeded) { errorMessage = string.Join(" ", result.Errors.Select(e => e.Description)); return; }
+            user.MustChangePassword = true;
+            await um.UpdateAsync(user);
+            await audit.WriteAsync(AdminAuditActions.AdminPasswordReset, currentUserId, currentEmail, targetUserId: user.Id);
+            createdPassword = password;
+            createdEmail = user.Email;
+            copyStatus = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Resetting the password of host admin {UserId} failed", id);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally { busy = false; }
     }
 
     private async Task ToggleAsync(int id)
     {
-        using var scope = ScopeFactory.CreateScope();
-        var sp = scope.ServiceProvider;
-        var um = sp.GetRequiredService<UserManager<AdminUser>>();
-        var memberships = sp.GetRequiredService<IAdminMembershipService>();
-        var audit = sp.GetRequiredService<IAdminAuditService>();
-        var user = await um.FindByIdAsync(id.ToString());
-        if (user is null || user.Id == currentUserId) return;
-
-        var isEnabled = user.LockoutEnd is null || user.LockoutEnd <= DateTimeOffset.UtcNow;
-        if (isEnabled && await memberships.CountHostAdminsAsync() <= 1)
+        if (busy) return;                                    // double-submit guard (before the first await)
+        busy = true;
+        errorMessage = null;
+        try
         {
-            errorMessage = "You can't disable the last enabled host admin.";
-            return;
+            using var scope = ScopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var um = sp.GetRequiredService<UserManager<AdminUser>>();
+            var memberships = sp.GetRequiredService<IAdminMembershipService>();
+            var audit = sp.GetRequiredService<IAdminAuditService>();
+            var user = await um.FindByIdAsync(id.ToString());
+            if (user is null || user.Id == currentUserId) return;
+
+            var isEnabled = user.LockoutEnd is null || user.LockoutEnd <= DateTimeOffset.UtcNow;
+            if (isEnabled && await memberships.CountHostAdminsAsync() <= 1)
+            {
+                errorMessage = "You can't disable the last enabled host admin.";
+                return;
+            }
+            await um.SetLockoutEnabledAsync(user, true);
+            await um.SetLockoutEndDateAsync(user, isEnabled ? DateTimeOffset.MaxValue : null);
+            await audit.WriteAsync(isEnabled ? AdminAuditActions.AdminDisabled : AdminAuditActions.AdminEnabled, currentUserId, currentEmail, targetUserId: user.Id);
+            await RefreshAsync();
         }
-        await um.SetLockoutEnabledAsync(user, true);
-        await um.SetLockoutEndDateAsync(user, isEnabled ? DateTimeOffset.MaxValue : null);
-        await audit.WriteAsync(isEnabled ? AdminAuditActions.AdminDisabled : AdminAuditActions.AdminEnabled, currentUserId, currentEmail, targetUserId: user.Id);
-        await RefreshAsync();
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Enabling/disabling host admin {UserId} failed", id);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally { busy = false; }
     }
 
     private async Task ConfirmDeleteAsync()
     {
+        if (busy) return;                                    // double-submit guard (before the first await)
         showDelete = false;
-        using var scope = ScopeFactory.CreateScope();
-        var sp = scope.ServiceProvider;
-        var um = sp.GetRequiredService<UserManager<AdminUser>>();
-        var memberships = sp.GetRequiredService<IAdminMembershipService>();
-        var audit = sp.GetRequiredService<IAdminAuditService>();
-        var user = await um.FindByIdAsync(deleteId.ToString());
-        if (user is null || user.Id == currentUserId) return;
-
-        if (await memberships.CountHostAdminsAsync() <= 1)
+        busy = true;
+        errorMessage = null;
+        try
         {
-            errorMessage = "You can't delete the last host admin.";
-            return;
+            using var scope = ScopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var um = sp.GetRequiredService<UserManager<AdminUser>>();
+            var memberships = sp.GetRequiredService<IAdminMembershipService>();
+            var audit = sp.GetRequiredService<IAdminAuditService>();
+            var user = await um.FindByIdAsync(deleteId.ToString());
+            if (user is null || user.Id == currentUserId) return;
+
+            if (await memberships.CountHostAdminsAsync() <= 1)
+            {
+                errorMessage = "You can't delete the last host admin.";
+                return;
+            }
+            var email = user.Email;
+            await um.DeleteAsync(user); // cascades memberships + Identity rows
+            await audit.WriteAsync(AdminAuditActions.AdminDeleted, currentUserId, currentEmail, targetUserId: deleteId, detail: email);
+            await RefreshAsync();
         }
-        var email = user.Email;
-        await um.DeleteAsync(user); // cascades memberships + Identity rows
-        await audit.WriteAsync(AdminAuditActions.AdminDeleted, currentUserId, currentEmail, targetUserId: deleteId, detail: email);
-        await RefreshAsync();
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Deleting host admin {UserId} failed", deleteId);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally { busy = false; }
     }
 
     private async Task CopyAsync()
     {
-        if (createdPassword is not null)
-            await JS.InvokeVoidAsync("navigator.clipboard.writeText", createdPassword);
+        copyStatus = await JS.CopyToClipboardAsync(createdPassword) ? "Copied." : UiMessages.CopyFailed;
     }
 }

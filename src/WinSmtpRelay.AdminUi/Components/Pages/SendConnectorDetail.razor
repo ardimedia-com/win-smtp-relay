@@ -5,6 +5,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject ILogger<SendConnectorDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -70,7 +71,14 @@ else
                 </div>
                 <div class="form-group">
                     <BbLabel For="password">Password</BbLabel>
-                    <BbInput Id="password" Type="InputType.Password" @bind-Value="password" />
+                    @* The stored password is never sent to the browser: the field starts empty and a blank value
+                       keeps the stored one (SendConnectorService.UpdateAsync treats null as «keep»). *@
+                    <BbInput Id="password" Type="InputType.Password" @bind-Value="password"
+                             Placeholder="@(hasStoredPassword ? "•••••••• (stored)" : "")" autocomplete="new-password" />
+                    @if (hasStoredPassword)
+                    {
+                        <p class="hint">A password is stored. Leave blank to keep the current password; type a new one to replace it.</p>
+                    }
                 </div>
                 <div class="form-group">
                     <BbLabel For="opportunistic-tls">Opportunistic TLS</BbLabel>
@@ -108,7 +116,7 @@ else
                 <div class="form-group col-span-full">
                     <BbLabel For="ehlo-domain">EHLO hostname override (empty = host default)</BbLabel>
                     <BbInput Id="ehlo-domain" @bind-Value="ehloDomain" Placeholder="relay.example.com" />
-                    <span class="text-muted" style="font-size:0.8rem;">
+                    <span class="hint">
                         Announced in EHLO/HELO for deliveries through this connector. Only needed when this
                         connector sends from a different egress IP than the host default &mdash; use the FQDN
                         matching that IP's PTR record. Empty uses the public hostname from Settings &rarr; Sending identity.
@@ -122,16 +130,20 @@ else
                     </BbNativeSelect>
                 </div>
             </div>
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <p class="form-error" role="alert">@errorMessage</p>
+            }
         </BbCardContent>
         <BbCardFooter>
             <div class="flex gap-1 items-center">
-                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(name)">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(name))">
                     <LucideIcon Name="save" /> Save
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
                 @if (!string.IsNullOrEmpty(statusMessage))
                 {
-                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                    <span class="status-note" role="status">@statusMessage</span>
                 }
             </div>
         </BbCardFooter>
@@ -150,6 +162,9 @@ else
     private bool isLoading = true;
     private bool notFound;
     private string? statusMessage;
+    private string? errorMessage;
+    private bool busy;
+    private bool hasStoredPassword;
 
     private string name = "";
     private string smartHost = "";
@@ -198,7 +213,9 @@ else
         smartHost = c.SmartHost ?? "";
         port = c.SmartHostPort.ToString();
         username = c.Username ?? "";
-        password = c.EncryptedPassword ?? "";
+        // Never bind the stored (decrypted) password into the page: only remember that one exists.
+        hasStoredPassword = !string.IsNullOrEmpty(c.EncryptedPassword);
+        password = "";
         opportunisticTls = c.OpportunisticTls.ToString().ToLowerInvariant();
         requireTls = c.RequireTls.ToString().ToLowerInvariant();
         isDefault = c.IsDefault.ToString().ToLowerInvariant();
@@ -212,34 +229,86 @@ else
 
     private async Task SaveAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ISendConnectorService>();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        errorMessage = null;
 
-        var connector = new SendConnector
+        // Validate everything first — no silent fallback to defaults on unparsable numbers.
+        string? host = null;
+        if (!string.IsNullOrWhiteSpace(smartHost))
         {
-            Id = Id ?? 0,
-            Name = name.Trim(),
-            SmartHost = string.IsNullOrWhiteSpace(smartHost) ? null : smartHost.Trim(),
-            SmartHostPort = int.TryParse(port, out var p) ? p : 587,
-            Username = string.IsNullOrWhiteSpace(username) ? null : username.Trim(),
-            EncryptedPassword = string.IsNullOrWhiteSpace(password) ? null : password,
-            OpportunisticTls = opportunisticTls == "true",
-            RequireTls = requireTls == "true",
-            IsDefault = isDefault == "true",
-            MaxConcurrentDeliveries = int.TryParse(concurrency, out var conc) ? conc : 4,
-            MaxRetryHours = int.TryParse(maxRetry, out var mr) ? mr : 48,
-            RetryIntervalsMinutes = retryIntervals.Trim(),
-            ConnectTimeoutSeconds = 30,
-            IsEnabled = enabled == "true",
-            EhloDomain = string.IsNullOrWhiteSpace(ehloDomain) ? null : ehloDomain.Trim().TrimEnd('.')
-        };
+            var h = smartHost.Trim().TrimEnd('.');
+            if (InputValidation.IsIpAddress(h))
+                host = h;
+            else if (InputValidation.TryNormalizeDomain(h, out var hostAscii, out _))
+                host = hostAscii;
+            else
+            {
+                errorMessage = $"Smart host: '{h}' is not a valid host name or IP address.";
+                return;
+            }
+        }
+        if (!InputValidation.TryParseInt(port, "Port", 1, 65535, out var portValue, out var err)
+            || !InputValidation.TryParseInt(concurrency, "Concurrent deliveries", 1, 100, out var concValue, out err)
+            || !InputValidation.TryParseInt(maxRetry, "Max retry hours", 1, 720, out var maxRetryValue, out err)
+            || !InputValidation.TryParseRetryIntervals(retryIntervals, out var intervals, out err))
+        {
+            errorMessage = err;
+            return;
+        }
+        string? ehlo = null;
+        if (!string.IsNullOrWhiteSpace(ehloDomain))
+        {
+            if (!InputValidation.TryNormalizeDomain(ehloDomain, out var ehloAscii, out var ehloError))
+            {
+                errorMessage = "EHLO hostname: " + ehloError;
+                return;
+            }
+            ehlo = ehloAscii;
+        }
 
-        if (IsNew)
-            await svc.CreateAsync(connector);
-        else
-            await svc.UpdateAsync(connector);
+        busy = true;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<ISendConnectorService>();
 
-        Nav.NavigateTo("/connectors/send");
+            var connector = new SendConnector
+            {
+                Id = Id ?? 0,
+                Name = name.Trim(),
+                SmartHost = host,
+                SmartHostPort = portValue,
+                Username = string.IsNullOrWhiteSpace(username) ? null : username.Trim(),
+                // Blank = keep the stored password (null); the stored value never left the server.
+                EncryptedPassword = string.IsNullOrEmpty(password) ? null : password,
+                OpportunisticTls = opportunisticTls == "true",
+                RequireTls = requireTls == "true",
+                IsDefault = isDefault == "true",
+                MaxConcurrentDeliveries = concValue,
+                MaxRetryHours = maxRetryValue,
+                RetryIntervalsMinutes = intervals,
+                ConnectTimeoutSeconds = 30,
+                IsEnabled = enabled == "true",
+                EhloDomain = ehlo
+            };
+
+            if (IsNew)
+                await svc.CreateAsync(connector);
+            else
+                await svc.UpdateAsync(connector);
+
+            password = "";
+            Nav.NavigateTo("/connectors/send");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving send connector {ConnectorId} failed", Id);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private void Cancel() => Nav.NavigateTo("/connectors/send");

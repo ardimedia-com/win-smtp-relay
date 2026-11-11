@@ -4,6 +4,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject ILogger<Suppressions> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -22,6 +23,11 @@
         <LucideIcon Name="plus" /> Add address
     </BbButton>
 </div>
+
+@if (!string.IsNullOrEmpty(actionError))
+{
+    <p class="form-error mb-1" role="alert">@actionError</p>
+}
 
 @if (isLoading)
 {
@@ -48,14 +54,14 @@ else
             }
             @foreach (var e in rows)
             {
-                <BbTableRow Item="@e" class="list-row-clickable" @onclick="() => ShowDetail(e)">
+                <BbTableRow Item="@e" class="list-row-clickable" tabindex="0" role="link" @onclick="() => ShowDetail(e)" @onkeydown="args => OnRowKey(args, () => ShowDetail(e))">
                     <BbTableCell><code>@e.Address</code></BbTableCell>
                     <BbTableCell><span class="badge-status @ReasonCss(e.Reason)">@e.Reason</span></BbTableCell>
-                    <BbTableCell style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@(e.Detail ?? "—")</BbTableCell>
+                    <BbTableCell class="cell-ellipsis" title="@e.Detail">@(e.Detail ?? "—")</BbTableCell>
                     <BbTableCell><LocalTime Utc="@e.CreatedUtc" /></BbTableCell>
                     <BbTableCell>
-                        <div class="list-row-actions" @onclick:stopPropagation="true">
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Remove (re-enable delivery)"
+                        <div class="list-row-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Remove (re-enable delivery)" aria-label="Remove (re-enable delivery)"
                                     @onclick="() => { removeId = e.Id; removeAddress = e.Address; showRemove = true; }">
                                 <LucideIcon Name="trash-2" />
                             </BbButton>
@@ -75,7 +81,7 @@ else
         </BbAlertDialogHeader>
         <BbAlertDialogFooter>
             <BbAlertDialogCancel><BbButton Variant="ButtonVariant.Outline">Cancel</BbButton></BbAlertDialogCancel>
-            <BbAlertDialogAction><BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmRemoveAsync">Remove</BbButton></BbAlertDialogAction>
+            <BbAlertDialogAction><BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmRemoveAsync" Disabled="@busy">Remove</BbButton></BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
 </BbAlertDialog>
@@ -88,7 +94,7 @@ else
         </BbDialogHeader>
         @if (selected is not null)
         {
-            <div style="font-size:0.875rem;line-height:1.6;">
+            <div class="dialog-body">
                 <p style="margin:0 0 0.5rem;"><strong>Address:</strong> <code>@selected.Address</code></p>
                 <p style="margin:0 0 0.5rem;"><strong>Reason:</strong> <span class="badge-status @ReasonCss(selected.Reason)">@selected.Reason</span></p>
                 <p style="margin:0 0 0.5rem;"><strong>Detail:</strong> @(selected.Detail ?? "—")</p>
@@ -109,6 +115,16 @@ else
 </BbDialog>
 
 @code {
+    private bool busy;
+    private string? actionError;
+
+    // Opens the row's detail with the keyboard (rows are focusable: tabindex="0").
+    private static void OnRowKey(KeyboardEventArgs e, Action open)
+    {
+        if (e.Key is "Enter" or " ")
+            open();
+    }
+
     private IReadOnlyList<SuppressionEntry> rows = [];
     private bool isLoading = true;
     private bool showRemove;
@@ -136,11 +152,26 @@ else
 
     private async Task ConfirmRemoveAsync()
     {
-        showRemove = false;
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ISuppressionService>();
-        await svc.RemoveAsync(removeId);
-        await RefreshAsync();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        busy = true;
+        actionError = null;
+        try
+        {
+            showRemove = false;
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<ISuppressionService>();
+            await svc.RemoveAsync(removeId);
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{Action} on the {Page} page failed", "ConfirmRemoveAsync", "Suppressions");
+            actionError = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private static string ReasonCss(SuppressionReason reason) => reason switch

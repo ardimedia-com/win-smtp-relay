@@ -9,6 +9,7 @@
 @inject IUpdateService Updater
 @inject IAdminAuditService Audit
 @inject NavigationManager Nav
+@inject ILogger<Update> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -55,7 +56,7 @@
         <BbCardContent Class="pt-6">
             @if (installing)
             {
-                <div style="display:flex;align-items:center;gap:0.5rem;">
+                <div class="row-flex">
                     <BbSpinner /> <span class="text-muted">Downloading and verifying the update…</span>
                 </div>
             }
@@ -81,7 +82,7 @@
 {
     <BbCard>
         <BbCardContent Class="pt-6">
-            <div style="display:flex;align-items:center;gap:0.5rem;">
+            <div class="row-flex">
                 <BbSpinner />
                 <span class="text-muted">Checking for updates...</span>
             </div>
@@ -93,7 +94,7 @@ else if (errorMessage is not null)
     <BbCard>
         <BbCardContent Class="pt-6">
             <BbAlert>@errorMessage</BbAlert>
-            <BbButton Variant="ButtonVariant.Outline" @onclick="CheckForUpdates" Class="mt-1">
+            <BbButton Variant="ButtonVariant.Outline" @onclick="CheckForUpdates" Class="mt-1" Disabled="@isChecking">
                 <LucideIcon Name="refresh-cw" />
                 Retry
             </BbButton>
@@ -104,7 +105,7 @@ else if (hasChecked)
 {
     <BbCard Class="mb-1">
         <BbCardHeader>
-            <div style="display:flex;align-items:center;gap:0.5rem;">
+            <div class="row-flex">
                 <BbCardTitle>Latest Stable Release</BbCardTitle>
                 @if (latestStable is not null)
                 {
@@ -135,7 +136,7 @@ else if (hasChecked)
     {
         <BbCard Class="mb-1">
             <BbCardHeader>
-                <div style="display:flex;align-items:center;gap:0.5rem;">
+                <div class="row-flex">
                     <BbCardTitle>Latest Pre-release</BbCardTitle>
                     @if (isPrereleaseNewer)
                     {
@@ -158,7 +159,7 @@ else
 {
     <BbCard Class="mt-1">
         <BbCardContent Class="pt-6">
-            <BbButton Variant="ButtonVariant.Default" @onclick="CheckForUpdates">
+            <BbButton Variant="ButtonVariant.Default" @onclick="CheckForUpdates" Disabled="@isChecking">
                 <LucideIcon Name="download" />
                 Check for Updates
             </BbButton>
@@ -172,25 +173,25 @@ else
             <BbDialogTitle>About Software Update</BbDialogTitle>
             <BbDialogDescription>Checking for new releases</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 This page checks the <strong>GitHub Releases</strong> API for newer versions of WIN-SMTP-RELAY.
                 No data is sent &mdash; the relay simply fetches the latest release metadata from the public repository.
             </p>
-            <h4 style="margin-top:1rem;">How it works</h4>
-            <ol style="padding-left:1.25rem;">
+            <h3>How it works</h3>
+            <ol>
                 <li>Click <strong>Check for Updates</strong> to query the GitHub API.</li>
                 <li>The current running version is compared against the latest stable and pre-release tags.</li>
                 <li>If a newer version is available, an <strong>Update Available</strong> badge is shown along with download links and release notes.</li>
             </ol>
-            <h4 style="margin-top:1rem;">Updating</h4>
+            <h3>Updating</h3>
             <p>
                 WIN-SMTP-RELAY does not auto-update. Download the new release and start the installer.
                 It will stop the Windows service, replace the files, and restart the service
                 (if it was running). Your <code>appsettings.json</code> and SQLite database are
                 preserved across updates.
             </p>
-            <h4 style="margin-top:1rem;">Network requirements</h4>
+            <h3>Network requirements</h3>
             <p>
                 The update check requires outbound HTTPS access to <code>api.github.com</code>.
                 If the server has no internet access, the check will fail gracefully with an error message.
@@ -210,7 +211,7 @@ else
             <BbDialogTitle>Install update on this server?</BbDialogTitle>
             <BbDialogDescription>Unattended install of @installVersion (@installVariant)</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 The server downloads the signed installer, verifies its Authenticode signature
                 (publisher <strong>ARDIMEDIA</strong>), and installs it silently. The
@@ -311,7 +312,7 @@ else
         if (!string.IsNullOrEmpty(release.Body))
         {
             <BbSeparator Class="my-1" />
-            <div style="display:flex;align-items:center;gap:0.5rem;">
+            <div class="row-flex">
                 <h4 style="margin:0;">Release Notes</h4>
                 @if (!string.IsNullOrEmpty(release.HtmlUrl))
                 {
@@ -326,6 +327,7 @@ else
 
     private async Task CheckForUpdates()
     {
+        if (isChecking) return;
         isChecking = true;
         errorMessage = null;
         latestStable = null;
@@ -371,7 +373,8 @@ else
         }
         catch (Exception ex)
         {
-            errorMessage = $"Failed to check: {ex.Message}";
+            Logger.LogWarning(ex, "Checking GitHub for WIN-SMTP-RELAY releases failed");
+            errorMessage = "Could not check for updates — GitHub could not be reached or answered unexpectedly. The details were written to the server log.";
         }
         finally
         {
@@ -413,7 +416,8 @@ else
         }
         catch (Exception ex)
         {
-            installMessage = $"Update could not be started: {ex.Message}";
+            Logger.LogError(ex, "Starting the update to {Version} failed", installVersion);
+            installMessage = "Update could not be started. " + UiMessages.Unexpected;
             installLaunched = false;
         }
         finally

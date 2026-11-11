@@ -5,6 +5,7 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject ICurrentTenant CurrentTenant
 @inject NavigationManager Nav
+@inject ILogger<ApiKeys> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -29,6 +30,11 @@
         </BbButton>
     </div>
 </div>
+
+@if (!string.IsNullOrEmpty(actionError))
+{
+    <p class="form-error mb-1" role="alert">@actionError</p>
+}
 
 @if (isLoading)
 {
@@ -58,7 +64,7 @@ else
             }
             @foreach (var k in keys)
             {
-                <BbTableRow Item="@k" class="list-row-clickable" @onclick="() => View(k.Id)">
+                <BbTableRow Item="@k" class="list-row-clickable" tabindex="0" role="link" @onclick="() => View(k.Id)" @onkeydown="args => OnRowKey(args, () => View(k.Id))">
                     <BbTableCell>@k.Name</BbTableCell>
                     <BbTableCell><span class="mono">@(k.KeyPrefix)…</span></BbTableCell>
                     <BbTableCell>@k.Role</BbTableCell>
@@ -76,8 +82,8 @@ else
                     <BbTableCell><LocalTime Utc="@k.LastUsedUtc" /></BbTableCell>
                     <BbTableCell>@if (k.ExpiresUtc is null) { <span class="text-muted">never</span> } else { <LocalTime Utc="@k.ExpiresUtc" Format="yyyy-MM-dd" /> }</BbTableCell>
                     <BbTableCell>
-                        <div class="list-row-actions" @onclick:stopPropagation="true">
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Revoke"
+                        <div class="list-row-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Revoke" aria-label="Revoke"
                                     @onclick="() => { revokeTargetId = k.Id; showRevoke = true; }">
                                 <LucideIcon Name="trash-2" />
                             </BbButton>
@@ -100,13 +106,23 @@ else
                 <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
             </BbAlertDialogCancel>
             <BbAlertDialogAction>
-                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmRevokeAsync">Revoke</BbButton>
+                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmRevokeAsync" Disabled="@busy">Revoke</BbButton>
             </BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
 </BbAlertDialog>
 
 @code {
+    private bool busy;
+    private string? actionError;
+
+    // Opens the row's detail with the keyboard (rows are focusable: tabindex="0").
+    private static void OnRowKey(KeyboardEventArgs e, Action open)
+    {
+        if (e.Key is "Enter" or " ")
+            open();
+    }
+
     private IReadOnlyList<ApiKey> keys = [];
     private bool isLoading = true;
     private bool showRevoke;
@@ -129,13 +145,28 @@ else
 
     private async Task ConfirmRevokeAsync()
     {
-        showRevoke = false;
-        // Only revoke keys in the current tenant scope (keys was loaded scoped to ScopeTenantId).
-        if (!keys.Any(k => k.Id == revokeTargetId))
-            return;
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
-        await svc.DeleteAsync(revokeTargetId);
-        await RefreshAsync();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        busy = true;
+        actionError = null;
+        try
+        {
+            showRevoke = false;
+            // Only revoke keys in the current tenant scope (keys was loaded scoped to ScopeTenantId).
+            if (!keys.Any(k => k.Id == revokeTargetId))
+                return;
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+            await svc.DeleteAsync(revokeTargetId);
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{Action} on the {Page} page failed", "ConfirmRevokeAsync", "ApiKeys");
+            actionError = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 }

@@ -5,6 +5,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject ILogger<ReceiveConnectorDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -71,6 +72,7 @@ else
                 <div class="form-group">
                     <BbLabel For="max-message-size">Max Message Size (MB)</BbLabel>
                     <BbInput Id="max-message-size" Type="InputType.Number" @bind-Value="maxSizeMb" />
+                    <p class="hint">1 to 2047 MB.</p>
                 </div>
                 <div class="form-group">
                     <BbLabel For="max-connections">Max Connections</BbLabel>
@@ -84,16 +86,20 @@ else
                     </BbNativeSelect>
                 </div>
             </div>
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <p class="form-error" role="alert">@errorMessage</p>
+            }
         </BbCardContent>
         <BbCardFooter>
             <div class="flex gap-1 items-center">
-                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(name)">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(name))">
                     <LucideIcon Name="save" /> Save
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
                 @if (!string.IsNullOrEmpty(statusMessage))
                 {
-                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                    <span class="status-note" role="status">@statusMessage</span>
                 }
             </div>
         </BbCardFooter>
@@ -107,6 +113,8 @@ else
     private bool isLoading = true;
     private bool notFound;
     private string? statusMessage;
+    private string? errorMessage;
+    private bool busy;
 
     private string name = "";
     private string address = "0.0.0.0";
@@ -150,29 +158,61 @@ else
 
     private async Task SaveAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IReceiveConnectorService>();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        errorMessage = null;
 
-        var connector = new ReceiveConnector
+        // The listener parses the bind address with IPAddress.Parse at startup — a typo would stop it from starting.
+        var bindAddress = address.Trim();
+        if (!InputValidation.IsIpAddress(bindAddress))
         {
-            Id = Id ?? 0,
-            Name = name.Trim(),
-            Address = address.Trim(),
-            Port = int.TryParse(port, out var p) ? p : 25,
-            RequireTls = requireTls == "true",
-            ImplicitTls = implicitTls == "true",
-            RequireAuth = requireAuth == "true",
-            MaxMessageSizeBytes = (int.TryParse(maxSizeMb, out var s) ? s : 25) * 1024 * 1024,
-            MaxConnections = int.TryParse(maxConn, out var mc) ? mc : 100,
-            IsEnabled = enabled == "true"
-        };
+            errorMessage = $"Bind address: '{bindAddress}' is not an IP address (use 0.0.0.0 for all IPv4 addresses, :: for all IPv6).";
+            return;
+        }
+        if (!InputValidation.TryParseInt(port, "Port", 1, 65535, out var portValue, out var error)
+            // MB → bytes in long arithmetic, capped at 2047 MB: the former int multiplication overflowed at 2048 MB.
+            || !InputValidation.TryParseMegabytesToBytes(maxSizeMb, "Max message size (MB)", 1, out var maxBytes, out error)
+            || !InputValidation.TryParseInt(maxConn, "Max connections", 1, 100_000, out var maxConnections, out error))
+        {
+            errorMessage = error;
+            return;
+        }
 
-        if (IsNew)
-            await svc.CreateAsync(connector);
-        else
-            await svc.UpdateAsync(connector);
+        busy = true;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IReceiveConnectorService>();
 
-        Nav.NavigateTo("/connectors/receive");
+            var connector = new ReceiveConnector
+            {
+                Id = Id ?? 0,
+                Name = name.Trim(),
+                Address = bindAddress,
+                Port = portValue,
+                RequireTls = requireTls == "true",
+                ImplicitTls = implicitTls == "true",
+                RequireAuth = requireAuth == "true",
+                MaxMessageSizeBytes = maxBytes,
+                MaxConnections = maxConnections,
+                IsEnabled = enabled == "true"
+            };
+
+            if (IsNew)
+                await svc.CreateAsync(connector);
+            else
+                await svc.UpdateAsync(connector);
+
+            Nav.NavigateTo("/connectors/receive");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving receive connector {Name} failed", name);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private void Cancel() => Nav.NavigateTo("/connectors/receive");

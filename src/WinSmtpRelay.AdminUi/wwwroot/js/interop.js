@@ -19,3 +19,29 @@ window.winSmtpRelay.scrollMainToTop = function () {
     var el = document.querySelector('.app-main');
     if (el) el.scrollTo(0, 0);
 };
+
+// Copies text to the clipboard and resolves to true on success. navigator.clipboard exists only in secure
+// contexts (HTTPS or localhost); on plain HTTP fall back to a hidden textarea + execCommand('copy').
+window.winSmtpRelay.copyText = async function (text) {
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+    } catch (e) { /* fall through to the legacy path */ }
+    try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-1000px';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return !!ok;
+    } catch (e) {
+        return false;
+    }
+};

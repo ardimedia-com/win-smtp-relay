@@ -78,13 +78,17 @@
         <p style="margin-top:0;">On the machine where Claude Code runs (it must be able to reach this admin UI):</p>
         <div style="display:flex;gap:0.5rem;align-items:flex-start;">
             <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.6rem 0.8rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.82rem;">@ClaudeCommand</code></pre>
-            <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopyCommandAsync">
+            <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" AriaLabel="Copy the Claude Code command" @onclick="CopyCommandAsync">
                 <LucideIcon Name="copy" />
             </BbButton>
         </div>
-        @if (copied)
+        @if (copied == true)
         {
-            <span class="text-muted" style="font-size:0.8125rem;">Copied to clipboard — replace the placeholder with your key.</span>
+            <span class="text-muted" style="font-size:0.8125rem;" role="status">Copied to clipboard — replace the placeholder with your key.</span>
+        }
+        else if (copied == false)
+        {
+            <span class="form-error" style="font-size:0.8125rem;" role="status">@UiMessages.CopyFailed</span>
         }
         <p class="text-muted" style="font-size:0.82rem;margin:0.5rem 0 0;">
             This adds the server in the default <code class="mono">local</code> scope — active only when Claude Code
@@ -129,7 +133,8 @@
 </BbCard>
 
 @code {
-    private bool copied;
+    // null = not copied yet, true = copied, false = the browser refused.
+    private bool? copied;
 
     private string McpUrl => $"{Nav.BaseUri}mcp";
 
@@ -138,7 +143,6 @@
 
     private async Task CopyCommandAsync()
     {
-        await JS.InvokeVoidAsync("navigator.clipboard.writeText", ClaudeCommand);
-        copied = true;
+        copied = await JS.CopyToClipboardAsync(ClaudeCommand);
     }
 }

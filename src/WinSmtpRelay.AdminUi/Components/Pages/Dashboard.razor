@@ -1,6 +1,7 @@
 @page "/"
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
+@inject ILogger<Dashboard> Logger
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Navigation
 @inject IQueueDepthRecorder QueueDepthRecorder
@@ -202,22 +203,22 @@ else
             <BbDialogTitle>About the Dashboard</BbDialogTitle>
             <BbDialogDescription>Understanding the server overview</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 The Dashboard provides an at-a-glance overview of your WIN-SMTP-RELAY server.
             </p>
-            <h4 style="margin-top:1rem;">Stat cards</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Stat cards</h3>
+            <ul>
                 <li><strong>Queue Depth</strong> &mdash; number of messages currently waiting to be delivered. A high number may indicate delivery issues.</li>
                 <li><strong>Server Uptime</strong> &mdash; how long the WIN-SMTP-RELAY Windows service has been running.</li>
                 <li><strong>Version</strong> &mdash; the installed software version.</li>
             </ul>
-            <h4 style="margin-top:1rem;">Email Volume</h4>
+            <h3>Email Volume</h3>
             <p>
                 Shows email throughput over four time windows. The <strong>Minute</strong> and <strong>Hour</strong> tabs
                 update in real time via SignalR. The <strong>Day</strong> and <strong>Month</strong> tabs refresh when selected.
             </p>
-            <h4 style="margin-top:1rem;">Recent Messages</h4>
+            <h3>Recent Messages</h3>
             <p>
                 Shows the 10 most recent messages across all statuses (queued, delivered, bounced).
                 This gives you a quick view of what is flowing through the relay.
@@ -280,11 +281,17 @@ else
         Feed.Received += OnActivity;
 
         // Periodic refresh: uptime every 30s
+        // Timer callbacks run on the thread pool: an exception escaping one would end the process, so every
+        // callback body catches and logs (same pattern as the Journal page).
         uptimeTimer = new System.Threading.Timer(_ =>
         {
             if (_disposed) return;
-            UpdateUptime();
-            InvokeAsync(StateHasChanged);
+            try
+            {
+                UpdateUptime();
+                _ = InvokeAsync(StateHasChanged);
+            }
+            catch (Exception ex) { Logger.LogWarning(ex, "Dashboard uptime refresh failed"); }
         }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
 
         // Boundary-aligned refresh: hour tab on full minute, day on full hour, month on midnight
@@ -310,6 +317,7 @@ else
                     StateHasChanged();
                 });
             }
+            catch (Exception ex) { Logger.LogWarning(ex, "Dashboard minute refresh failed"); }
             finally { Interlocked.Exchange(ref _minuteRefreshing, 0); }
         }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
@@ -338,9 +346,13 @@ else
                 _ = InvokeAsync(async () =>
                 {
                     if (_disposed) return;
-                    queueDepth = await ReadQueueDepthAsync();
-                    await RefreshRecentMessagesAsync();
-                    StateHasChanged();
+                    try
+                    {
+                        queueDepth = await ReadQueueDepthAsync();
+                        await RefreshRecentMessagesAsync();
+                        StateHasChanged();
+                    }
+                    catch (Exception ex) { Logger.LogWarning(ex, "Dashboard queue refresh failed"); }
                 });
                 break;
         }
@@ -354,7 +366,7 @@ else
             var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
             recentMessages = await queue.GetRecentAsync(10);
         }
-        catch { }
+        catch (Exception ex) { Logger.LogWarning(ex, "Loading the recent messages failed"); }
     }
 
     /// <summary>
@@ -367,11 +379,15 @@ else
         _chartDebounceTimer = new System.Threading.Timer(async _ =>
         {
             if (_disposed) return;
-            if (activeTab == "minute" || activeTab == "hour")
+            try
             {
-                await LoadChartDataAsync();
-                if (!_disposed) await InvokeAsync(StateHasChanged);
+                if (activeTab == "minute" || activeTab == "hour")
+                {
+                    await LoadChartDataAsync();
+                    if (!_disposed) await InvokeAsync(StateHasChanged);
+                }
             }
+            catch (Exception ex) { Logger.LogWarning(ex, "Dashboard chart refresh failed"); }
         }, null, TimeSpan.FromMilliseconds(500), Timeout.InfiniteTimeSpan);
     }
 
@@ -387,31 +403,38 @@ else
         refreshTimer = new System.Threading.Timer(async _ =>
         {
             if (_disposed) return;
-            var utcNow = DateTime.UtcNow;
-
-            // Every full minute: refresh hour tab
-            if (activeTab == "hour")
+            try
             {
-                await LoadChartDataAsync();
-                if (!_disposed) await InvokeAsync(StateHasChanged);
-            }
+                var utcNow = DateTime.UtcNow;
 
-            // Every full hour: refresh day tab
-            if (utcNow.Minute == 0 && activeTab == "day")
+                // Every full minute: refresh hour tab
+                if (activeTab == "hour")
+                {
+                    await LoadChartDataAsync();
+                    if (!_disposed) await InvokeAsync(StateHasChanged);
+                }
+
+                // Every full hour: refresh day tab
+                if (utcNow.Minute == 0 && activeTab == "day")
+                {
+                    await LoadChartDataAsync();
+                    if (!_disposed) await InvokeAsync(StateHasChanged);
+                }
+
+                // At midnight: refresh month tab
+                if (utcNow.Hour == 0 && utcNow.Minute == 0 && activeTab == "month")
+                {
+                    await LoadChartDataAsync();
+                    if (!_disposed) await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch (Exception ex) { Logger.LogWarning(ex, "Dashboard boundary refresh failed"); }
+            finally
             {
-                await LoadChartDataAsync();
-                if (!_disposed) await InvokeAsync(StateHasChanged);
+                // Re-schedule aligned to the next full minute — also after a failed refresh, so one DB error
+                // does not stop the periodic refresh for the rest of the session.
+                if (!_disposed) ScheduleNextBoundaryRefresh();
             }
-
-            // At midnight: refresh month tab
-            if (utcNow.Hour == 0 && utcNow.Minute == 0 && activeTab == "month")
-            {
-                await LoadChartDataAsync();
-                if (!_disposed) await InvokeAsync(StateHasChanged);
-            }
-
-            // Re-schedule aligned to the next full minute
-            if (!_disposed) ScheduleNextBoundaryRefresh();
         }, null, delay, Timeout.InfiniteTimeSpan);
     }
 
@@ -422,11 +445,15 @@ else
         await LoadChartDataAsync();
     }
 
-    private void OnTimeZoneChanged() => InvokeAsync(async () =>
+    private void OnTimeZoneChanged() => _ = InvokeAsync(async () =>
     {
         if (_disposed) return;
-        await LoadChartDataAsync();
-        StateHasChanged();
+        try
+        {
+            await LoadChartDataAsync();
+            StateHasChanged();
+        }
+        catch (Exception ex) { Logger.LogWarning(ex, "Dashboard time-zone refresh failed"); }
     });
 
     // Tenant-scoped queue depth: a tenant admin sees only their own pending count, never the host-wide
@@ -478,8 +505,9 @@ else
                 data = buckets.Select(b => (object)new { label = BrowserTime.Format(b.TimestampUtc, "HH:mm"), sent = b.Sent, failed = b.Failed }).ToArray();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.LogWarning(ex, "Loading the dashboard chart ({Tab}) failed", activeTab);
             data = [];
         }
 

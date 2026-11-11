@@ -3,6 +3,8 @@
 @using Microsoft.JSInterop
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IJSRuntime JS
+@inject ILogger<Logs> Logger
+@implements IDisposable
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -34,7 +36,7 @@
 
 <div class="search-bar">
     <div class="search-input-wrapper">
-        <BbInput Placeholder="Search source or message..." Value="@searchText" ValueChanged="OnSearchChanged" />
+        <BbInput Placeholder="Search source or message..." Value="@searchText" ValueChanged="OnSearchChanged" aria-label="Search source or message" />
         @if (!string.IsNullOrEmpty(searchText))
         {
             <button type="button" class="search-clear" aria-label="Clear search" @onclick="@(() => OnSearchChanged(""))">
@@ -42,16 +44,18 @@
             </button>
         }
     </div>
-    <div style="width:140px;flex-shrink:0;">
-        <BbNativeSelect Value="@selectedLevel" ValueChanged="@((string v) => OnLevelChanged(v))">
+    <div class="logs-level">
+        <label for="log-level" class="sr-only">Level</label>
+        <BbNativeSelect Id="log-level" Value="@selectedLevel" ValueChanged="@((string v) => OnLevelChanged(v))">
             <option value="">All Levels</option>
             <option value="Information">Information</option>
             <option value="Warning">Warning</option>
             <option value="Error">Error</option>
         </BbNativeSelect>
     </div>
-    <div style="width:100px;flex-shrink:0;"><BbInput Type="InputType.Number" Value="@maxEntriesStr" ValueChanged="OnMaxEntriesChanged" /></div>
-    <BbButton Variant="ButtonVariant.Secondary" @onclick="RefreshLogs">
+    <div class="logs-count"><BbInput Type="InputType.Number" Value="@maxEntriesStr" ValueChanged="OnMaxEntriesChanged"
+                                     aria-label="Number of entries to load" title="Number of entries to load (1–5000)" /></div>
+    <BbButton Variant="ButtonVariant.Secondary" Disabled="@isLoading" @onclick="RefreshLogs">
         <LucideIcon Name="refresh-cw" />
         Refresh
     </BbButton>
@@ -73,8 +77,8 @@
 
 @if (isLoading)
 {
-    <div class="text-muted" style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
-        <span class="spin" style="display:inline-flex;"><LucideIcon Name="loader-circle" Size="16" /></span>
+    <div class="text-muted row-flex mb-1" role="status">
+        <span class="spin row-flex"><LucideIcon Name="loader-circle" Size="16" /></span>
         <span>Reading the Windows Event Log…</span>
     </div>
     <BbSkeleton Class="h-[320px] w-full" />
@@ -108,18 +112,20 @@ else
         }
         @foreach (var entry in visibleEntries)
         {
-            <BbTableRow Item="@entry" class="@($"{GetRowClass(entry)} {(IsHandled(entry) ? "log-handled" : "")} log-row-clickable")" @onclick="() => selectedEntry = entry">
-                <BbTableCell style="white-space:nowrap;">@entry.Time.ToString("yyyy-MM-dd HH:mm:ss")</BbTableCell>
+            <BbTableRow Item="@entry" class="@($"{GetRowClass(entry)} {(IsHandled(entry) ? "log-handled" : "")} log-row-clickable")"
+                        tabindex="0" role="button" aria-label="@($"Show {entry.Level} entry from {entry.Source}")"
+                        @onclick="() => selectedEntry = entry" @onkeydown="e => OnRowKey(e, entry)">
+                <BbTableCell class="nowrap"><LocalTime Utc="@entry.Time" Format="yyyy-MM-dd HH:mm:ss" /></BbTableCell>
                 <BbTableCell><span class="badge-status @GetBadgeCss(entry.Level)">@entry.Level</span></BbTableCell>
                 <BbTableCell>@entry.Source</BbTableCell>
                 <BbTableCell>
                     @{ var parsed = ParseMessageFields(entry.Message); }
-                    <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+                    <table class="kv-table log-fields">
                         @foreach (var field in parsed)
                         {
                             <tr>
-                                <td style="color:var(--muted-foreground);font-size:0.75rem;white-space:nowrap;padding:0 0.5rem 0 0;vertical-align:top;width:70px;">@field.Label:</td>
-                                <td style="white-space:normal;overflow-wrap:anywhere;word-break:break-word;padding:0;">@field.Value</td>
+                                <td class="log-field-label">@field.Label:</td>
+                                <td class="wrap-anywhere">@field.Value</td>
                             </tr>
                         }
                     </table>
@@ -138,14 +144,14 @@ else
                 <BbDialogTitle>
                     <span class="badge-status @GetBadgeCss(selectedEntry.Level)">@selectedEntry.Level</span>
                 </BbDialogTitle>
-                <BbDialogDescription>@selectedEntry.Time.ToString("yyyy-MM-dd HH:mm:ss") &mdash; @selectedEntry.Source</BbDialogDescription>
+                <BbDialogDescription><LocalTime Utc="@selectedEntry.Time" Format="yyyy-MM-dd HH:mm:ss" /> &mdash; @selectedEntry.Source</BbDialogDescription>
             </BbDialogHeader>
-            <div style="font-size:0.875rem;line-height:1.6;max-height:60vh;overflow-y:auto;">
+            <div class="dialog-body log-entry-body">
                 @foreach (var field in ParseMessageFields(selectedEntry.Message))
                 {
-                    <div style="margin-bottom:0.5rem;">
-                        <strong style="color:var(--muted-foreground);">@field.Label</strong><br />
-                        <span style="word-break:break-word;">@field.Value</span>
+                    <div class="mb-half">
+                        <strong class="text-muted">@field.Label</strong><br />
+                        <span class="wrap-anywhere">@field.Value</span>
                     </div>
                 }
             </div>
@@ -164,26 +170,26 @@ else
             <BbDialogTitle>About the Event Log</BbDialogTitle>
             <BbDialogDescription>Windows Event Log viewer for WIN-SMTP-RELAY</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 This page reads entries from the <strong>Windows Event Log</strong> (Application log) written by
                 the WIN-SMTP-RELAY service. It provides a convenient way to inspect service-level events without
                 opening the Windows Event Viewer.
             </p>
-            <h4 style="margin-top:1rem;">Event levels</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Event levels</h3>
+            <ul>
                 <li><strong>Information</strong> &mdash; normal operations: service start/stop, configuration loaded, delivery summaries.</li>
                 <li><strong>Warning</strong> &mdash; non-critical issues: temporary delivery failures, rate-limit hits, certificate expiry warnings.</li>
                 <li><strong>Error</strong> &mdash; critical failures: unhandled exceptions, database errors, TLS handshake failures.</li>
             </ul>
-            <h4 style="margin-top:1rem;">Search &amp; filtering</h4>
+            <h3>Search &amp; filtering</h3>
             <p>
                 Use the <strong>search box</strong> to filter entries by source or message text. The
                 <strong>level dropdown</strong> filters by severity. The <strong>entry count</strong> field
                 limits how many entries are loaded (default 100). Changes apply immediately. Click
                 <strong>Refresh</strong> to reload entries from the Windows Event Log.
             </p>
-            <h4 style="margin-top:1rem;">Marking entries as handled</h4>
+            <h3>Marking entries as handled</h3>
             <p>
                 Click <strong>Mark all as handled</strong> to acknowledge all current entries. Handled entries
                 are dimmed and can be hidden with the <strong>Show handled</strong> toggle. The handled state
@@ -202,6 +208,7 @@ else
 @code {
     private const string StorageKey = "winsmtprelay-log-handled-until";
     private const string ShowHandledKey = "winsmtprelay-log-show-handled";
+    private const int MaxEntriesLimit = 5000;
 
     private bool showHelp;
     private bool isLoading = true;
@@ -209,13 +216,21 @@ else
     private string selectedLevel = "";
     private string searchText = "WinSmtpRelay";
     private string maxEntriesStr = "100";
-    private int maxEntries => int.TryParse(maxEntriesStr, out var v) ? v : 100;
 
-    private DateTime? handledUntil;
+    private DateTimeOffset? handledUntil;
     private bool showHandled;
     private int unhandledCount;
     private List<LogEntry> visibleEntries = [];
     private LogEntry? selectedEntry;
+
+    // Loads are serialized (one Event Log read at a time) and results are applied on the circuit thread only,
+    // so the list the renderer enumerates is never mutated from a thread-pool thread.
+    private readonly SemaphoreSlim _loadLock = new(1, 1);
+    private CancellationTokenSource? _debounce;
+    private bool _disposed;
+
+    private int MaxEntries =>
+        int.TryParse(maxEntriesStr, out var v) ? Math.Clamp(v, 1, MaxEntriesLimit) : 100;
 
     // The Windows Event Log read is synchronous and can take several seconds. Defer it until after the
     // first paint (and run it off the circuit thread) so the page shows immediately with a loading
@@ -224,23 +239,46 @@ else
     {
         if (!firstRender) return;
 
-        await ReadWatermark();
-        var showHandledStr = await JS.InvokeAsync<string?>("localStorage.getItem", ShowHandledKey);
-        showHandled = showHandledStr == "true";
+        try
+        {
+            await ReadWatermark();
+            var showHandledStr = await JS.InvokeAsync<string?>("localStorage.getItem", ShowHandledKey);
+            showHandled = showHandledStr == "true";
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // Browser storage unavailable: start with nothing marked as handled.
+        }
         await LoadLogsAsync();
     }
 
     private async Task LoadLogsAsync()
     {
-        isLoading = true;
-        await InvokeAsync(StateHasChanged);
+        if (_disposed) return;
+        await _loadLock.WaitAsync();
+        try
+        {
+            isLoading = true;
+            await InvokeAsync(StateHasChanged);
 
-        // Offload the blocking EventLogReader scan to a thread-pool thread so the circuit stays responsive.
-        await Task.Run(LoadLogs);
+            // Offload the blocking EventLogReader scan to a thread-pool thread so the circuit stays responsive;
+            // the reader returns a NEW list that is assigned here, on the circuit thread.
+            var level = selectedLevel;
+            var max = MaxEntries;
+            var (entries, error) = await Task.Run(() => ReadEntries(level, max));
+            if (error is not null)
+                Logger.LogWarning(error, "Reading the Windows Event Log for the Event Log page failed");
 
-        UpdateUnhandledCount();
-        UpdateVisibleEntries();
-        isLoading = false;
+            logEntries = entries;
+            UpdateUnhandledCount();
+            UpdateVisibleEntries();
+        }
+        finally
+        {
+            isLoading = false;
+            _loadLock.Release();
+        }
+
         try { await InvokeAsync(StateHasChanged); }
         catch (ObjectDisposedException) { /* circuit gone while the log read was in flight */ }
         catch (OperationCanceledException) { /* circuit gone while the log read was in flight */ }
@@ -249,41 +287,49 @@ else
     private async Task ReadWatermark()
     {
         var stored = await JS.InvokeAsync<string?>("localStorage.getItem", StorageKey);
-        if (stored is not null && DateTime.TryParse(stored, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt))
-        {
+        if (stored is not null && DateTimeOffset.TryParse(stored, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt))
             handledUntil = dt;
-        }
     }
 
     private async Task MarkAllHandled()
     {
-        var latest = logEntries.Count > 0 ? logEntries[0].Time : DateTime.UtcNow;
+        var latest = logEntries.Count > 0 ? logEntries[0].Time : DateTimeOffset.UtcNow;
         handledUntil = latest;
-        await JS.InvokeVoidAsync("localStorage.setItem", StorageKey, latest.ToString("O"));
         UpdateUnhandledCount();
         UpdateVisibleEntries();
+        try { await JS.InvokeVoidAsync("localStorage.setItem", StorageKey, latest.ToString("O")); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException) { /* not persisted */ }
     }
 
     private async Task ResetWatermark()
     {
         handledUntil = null;
-        await JS.InvokeVoidAsync("localStorage.removeItem", StorageKey);
         UpdateUnhandledCount();
         UpdateVisibleEntries();
+        try { await JS.InvokeVoidAsync("localStorage.removeItem", StorageKey); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException) { /* not persisted */ }
     }
 
     private async Task ToggleShowHandled(bool value)
     {
         showHandled = value;
-        await JS.InvokeVoidAsync("localStorage.setItem", ShowHandledKey, value ? "true" : "false");
         UpdateVisibleEntries();
+        try { await JS.InvokeVoidAsync("localStorage.setItem", ShowHandledKey, value ? "true" : "false"); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException) { /* not persisted */ }
     }
 
-    private Task OnSearchChanged(string value)
+    // Search filters the loaded entries in memory; it is debounced so typing does not re-filter (and re-render
+    // the whole table) on every keystroke.
+    private async Task OnSearchChanged(string value)
     {
         searchText = value;
-        UpdateVisibleEntries();
-        return Task.CompletedTask;
+        if (string.IsNullOrEmpty(value))
+        {
+            UpdateVisibleEntries();
+            return;
+        }
+        if (await DebounceAsync())
+            UpdateVisibleEntries();
     }
 
     private async Task OnLevelChanged(string value)
@@ -292,67 +338,102 @@ else
         await LoadLogsAsync();
     }
 
+    // The entry count re-reads the Event Log, so wait until the operator stops typing.
     private async Task OnMaxEntriesChanged(string value)
     {
         maxEntriesStr = value;
-        await LoadLogsAsync();
+        if (await DebounceAsync())
+            await LoadLogsAsync();
+    }
+
+    /// <summary>Waits 400 ms; false when a newer keystroke superseded this one (or the page closed).</summary>
+    private async Task<bool> DebounceAsync()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        var cts = _debounce = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(400, cts.Token);
+            return !_disposed;
+        }
+        catch (TaskCanceledException)
+        {
+            return false;
+        }
     }
 
     private async Task RefreshLogs()
     {
-        await ReadWatermark();
+        try { await ReadWatermark(); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException) { /* keep the current watermark */ }
         await LoadLogsAsync();
     }
 
-    private void LoadLogs()
+    private void OnRowKey(KeyboardEventArgs e, LogEntry entry)
     {
-        logEntries.Clear();
+        if (e.Key is "Enter" or " ")
+            selectedEntry = entry;
+    }
 
+    /// <summary>
+    /// Reads the newest <paramref name="max"/> matching entries. The query runs newest-first and stops as soon
+    /// as enough entries are collected, instead of scanning the whole Application log.
+    /// </summary>
+    private static (List<LogEntry> Entries, Exception? Error) ReadEntries(string level, int max)
+    {
+        var entries = new List<LogEntry>();
         try
         {
-            if (!OperatingSystem.IsWindows()) return;
+            if (!OperatingSystem.IsWindows()) return (entries, null);
 
             var query = "*[System[Provider[@Name='WinSmtpRelay'] or Provider[@Name='.NET Runtime']]]";
-            using var logReader = new EventLogReader(new EventLogQuery("Application", PathType.LogName, query));
+            using var logReader = new EventLogReader(new EventLogQuery("Application", PathType.LogName, query)
+            {
+                ReverseDirection = true
+            });
 
-            var entries = new List<LogEntry>();
             EventRecord? record;
-            while ((record = logReader.ReadEvent()) is not null)
+            while (entries.Count < max && (record = logReader.ReadEvent()) is not null)
             {
                 using (record)
                 {
-                    var level = record.Level switch
+                    var recordLevel = record.Level switch
                     {
                         (byte)StandardEventLevel.Error or (byte)StandardEventLevel.Critical => "Error",
                         (byte)StandardEventLevel.Warning => "Warning",
                         _ => "Information"
                     };
 
-                    if (!string.IsNullOrEmpty(selectedLevel) && level != selectedLevel)
+                    if (!string.IsNullOrEmpty(level) && recordLevel != level)
                         continue;
 
                     var message = record.FormatDescription() ?? "(no message)";
                     if (IsNoiseMessage(message))
                         continue;
 
-                    entries.Add(new LogEntry(
-                        record.TimeCreated ?? DateTime.MinValue,
-                        level,
-                        record.ProviderName ?? "Unknown",
-                        message));
+                    // TimeCreated is the server's local time; keep the instant as a DateTimeOffset so the page can
+                    // show it in the viewer's time zone.
+                    var created = record.TimeCreated is { } t ? new DateTimeOffset(t.ToUniversalTime(), TimeSpan.Zero) : DateTimeOffset.MinValue;
+                    entries.Add(new LogEntry(created, recordLevel, record.ProviderName ?? "Unknown", message));
                 }
             }
 
-            logEntries = entries
-                .OrderByDescending(e => e.Time)
-                .Take(maxEntries)
-                .ToList();
+            return ([.. entries.OrderByDescending(e => e.Time)], null);
         }
         catch (Exception ex)
         {
-            logEntries.Add(new LogEntry(DateTime.Now, "Error", "LogViewer",
-                $"Failed to read Event Log: {ex.Message}"));
+            entries.Add(new LogEntry(DateTimeOffset.UtcNow, "Error", "LogViewer",
+                "The Windows Event Log could not be read. The details were written to the server log."));
+            return (entries, ex);
         }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _debounce?.Cancel();
+        _debounce?.Dispose();
     }
 
     private static bool IsNoiseMessage(string message) =>
@@ -464,5 +545,5 @@ else
         return fields;
     }
 
-    private record LogEntry(DateTime Time, string Level, string Source, string Message);
+    private record LogEntry(DateTimeOffset Time, string Level, string Source, string Message);
 }

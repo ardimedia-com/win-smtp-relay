@@ -5,6 +5,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject ILogger<IpAccessRuleDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -38,6 +39,7 @@ else
                 <div class="form-group">
                     <BbLabel For="network">Network (CIDR)</BbLabel>
                     <BbInput Id="network" @bind-Value="network" Placeholder="10.0.0.0/8" />
+                    <p class="hint">A single address (192.168.1.10) or a network in CIDR notation (192.168.1.0/24, 2001:db8::/48).</p>
                 </div>
                 <div class="form-group">
                     <BbLabel For="action">Action</BbLabel>
@@ -55,16 +57,20 @@ else
                     <BbInput Id="description" @bind-Value="description" Placeholder="Internal network" />
                 </div>
             </div>
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <p class="form-error" role="alert">@errorMessage</p>
+            }
         </BbCardContent>
         <BbCardFooter>
             <div class="flex gap-1 items-center">
-                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(network)">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(network))">
                     <LucideIcon Name="save" /> Save
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
                 @if (!string.IsNullOrEmpty(statusMessage))
                 {
-                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                    <span class="status-note" role="status">@statusMessage</span>
                 }
             </div>
         </BbCardFooter>
@@ -78,6 +84,8 @@ else
     private bool isLoading = true;
     private bool notFound;
     private string? statusMessage;
+    private string? errorMessage;
+    private bool busy;
 
     private string network = "";
     private string action = "Allow";
@@ -115,24 +123,58 @@ else
 
     private async Task SaveAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IIpAccessRuleService>();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        errorMessage = null;
 
-        var rule = new IpAccessRule
+        // Validate before saving: a malformed CIDR fails closed at runtime (never matches), so a typo in an
+        // allow rule would silently do nothing and a typo in a deny rule would silently not block.
+        if (!InputValidation.TryNormalizeNetwork(network, out var normalizedNetwork, out var networkError))
         {
-            Id = Id ?? 0,
-            Network = network.Trim(),
-            Action = Enum.Parse<IpAccessAction>(action),
-            SortOrder = int.TryParse(sortOrder, out var s) ? s : 0,
-            Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim()
-        };
+            errorMessage = networkError;
+            return;
+        }
+        if (!Enum.TryParse<IpAccessAction>(action, out var parsedAction))
+        {
+            errorMessage = "Select an action (Allow or Deny).";
+            return;
+        }
+        if (!InputValidation.TryParseInt(sortOrder, "Sort order", 0, int.MaxValue, out var order, out var orderError))
+        {
+            errorMessage = orderError;
+            return;
+        }
 
-        if (IsNew)
-            await svc.CreateAsync(rule);
-        else
-            await svc.UpdateAsync(rule);
+        busy = true;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IIpAccessRuleService>();
 
-        Nav.NavigateTo("/ip-rules");
+            var rule = new IpAccessRule
+            {
+                Id = Id ?? 0,
+                Network = normalizedNetwork,
+                Action = parsedAction,
+                SortOrder = order,
+                Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim()
+            };
+
+            if (IsNew)
+                await svc.CreateAsync(rule);
+            else
+                await svc.UpdateAsync(rule);
+
+            Nav.NavigateTo("/ip-rules");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving IP access rule {Network} failed", normalizedNetwork);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private void Cancel() => Nav.NavigateTo("/ip-rules");

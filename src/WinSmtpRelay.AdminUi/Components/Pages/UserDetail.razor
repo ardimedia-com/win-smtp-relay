@@ -7,6 +7,7 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject ICurrentTenant CurrentTenant
 @inject NavigationManager Nav
+@inject ILogger<UserDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -66,16 +67,20 @@ else
                     <BbInput Id="rate-limit-per-day" Type="InputType.Number" @bind-Value="ratePerDayStr" Placeholder="unlimited" />
                 </div>
             </div>
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <p class="form-error" role="alert">@errorMessage</p>
+            }
         </BbCardContent>
         <BbCardFooter>
             <div class="flex gap-1 items-center">
-                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@SaveDisabled">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@(busy || SaveDisabled)">
                     <LucideIcon Name="save" /> Save
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
                 @if (!string.IsNullOrEmpty(statusMessage))
                 {
-                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                    <span class="status-note" role="status">@statusMessage</span>
                 }
             </div>
         </BbCardFooter>
@@ -89,6 +94,8 @@ else
     private bool isLoading = true;
     private bool notFound;
     private string? statusMessage;
+    private string? errorMessage;
+    private bool busy;
 
     private string username = "";
     private string password = "";
@@ -97,8 +104,19 @@ else
     private string ratePerMinuteStr = "";
     private string ratePerDayStr = "";
 
-    private int? ratePerMinute => int.TryParse(ratePerMinuteStr, out var v) ? v : null;
-    private int? ratePerDay => int.TryParse(ratePerDayStr, out var v) ? v : null;
+    // Empty = unlimited; otherwise a whole number >= 0 (0 blocks the user). An unparsable value is reported,
+    // never silently turned into «unlimited».
+    private static bool TryParseLimit(string text, string field, out int? limit, out string? error)
+    {
+        limit = null;
+        error = null;
+        if (string.IsNullOrWhiteSpace(text))
+            return true;
+        if (!InputValidation.TryParseInt(text, field, 0, int.MaxValue, out var value, out error))
+            return false;
+        limit = value;
+        return true;
+    }
 
     // New user needs both username and password; an existing user only requires a username (the
     // password is optional and only changed when a new one is entered).
@@ -134,6 +152,42 @@ else
     }
 
     private async Task SaveAsync()
+    {
+        if (busy) return;                                   // double-submit guard (before the first await)
+        errorMessage = null;
+        statusMessage = null;
+
+        // Usernames are compared exactly at AUTH time — never store stray whitespace from a paste.
+        var name = username.Trim();
+        if (IsNew && (name.Length == 0 || name.Any(char.IsWhiteSpace)))
+        {
+            errorMessage = "Username: must not be empty or contain spaces.";
+            return;
+        }
+        if (!TryParseLimit(ratePerMinuteStr, "Rate limit per minute", out var ratePerMinute, out var limitError)
+            || !TryParseLimit(ratePerDayStr, "Rate limit per day", out var ratePerDay, out limitError))
+        {
+            errorMessage = limitError;
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await SaveCoreAsync(name, ratePerMinute, ratePerDay);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving SMTP user {Username} failed", name);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task SaveCoreAsync(string username, int? ratePerMinute, int? ratePerDay)
     {
         using var scope = ScopeFactory.CreateScope();
 

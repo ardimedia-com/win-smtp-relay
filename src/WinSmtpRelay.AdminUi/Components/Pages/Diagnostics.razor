@@ -5,6 +5,7 @@
 @using WinSmtpRelay.Core.Models
 @inject IHealthCheckSnapshotService Snapshots
 @inject IHealthCheckRunner Runner
+@inject ILogger<Diagnostics> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -178,8 +179,9 @@ else
             latest = await Snapshots.GetLatestAsync();
             history = await Snapshots.GetHistoryAsync(14);
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.LogError(ex, "Loading the self-check results failed");
             loadError = "Could not load the self-check results.";
         }
         finally
@@ -201,8 +203,9 @@ else
             latest = await Runner.RunAndSaveAsync();
             history = await Snapshots.GetHistoryAsync(14);
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.LogError(ex, "Running the self-check failed");
             loadError = "The self-check could not be run just now — try again.";
         }
         finally

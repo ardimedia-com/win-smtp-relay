@@ -5,6 +5,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
 @inject IOptions<AdminUiOptions> UiOptions
+@inject ILogger<SignupSettings> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -34,7 +35,7 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Self-service signup</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="signupEnabled" CheckedChanged="OnToggleAsync" id="signup-toggle" />
+                    <BbSwitch Checked="signupEnabled" CheckedChanged="OnToggleAsync" id="signup-toggle" Disabled="@busy" />
                     <label for="signup-toggle" style="cursor:pointer;">Allow anonymous visitors to sign up at <span class="mono">/signup</span></label>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.75rem;margin-bottom:0;">
@@ -54,9 +55,9 @@ else
                 }
                 <div class="form-group" style="margin-bottom:0;">
                     <BbLabel For="from-address">From-address</BbLabel>
-                    <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <div class="row-flex">
                         <BbInput Id="from-address" @bind-Value="signupFromAddress" Placeholder="noreply@yourdomain.tld" />
-                        <BbButton Variant="ButtonVariant.Default" @onclick="SaveFromAddressAsync">
+                        <BbButton Variant="ButtonVariant.Default" @onclick="SaveFromAddressAsync" Disabled="@busy">
                             <LucideIcon Name="save" /> Save
                         </BbButton>
                     </div>
@@ -72,7 +73,7 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Account recovery</div>
                 <div style="display:flex;align-items:center;gap:0.75rem;">
-                    <BbSwitch Checked="emailRecoveryEnabled" CheckedChanged="OnEmailRecoveryToggleAsync" id="recovery-toggle" />
+                    <BbSwitch Checked="emailRecoveryEnabled" CheckedChanged="OnEmailRecoveryToggleAsync" id="recovery-toggle" Disabled="@busy" />
                     <label for="recovery-toggle" style="cursor:pointer;">Allow the email sign-in link and password reset</label>
                 </div>
                 <p class="text-muted" style="font-size:0.8rem;margin-top:0.75rem;margin-bottom:0;">
@@ -87,9 +88,9 @@ else
                 <div class="settings-group-title">Abuse protection</div>
                 <div class="form-group" style="margin-bottom:0;">
                     <BbLabel For="signup-attempts-per-ip-per-hour">Signup attempts per IP per hour</BbLabel>
-                    <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <div class="row-flex">
                         <BbInput Id="signup-attempts-per-ip-per-hour" Type="InputType.Number" @bind-Value="signupMaxPerHour" />
-                        <BbButton Variant="ButtonVariant.Default" @onclick="SaveThrottleAsync">
+                        <BbButton Variant="ButtonVariant.Default" @onclick="SaveThrottleAsync" Disabled="@busy">
                             <LucideIcon Name="save" /> Save
                         </BbButton>
                     </div>
@@ -99,9 +100,13 @@ else
                 </div>
             </div>
 
+            @if (validationError is not null)
+            {
+                <p class="form-error" role="alert">@validationError</p>
+            }
             @if (!string.IsNullOrEmpty(statusMessage))
             {
-                <p class="text-muted" style="margin-top:0.5rem;">@statusMessage</p>
+                <p class="text-muted" style="margin-top:0.5rem;" role="status">@statusMessage</p>
             }
         </BbCardContent>
     </BbCard>
@@ -115,6 +120,34 @@ else
     private bool isLoading = true;
     private bool fromAddressConfigured;
     private string? statusMessage;
+    private string? validationError;
+    private bool busy;
+
+    /// <summary>
+    /// Runs one settings change with the page-wide double-submit guard: the flag is set before the first await,
+    /// and an unexpected failure is logged and shown as a generic message.
+    /// </summary>
+    private async Task RunAsync(string what, Func<IPortalSettingsService, Task> action)
+    {
+        if (busy) return;
+        busy = true;
+        statusMessage = null;
+        validationError = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            await action(scope.ServiceProvider.GetRequiredService<IPortalSettingsService>());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving the signup setting {Setting} failed", what);
+            statusMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -128,13 +161,12 @@ else
         isLoading = false;
     }
 
-    private async Task OnEmailRecoveryToggleAsync(bool value)
+    private Task OnEmailRecoveryToggleAsync(bool value) => RunAsync("EmailRecoveryEnabled", async portal =>
     {
-        using var scope = ScopeFactory.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetEmailRecoveryEnabledAsync(value);
+        await portal.SetEmailRecoveryEnabledAsync(value);
         emailRecoveryEnabled = value;
         statusMessage = value ? "Email sign-in link & password reset enabled." : "Email sign-in link & password reset disabled.";
-    }
+    });
 
     // The effective from-address is the DB value if set, otherwise the appsettings fallback. When both are
     // blank, no system email (verification, password reset, sign-in link) can be sent.
@@ -142,32 +174,51 @@ else
         => fromAddressConfigured = !string.IsNullOrWhiteSpace(signupFromAddress)
             || !string.IsNullOrWhiteSpace(UiOptions.Value.SignupFromAddress);
 
-    private async Task OnToggleAsync(bool value)
+    private Task OnToggleAsync(bool value) => RunAsync("SelfServiceSignupEnabled", async portal =>
     {
-        using var scope = ScopeFactory.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSelfServiceSignupEnabledAsync(value);
+        await portal.SetSelfServiceSignupEnabledAsync(value);
         signupEnabled = value;
         statusMessage = value ? "Self-service signup enabled." : "Self-service signup disabled.";
+    });
+
+    private Task SaveFromAddressAsync()
+    {
+        var from = signupFromAddress?.Trim();
+        if (!string.IsNullOrEmpty(from) && !InputValidation.IsPlausibleEmail(from))
+        {
+            validationError = $"'{from}' is not a valid email address.";
+            statusMessage = null;
+            return Task.CompletedTask;
+        }
+
+        return RunAsync("SignupFromAddress", async portal =>
+        {
+            await portal.SetSignupFromAddressAsync(string.IsNullOrEmpty(from) ? null : from);
+            signupFromAddress = from;
+            UpdateFromAddressConfigured();
+            statusMessage = string.IsNullOrEmpty(from)
+                ? "From-address cleared (using the appsettings value)."
+                : $"From-address set to {from}.";
+        });
     }
 
-    private async Task SaveFromAddressAsync()
+    private Task SaveThrottleAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSignupFromAddressAsync(signupFromAddress);
-        UpdateFromAddressConfigured();
-        statusMessage = string.IsNullOrWhiteSpace(signupFromAddress)
-            ? "From-address cleared (using the appsettings value)."
-            : $"From-address set to {signupFromAddress.Trim()}.";
-    }
+        // No silent fallback to 0 (= throttle off) on a typo: report it and save nothing.
+        if (!InputValidation.TryParseInt(signupMaxPerHour, "Signup attempts per IP per hour", 0, 10_000, out var max, out var error))
+        {
+            validationError = error;
+            statusMessage = null;
+            return Task.CompletedTask;
+        }
 
-    private async Task SaveThrottleAsync()
-    {
-        var max = int.TryParse(signupMaxPerHour, out var v) ? Math.Max(0, v) : 0;
-        using var scope = ScopeFactory.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IPortalSettingsService>().SetSignupMaxAttemptsPerIpPerHourAsync(max);
-        signupMaxPerHour = max.ToString();
-        statusMessage = max == 0
-            ? "Signup throttle disabled."
-            : $"Signup throttle set to {max}/hour per IP.";
+        return RunAsync("SignupMaxAttemptsPerIpPerHour", async portal =>
+        {
+            await portal.SetSignupMaxAttemptsPerIpPerHourAsync(max);
+            signupMaxPerHour = max.ToString();
+            statusMessage = max == 0
+                ? "Signup throttle disabled."
+                : $"Signup throttle set to {max}/hour per IP.";
+        });
     }
 }

@@ -5,6 +5,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
 @inject IAdminCertificateProvider CertProvider
+@inject ILogger<AdminCertificate> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -50,7 +51,7 @@ else
                 </div>
                 <div class="dns-record-row">
                     <span class="dns-record-label">Expires</span>
-                    <code class="mono dns-record-value">@(CurrentExpiry?.ToString("yyyy-MM-dd") ?? "—")</code>
+                    <code class="mono dns-record-value"><LocalTime Utc="@CurrentExpiry" Format="yyyy-MM-dd HH:mm" /></code>
                 </div>
                 @if (!string.IsNullOrEmpty(CurrentThumbprint))
                 {
@@ -81,7 +82,7 @@ else
 
             @if (info.HasImportedCertificate)
             {
-                <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="RemoveAsync" Disabled="@busy" Class="mt-1">
+                <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showRemoveConfirm = true" Disabled="@busy" Class="mt-1">
                     <LucideIcon Name="trash-2" /> Remove imported certificate (revert to self-signed)
                 </BbButton>
             }
@@ -160,7 +161,7 @@ else
                             <tr>
                                 <td><code class="mono">@c.Subject</code></td>
                                 <td class="text-muted">@c.Issuer</td>
-                                <td class="text-muted">@c.NotAfterUtc.ToString("yyyy-MM-dd")</td>
+                                <td class="text-muted"><LocalTime Utc="@c.NotAfterUtc" Format="yyyy-MM-dd" /></td>
                                 <td style="text-align:right;">
                                     <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => UseStoreCertAsync(c.Thumbprint)" Disabled="@busy">
                                         <LucideIcon Name="check" /> Use
@@ -180,6 +181,22 @@ else
     </BbCard>
 }
 
+<BbAlertDialog @bind-Open="showRemoveConfirm">
+    <BbAlertDialogContent>
+        <BbAlertDialogHeader>
+            <BbAlertDialogTitle>Remove imported certificate</BbAlertDialogTitle>
+            <BbAlertDialogDescription>
+                The admin UI switches back to the built-in self-signed certificate at once. Browsers show a certificate
+                warning again until you import a trusted certificate.
+            </BbAlertDialogDescription>
+        </BbAlertDialogHeader>
+        <BbAlertDialogFooter>
+            <BbAlertDialogCancel><BbButton Variant="ButtonVariant.Outline">Cancel</BbButton></BbAlertDialogCancel>
+            <BbAlertDialogAction><BbButton Variant="ButtonVariant.Destructive" Disabled="@busy" @onclick="RemoveAsync">Remove</BbButton></BbAlertDialogAction>
+        </BbAlertDialogFooter>
+    </BbAlertDialogContent>
+</BbAlertDialog>
+
 @code {
     private bool isLoading = true;
     private bool busy;
@@ -192,7 +209,7 @@ else
 
     // Snapshot of the certificate Kestrel is currently serving (self-signed or imported).
     private string? CurrentSubject;
-    private DateTime? CurrentExpiry;
+    private DateTimeOffset? CurrentExpiry;
     private string? CurrentThumbprint;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
@@ -206,7 +223,9 @@ else
 
         var current = CertProvider.Current;
         CurrentSubject = current?.Subject;
-        CurrentExpiry = current?.NotAfter;
+        // X509Certificate2.NotAfter is server-local time; as a DateTimeOffset it carries that offset, so
+        // <LocalTime> can show it in the viewer's zone.
+        CurrentExpiry = current is null ? null : new DateTimeOffset(current.NotAfter);
         CurrentThumbprint = current?.Thumbprint;
         isLoading = false;
     }
@@ -218,9 +237,11 @@ else
         errorMessage = null;
     }
 
+    private bool showRemoveConfirm;
+
     private async Task ImportAsync()
     {
-        if (selectedFile is null) return;
+        if (busy || selectedFile is null) return;            // double-submit guard (before the first await)
         busy = true;
         statusMessage = null;
         errorMessage = null;
@@ -241,11 +262,13 @@ else
         }
         catch (InvalidOperationException ex)
         {
+            // AdminCertificateService refusals (unreadable PFX, wrong password, no private key) are written for the operator.
             errorMessage = ex.Message;
         }
         catch (Exception ex)
         {
-            errorMessage = $"Could not import the certificate: {ex.Message}";
+            Logger.LogError(ex, "Importing the admin UI certificate failed");
+            errorMessage = "Could not import the certificate. " + UiMessages.Unexpected;
         }
         finally
         {
@@ -255,6 +278,7 @@ else
 
     private async Task UseStoreCertAsync(string thumbprint)
     {
+        if (busy) return;                                    // double-submit guard (before the first await)
         busy = true;
         statusMessage = null;
         errorMessage = null;
@@ -274,7 +298,8 @@ else
         }
         catch (Exception ex)
         {
-            errorMessage = $"Could not use the certificate: {ex.Message}";
+            Logger.LogError(ex, "Using store certificate {Thumbprint} for the admin UI failed", thumbprint);
+            errorMessage = "Could not use the certificate. " + UiMessages.Unexpected;
         }
         finally
         {
@@ -284,6 +309,8 @@ else
 
     private async Task RemoveAsync()
     {
+        if (busy) return;                                    // double-submit guard (before the first await)
+        showRemoveConfirm = false;
         busy = true;
         statusMessage = null;
         errorMessage = null;
@@ -299,7 +326,8 @@ else
         }
         catch (Exception ex)
         {
-            errorMessage = $"Could not remove the certificate: {ex.Message}";
+            Logger.LogError(ex, "Removing the imported admin UI certificate failed");
+            errorMessage = "Could not remove the certificate. " + UiMessages.Unexpected;
         }
         finally
         {

@@ -6,6 +6,7 @@
 @inject IServiceScopeFactory ScopeFactory
 @inject NavigationManager Nav
 @inject WinSmtpRelay.AdminUi.Services.LocalNetworkProbe NetProbe
+@inject ILogger<TenantDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -88,7 +89,7 @@ else
                     </div>
                     @if (localIps.Count > 0)
                     {
-                        <div style="margin-top:0.4rem;display:flex;gap:0.35rem;flex-wrap:wrap;align-items:center;">
+                        <div class="row-flex" style="margin-top:0.4rem;gap:0.35rem;">
                             <span class="text-muted" style="font-size:0.78rem;">Detected — click to use:</span>
                             @foreach (var ip in localIps)
                             {
@@ -117,13 +118,13 @@ else
         <BbCardFooter>
             <div class="flex gap-1 items-center">
                 <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync"
-                        Disabled="@(string.IsNullOrWhiteSpace(name) || (IsNew && string.IsNullOrWhiteSpace(slug)))">
-                    <LucideIcon Name="save" /> Save
+                        Disabled="@(saving || string.IsNullOrWhiteSpace(name) || (IsNew && string.IsNullOrWhiteSpace(slug)))">
+                    <LucideIcon Name="save" /> @(saving ? "Saving…" : "Save")
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
                 @if (!string.IsNullOrEmpty(statusMessage))
                 {
-                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                    <span class="status-note" role="status">@statusMessage</span>
                 }
             </div>
         </BbCardFooter>
@@ -185,6 +186,7 @@ else
 
     private async Task TestOutboundAsync()
     {
+        if (probing) return;
         probing = true;
         probeResults.Clear();
         try
@@ -232,27 +234,53 @@ else
         isLoading = false;
     }
 
+    private bool saving;
+
     private async Task SaveAsync()
+    {
+        if (saving) return;                                  // double-submit guard (before the first await)
+        if (string.IsNullOrWhiteSpace(name) || (IsNew && string.IsNullOrWhiteSpace(slug))) return;
+        if (!IsNew && !string.IsNullOrWhiteSpace(egress) && !InputValidation.IsIpAddress(egress))
+        {
+            statusMessage = $"'{egress.Trim()}' is not a valid IP address.";
+            return;
+        }
+
+        saving = true;
+        statusMessage = null;
+        try
+        {
+            await SaveCoreAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // TenantService refusals (duplicate slug, default tenant, invalid IP) are written for the operator.
+            statusMessage = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving tenant {TenantId} failed", Id);
+            statusMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task SaveCoreAsync()
     {
         using var scope = ScopeFactory.CreateScope();
         var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
 
         if (IsNew)
         {
-            try
-            {
-                await svc.CreateAsync(name.Trim(), slug.Trim());
-                Nav.NavigateTo("/tenants");
-            }
-            catch (InvalidOperationException ex)
-            {
-                statusMessage = ex.Message;
-            }
+            await svc.CreateAsync(name.Trim(), slug.Trim());
+            Nav.NavigateTo("/tenants");
             return;
         }
 
         var targetEnabled = IsDefault || enabled == "true";
-        try
         {
             // Enabling a previously-disabled tenant approves a pending self-service signup
             // (confirms + unlocks its admins); the name is then applied via Update.
@@ -269,10 +297,6 @@ else
 
             await svc.SetEgressIpAsync(Id!.Value, string.IsNullOrWhiteSpace(egress) ? null : egress.Trim());
             Nav.NavigateTo("/tenants");
-        }
-        catch (InvalidOperationException ex)
-        {
-            statusMessage = ex.Message;
         }
     }
 

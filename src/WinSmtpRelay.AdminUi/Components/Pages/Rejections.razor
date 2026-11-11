@@ -8,6 +8,9 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject ICurrentTenant CurrentTenant
 @inject ICurrentActor CurrentActor
+@inject IAuthorizationService AuthorizationService
+@inject BrowserTimeService Time
+@inject ILogger<Rejections> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -27,10 +30,10 @@
         <p>Submissions the relay refused &mdash; the counterpart of the Journal</p>
     </div>
     <div class="flex gap-1 items-center">
-        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showIgnored = !showIgnored">
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" Disabled="@isLoading" @onclick="ToggleIgnoredAsync">
             <LucideIcon Name="@(showIgnored ? "eye-off" : "eye")" /> @(showIgnored ? "Hide ignored" : "Show ignored")
         </BbButton>
-        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="RefreshAsync">
+        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" Disabled="@isLoading" @onclick="RefreshAsync">
             <LucideIcon Name="refresh-cw" /> Refresh
         </BbButton>
         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => showHelp = true">
@@ -41,10 +44,10 @@
 
 @if (!string.IsNullOrEmpty(statusMessage))
 {
-    <p class="@(statusIsError ? "text-danger" : "text-muted")">@statusMessage</p>
+    <p class="@(statusIsError ? "text-danger" : "text-muted")" role="@(statusIsError ? "alert" : "status")">@statusMessage</p>
 }
 
-@if (isLoading)
+@if (isLoading && trusted.Count == 0)
 {
     <BbSkeleton Class="h-[300px] w-full" />
 }
@@ -79,8 +82,8 @@ else
             @foreach (var row in trusted)
             {
                 <BbTableRow Item="@row">
-                    <BbTableCell><code>@row.ClientIp</code></BbTableCell>
-                    <BbTableCell>@(row.SenderDomain.Length > 0 ? row.SenderDomain : "—")</BbTableCell>
+                    <BbTableCell><code class="wrap-anywhere">@row.ClientIp</code></BbTableCell>
+                    <BbTableCell class="wrap-anywhere">@(row.SenderDomain.Length > 0 ? row.SenderDomain : "—")</BbTableCell>
                     <BbTableCell>
                         <span class="badge-status @(row.Reason.IsTemporary() ? "badge-warning" : "badge-destructive")">
                             @row.Reason.Describe()
@@ -91,12 +94,12 @@ else
                         }
                         @if (!string.IsNullOrWhiteSpace(row.LastBuffer))
                         {
-                            <div class="mono text-muted" style="font-size:0.75rem;">@row.LastBuffer</div>
+                            <div class="mono text-muted wrap-anywhere rejection-buffer">@row.LastBuffer</div>
                         }
                     </BbTableCell>
                     <BbTableCell>@row.Count</BbTableCell>
                     <BbTableCell>
-                        <span title="@($"First seen {row.FirstSeenUtc.UtcDateTime:yyyy-MM-dd HH:mm} UTC, last {row.LastSeenUtc.UtcDateTime:yyyy-MM-dd HH:mm} UTC")">
+                        <span title="@($"First seen {Time.Format(row.FirstSeenUtc, "yyyy-MM-dd HH:mm")}, last {Time.Format(row.LastSeenUtc, "yyyy-MM-dd HH:mm")}")">
                             @Age(row)
                         </span>
                     </BbTableCell>
@@ -122,6 +125,7 @@ else
                                     @if (row.IgnoredUtc is null)
                                     {
                                         <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Ignore" Disabled="@busy"
+                                                  aria-label="@($"Ignore rejections from {row.ClientIp}")"
                                                   @onclick="() => Ask(row, RejectionAction.Ignore)">
                                             <LucideIcon Name="bell-off" />
                                         </BbButton>
@@ -129,6 +133,7 @@ else
                                     else
                                     {
                                         <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Stop ignoring" Disabled="@busy"
+                                                  aria-label="@($"Stop ignoring rejections from {row.ClientIp}")"
                                                   @onclick="() => UnignoreAsync(row)">
                                             <LucideIcon Name="bell" />
                                         </BbButton>
@@ -141,6 +146,16 @@ else
             }
         </BbTableBody>
     </BbTable>
+
+    @if (trustedTotal > trusted.Count)
+    {
+        <div class="list-footer">
+            <span>Showing the @trusted.Count most recent of @trustedTotal rejections.</span>
+            <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" Disabled="@isLoading" @onclick="LoadMoreAsync">
+                Load @PageSize more
+            </BbButton>
+        </div>
+    }
 
     @if (!CanAct)
     {
@@ -155,19 +170,16 @@ else
         Port 25 hears from the whole internet. These are the relay working as designed &mdash; counted so the
         volume is visible, never reported as a problem.
     </p>
-    @if (untrusted.Count == 0)
+    @if (untrustedAttempts == 0)
     {
         <p>Nothing refused from outside your networks.</p>
     }
     else
     {
         <p>
-            <strong>@untrusted.Sum(r => r.Count)</strong> attempt(s) from
-            <strong>@untrusted.Select(r => r.ClientIp).Distinct().Count()</strong> IP(s).
-            Most common: @string.Join(", ", untrusted.GroupBy(r => r.Reason)
-                .OrderByDescending(g => g.Sum(r => r.Count))
-                .Take(3)
-                .Select(g => $"{g.Key.Describe()} ({g.Sum(r => r.Count)})"))
+            <strong>@untrustedAttempts</strong> attempt(s) from
+            <strong>@untrustedIps</strong> IP(s).
+            Most common: @string.Join(", ", untrustedTopReasons.Select(g => $"{g.Reason.Describe()} ({g.Total})"))
         </p>
     }
 }
@@ -195,7 +207,7 @@ else
             <BbDialogTitle>About Rejections</BbDialogTitle>
             <BbDialogDescription>The mail that never got in</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>The Journal shows what happened to mail the relay <strong>accepted</strong>. This page shows what it <strong>refused</strong> &mdash; the failure that is otherwise silent on both ends, because the relay only logs a warning and the sending device only reports a generic error and keeps retrying.</p>
             <p>Rows are aggregated: one line per client, reason and sender domain, with a count. A device retrying every 30 minutes for months is one row, not thousands.</p>
             <p><strong>From your networks</strong> means the client matched an allow rule (or the <code>AllowedNetworks</code> fallback) &mdash; a device you configured that cannot send. That is worth acting on. Everything else is background noise on port 25 and is only counted.</p>
@@ -212,8 +224,17 @@ else
 @code {
     private enum RejectionAction { AcceptDomain, AllowIp, Ignore }
 
+    private const int PageSize = 100;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
     private List<RejectedSubmission> trusted = [];
-    private List<RejectedSubmission> untrusted = [];
+    private int trustedTotal;
+    private int take = PageSize;
+    // The untrusted («from elsewhere») rows are only ever shown as totals, so only the totals are loaded.
+    private long untrustedAttempts;
+    private int untrustedIps;
+    private List<ReasonTotal> untrustedTopReasons = [];
     private bool isLoading = true;
     private bool showHelp;
     private bool showIgnored;
@@ -259,26 +280,64 @@ else
     private async Task RefreshAsync()
     {
         isLoading = true;
-        using var scope = ScopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
 
-        // RejectedSubmission is deliberately NOT ITenantOwned (a row whose tenant attribution FAILED has
-        // no tenant to own it), so it carries no query filter and the tenant split must be applied by
-        // hand — otherwise a tenant admin would see every other tenant's rows.
-        var query = db.RejectedSubmissions.AsNoTracking();
-        if (CurrentTenant.FilterEnabled)
-            query = query.Where(r => r.TenantId == CurrentTenant.FilterTenantId);
+            // RejectedSubmission is deliberately NOT ITenantOwned (a row whose tenant attribution FAILED has
+            // no tenant to own it), so it carries no query filter and the tenant split must be applied by
+            // hand — otherwise a tenant admin would see every other tenant's rows.
+            var query = db.RejectedSubmissions.AsNoTracking();
+            if (CurrentTenant.FilterEnabled)
+                query = query.Where(r => r.TenantId == CurrentTenant.FilterTenantId);
 
-        var rows = await query.ToListAsync();
+            // Trusted sources: one page, newest first, with the total for the «load more» footer.
+            var trustedQuery = query.Where(r => r.IsTrustedSource);
+            if (!showIgnored)
+                trustedQuery = trustedQuery.Where(r => r.IgnoredUtc == null);
+            trustedTotal = await trustedQuery.CountAsync();
+            trusted = await trustedQuery
+                .OrderByDescending(r => r.LastSeenUtc)
+                .Take(take)
+                .ToListAsync();
 
-        trusted = rows
-            .Where(r => r.IsTrustedSource && (showIgnored || r.IgnoredUtc is null))
-            .OrderByDescending(r => r.LastSeenUtc)
-            .ToList();
-        untrusted = rows.Where(r => !r.IsTrustedSource).ToList();
-
-        isLoading = false;
+            // Everything else: aggregated in the database instead of loading every row.
+            var untrustedQuery = query.Where(r => !r.IsTrustedSource);
+            untrustedAttempts = await untrustedQuery.SumAsync(r => (long?)r.Count) ?? 0;
+            untrustedIps = await untrustedQuery.Select(r => r.ClientIp).Distinct().CountAsync();
+            untrustedTopReasons = (await untrustedQuery
+                    .GroupBy(r => r.Reason)
+                    .Select(g => new ReasonTotal(g.Key, g.Sum(r => r.Count)))
+                    .ToListAsync())
+                .OrderByDescending(g => g.Total)
+                .Take(3)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Loading rejections failed");
+            Fail(UiMessages.Unexpected);
+        }
+        finally
+        {
+            isLoading = false;
+        }
     }
+
+    private async Task ToggleIgnoredAsync()
+    {
+        showIgnored = !showIgnored;
+        await RefreshAsync();
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        take += PageSize;
+        await RefreshAsync();
+    }
+
+    private sealed record ReasonTotal(RejectReason Reason, long Total);
 
     private static bool CanAllowIp(RejectedSubmission row) => row.Reason
         is RejectReason.NotInAllowedNetworks
@@ -311,18 +370,29 @@ else
         busy = true;
         try
         {
+            // The AuthorizeView around the buttons only hides them; re-check the policy server-side.
+            if (!await AuthorizationService.IsAllowedAsync(AuthState, AuthorizationPolicies.AdminFull))
+            {
+                Fail(UiMessages.Forbidden);
+                return;
+            }
             switch (action)
             {
                 case RejectionAction.AcceptDomain: await AcceptDomainAsync(target); break;
                 case RejectionAction.AllowIp: await AllowIpAsync(target); break;
                 case RejectionAction.Ignore: await SetIgnoredAsync(target, DateTimeOffset.UtcNow); break;
             }
-            showConfirm = false;
             await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Rejection action {Action} for {ClientIp} failed", action, target?.ClientIp);
+            Fail(UiMessages.Unexpected);
         }
         finally
         {
             busy = false;
+            showConfirm = false;
         }
     }
 
@@ -419,12 +489,22 @@ else
 
     private async Task UnignoreAsync(RejectedSubmission row)
     {
-        if (busy) return;
+        if (busy) return;                                   // double-submit guard (before the first await)
         busy = true;
         try
         {
+            if (!await AuthorizationService.IsAllowedAsync(AuthState, AuthorizationPolicies.AdminFull))
+            {
+                Fail(UiMessages.Forbidden);
+                return;
+            }
             await SetIgnoredAsync(row, null);
             await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Un-ignoring the rejection from {ClientIp} failed", row.ClientIp);
+            Fail(UiMessages.Unexpected);
         }
         finally
         {
