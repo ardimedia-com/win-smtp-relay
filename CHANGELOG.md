@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build80] - 2026-11-11
+
 All findings of the deep code review of 2026-11-11 (decisions T1073–T1085). **Read the BREAKING lines before
 upgrading** — data moves to `%ProgramData%`, mailed links need a public address when the admin UI is reached
 through a DNS alias or proxy, and API/MCP clients see validated request bodies.
@@ -30,6 +32,10 @@ through a DNS alias or proxy, and API/MCP clients see validated request bodies.
   cannot be decrypted; `REMOVEDATA=1` deletes the data on uninstall (kept by default); `appsettings.Local.json` for
   machine-local secrets; an error bar and page error panel in the admin UI; paging for the queue and rejections; the
   admin UI works on tablets and phones.
+- Host admins: a new **Unlock** action lifts a lockout after failed sign-ins (a password reset lifts it too); the
+  status column shows Enabled / Locked / Disabled.
+- Tenant setting to send bounces (DSN) to the tenant's own senders; send connector: «Allow sign-in without TLS» with
+  a warning and an explicit «Remove stored password»; the message page lists recipients that failed permanently.
 
 ### Changed
 
@@ -67,6 +73,8 @@ through a DNS alias or proxy, and API/MCP clients see validated request bodies.
 - DKIM-key regeneration, admin reset/disable, certificate removal and tenant purge ask for confirmation; forms
   validate domains (IDN stored as punycode), IP/CIDR rules, ports and limits instead of saving defaults; the Event Log
   page shows your time zone; the service refuses to start without an explicit environment.
+- Suppression retention defaults to 30 days for hard-bounce entries. `Update:ExpectedPublisher` is removed;
+  `Update:SignerThumbprints` lists the accepted signing certificates (for a certificate rollover).
 
 ### Fixed
 
@@ -82,6 +90,9 @@ through a DNS alias or proxy, and API/MCP clients see validated request bodies.
   before midnight is no longer skipped; a settings-read error or a dashboard timer can no longer stop the service;
   the EHLO domain of a send connector is saved on edit; the switch-tenant and break-glass sign-ins keep «Keep me
   signed in»; save and delete buttons cannot run twice; a 2048 MB size limit no longer overflows.
+- Doubled retry intervals on the default send connector are repaired at startup; the send-connector page no longer
+  resets the connect timeout to 30 s on save; removing an imported admin certificate falls back to the self-signed
+  one in the data folder; the queue and dashboard lists no longer load message bodies.
 - **Loading placeholders have their height again** — about 30 skeletons (queue, setup, logs, dashboard cards) used
   size classes that no stylesheet declared, so they collapsed to nothing while a page loaded. The sub-headings on
   the accepted-domain and DKIM detail pages are styled as well.
@@ -112,6 +123,10 @@ through a DNS alias or proxy, and API/MCP clients see validated request bodies.
   that cannot be decrypted is never used; security headers (CSP, HSTS, nosniff, frame and referrer policy); logout
   protected against cross-site requests; OpenAPI only for signed-in admins; live activity no longer shows client IPs
   to other tenants.
+- Disabling or enabling a host admin ends the account's sessions; resending a message needs a tenant-admin
+  membership in its tenant and is audited as a body read; SMTP AUTH no longer reveals through timing which
+  usernames exist; live SMTP connection events are shown to host administrators only; the password show/hide button
+  is reachable by keyboard, and turning off two-factor or regenerating recovery codes asks for confirmation.
 
 ## [1.0.0-beta1-build79] - 2026-10-19
 
