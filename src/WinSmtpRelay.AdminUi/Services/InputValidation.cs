@@ -63,7 +63,9 @@ public static class InputValidation
             return false;
         }
 
-        if (!IpAddressScope.TryParseAddressOrNetwork(text, out var address))
+        var slashAt = text.IndexOf('/');
+        if (!IsStrictIpAddress(slashAt >= 0 ? text[..slashAt] : text)
+            || !IpAddressScope.TryParseAddressOrNetwork(text, out var address))
         {
             error = $"'{text}' is not a valid IP address or CIDR network (e.g. 192.168.1.0/24 or 2001:db8::/48).";
             return false;
@@ -158,6 +160,19 @@ public static class InputValidation
             && text.IndexOf('@') == at && text[(at + 1)..].Contains('.');
     }
 
-    /// <summary>True when <paramref name="text"/> parses as an <see cref="IPAddress"/>.</summary>
-    public static bool IsIpAddress(string? text) => IPAddress.TryParse((text ?? "").Trim(), out _);
+    /// <summary>True when <paramref name="text"/> is an IP address in its usual written form.</summary>
+    public static bool IsIpAddress(string? text) => IsStrictIpAddress((text ?? "").Trim());
+
+    /// <summary>
+    /// <see cref="IPAddress.TryParse(string?, out IPAddress?)"/> also accepts legacy IPv4 shorthands («10» = 0.0.0.10,
+    /// «10.1» = 10.0.0.1), which in a rule would silently mean something else than the operator typed. Require the
+    /// dotted-quad form for IPv4.
+    /// </summary>
+    private static bool IsStrictIpAddress(string text)
+    {
+        if (!IPAddress.TryParse(text, out var parsed))
+            return false;
+        return parsed.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork
+            || text.Count(c => c == '.') == 3;
+    }
 }

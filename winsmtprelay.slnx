@@ -10,6 +10,7 @@
     <Project Path="src/WinSmtpRelay.Storage/WinSmtpRelay.Storage.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/WinSmtpRelay.AdminUi.Tests/WinSmtpRelay.AdminUi.Tests.csproj" />
     <Project Path="tests/WinSmtpRelay.Core.Tests/WinSmtpRelay.Core.Tests.csproj" />
     <Project Path="tests/WinSmtpRelay.Delivery.Tests/WinSmtpRelay.Delivery.Tests.csproj" />
     <Project Path="tests/WinSmtpRelay.Integration.Tests/WinSmtpRelay.Integration.Tests.csproj" />
