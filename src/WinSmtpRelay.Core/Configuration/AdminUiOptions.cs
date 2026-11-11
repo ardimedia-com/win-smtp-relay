@@ -34,4 +34,21 @@ public class AdminUiOptions
 
     /// <summary>Maximum self-service signup attempts per client IP per hour (abuse control). 0 disables the limit.</summary>
     public int SignupMaxAttemptsPerIpPerHour { get; set; } = 5;
+
+    /// <summary>
+    /// The absolute address administrators reach the admin UI at, e.g. <c>https://relay.example.com:8025/</c>.
+    /// Every link the relay mails (sign-in link, password reset, signup confirmation) is built from it, never
+    /// from the request's Host header, and its host name is added to the allowed host names. When unset, links
+    /// fall back to the request address — which is only safe because host filtering restricts it to the
+    /// allowed host names; with <c>AllowedHosts</c> = <c>*</c> and no public URL no link is mailed at all.
+    /// </summary>
+    public string? PublicBaseUrl { get; set; }
+
+    /// <summary>
+    /// Sign-in related form posts (password, sign-in link, forgot/reset password, two-factor, recovery code,
+    /// passkey, first-run setup) accepted per client IP and minute before the admin plane answers 429. A
+    /// throttle ahead of the per-account lockout, so guessing — or deliberately locking out a known account —
+    /// is slowed down per source. 0 disables it.
+    /// </summary>
+    public int SignInRequestsPerIpPerMinute { get; set; } = 10;
 }

@@ -17,6 +17,9 @@ public class ApiKeyService(
     private const string Prefix = "wsr_";
     private const int PrefixStoreLength = 12; // "wsr_" + 8 chars, enough to narrow lookups
 
+    /// <summary>How fresh <see cref="ApiKey.LastUsedUtc"/> is kept (see <see cref="ValidateAsync"/>).</summary>
+    public static readonly TimeSpan LastUsedResolution = TimeSpan.FromMinutes(1);
+
     public async Task<IReadOnlyList<ApiKey>> GetAllAsync(int? tenantId, CancellationToken cancellationToken)
     {
         var query = db.ApiKeys.AsNoTracking();
@@ -93,8 +96,13 @@ public class ApiKeyService(
                     return null;
                 }
 
-                candidate.LastUsedUtc = now;
-                await db.SaveChangesAsync(cancellationToken);
+                // At most one write per key and minute: every API/MCP request authenticates, and a write per
+                // request would serialise all of them on the SQLite write lock for a value shown to the minute.
+                if (candidate.LastUsedUtc is null || now - candidate.LastUsedUtc.Value >= LastUsedResolution)
+                {
+                    candidate.LastUsedUtc = now;
+                    await db.SaveChangesAsync(cancellationToken);
+                }
                 return candidate;
             }
         }

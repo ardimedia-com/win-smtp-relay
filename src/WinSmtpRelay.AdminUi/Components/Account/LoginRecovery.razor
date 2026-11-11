@@ -2,6 +2,7 @@
 @layout AccountLayout
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
+@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(WinSmtpRelay.AdminApi.Auth.RelayRateLimitPolicies.SignIn)]
 @inject SignInManager<AdminUser> SignInManager
 @inject WinSmtpRelay.Core.Interfaces.IAdminAuditService Audit
 @inject NavigationManager Nav

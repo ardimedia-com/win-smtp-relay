@@ -2,6 +2,7 @@
 @layout AccountLayout
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
+@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(WinSmtpRelay.AdminApi.Auth.RelayRateLimitPolicies.SignIn)]
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.Extensions.Options
 @using WinSmtpRelay.Core.Configuration
@@ -14,6 +15,7 @@
 @inject WinSmtpRelay.Core.Interfaces.IPortalSettingsService PortalSettings
 @inject IMessageQueue Queue
 @inject IOptions<AdminUiOptions> UiOptions
+@inject IOptions<Microsoft.AspNetCore.HostFiltering.HostFilteringOptions> HostFiltering
 @inject IAdminMembershipService Memberships
 @inject IAdminAuditService Audit
 
@@ -99,6 +101,17 @@ else if (errorMessage is not null)
     private const string PasswordAction = "password";
     private const string MagicLinkAction = "magiclink";
 
+    // One answer for every failed attempt — unknown address, wrong password, locked account — so the page never
+    // tells whether an address has an account or is locked.
+    private const string FailedSignIn =
+        "Invalid email or password. After repeated failures the account is locked for a few minutes — try again "
+        + "later, or reset your password.";
+
+    // Verified against when there is no account (or a locked one), so a failed attempt costs the same hashing time
+    // whether or not the address exists.
+    private static readonly string DummyPasswordHash =
+        new PasswordHasher<AdminUser>().HashPassword(new AdminUser(), Guid.NewGuid().ToString("N"));
+
     protected override async Task OnInitializedAsync()
     {
         var portal = await PortalSettings.GetAsync();
@@ -160,7 +173,7 @@ else if (errorMessage is not null)
                         Nav.NavigateTo($"/account/login-2fa?rememberMe={Input.RememberMe}{rt}");
                         return;
                     }
-                    errorMessage = "Account locked due to too many failed attempts. Try again later.";
+                    errorMessage = FailedSignIn;
                     return;
                 }
 
@@ -173,14 +186,20 @@ else if (errorMessage is not null)
 
             if (check.IsLockedOut)
             {
-                errorMessage = "Account locked due to too many failed attempts. Try again later.";
+                // Identity refuses a locked account before hashing: hash anyway, answer like any other failure.
+                SignInManager.UserManager.PasswordHasher.VerifyHashedPassword(user, DummyPasswordHash, Input.Password);
+                errorMessage = FailedSignIn;
                 Logger.LogWarning("Failed admin sign-in for {Email} (lockedOut=True)", Input.Email);
                 await Audit.WriteAsync(AdminAuditActions.SignInFailed, user.Id, user.Email, targetUserId: user.Id, detail: "locked out");
                 return;
             }
         }
+        else
+        {
+            SignInManager.UserManager.PasswordHasher.VerifyHashedPassword(new AdminUser(), DummyPasswordHash, Input.Password);
+        }
 
-        errorMessage = "Invalid email or password.";
+        errorMessage = FailedSignIn;
         Logger.LogWarning("Failed admin sign-in for {Email}", Input.Email);
         await Audit.WriteAsync(AdminAuditActions.SignInFailed, user?.Id, Input.Email, targetUserId: user?.Id, detail: "invalid credentials");
     }
@@ -208,7 +227,17 @@ else if (errorMessage is not null)
             {
                 var token = await SignInManager.UserManager.GenerateUserTokenAsync(
                     user, MagicLinkDefaults.ProviderName, MagicLinkDefaults.Purpose);
-                var linkUrl = $"{Nav.BaseUri}account/magic-link?userId={user.Id}&token={Uri.EscapeDataString(token)}";
+                // Never from the Host header alone (H13): AdminUi:PublicBaseUrl, or the request address once host
+                // filtering has restricted it to the allowed host names.
+                var linkUrl = WinSmtpRelay.AdminApi.Auth.PublicLinks.Build(UiOptions.Value.PublicBaseUrl,
+                    HostFiltering.Value.AllowedHosts, Nav.BaseUri,
+                    $"account/magic-link?userId={user.Id}&token={Uri.EscapeDataString(token)}");
+                if (linkUrl is null)
+                {
+                    Logger.LogWarning("Sign-in link for {Email} not sent: set AdminUi:PublicBaseUrl (AllowedHosts is '*', so the request host is not trusted)", email);
+                    linkSent = true;
+                    return;
+                }
                 var minutes = (int)MagicLinkDefaults.TokenLifetime.TotalMinutes;
                 var content = new WinSmtpRelay.Core.Mail.SystemEmailContent
                 {

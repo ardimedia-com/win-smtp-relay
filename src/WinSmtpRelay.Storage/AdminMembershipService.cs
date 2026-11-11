@@ -39,10 +39,15 @@ public class AdminMembershipService(RelayDbContext db) : IAdminMembershipService
         var existing = await db.AdminMemberships.FirstOrDefaultAsync(m => m.UserId == userId && m.TenantId == tenantId, ct);
         if (existing is not null)
         {
+            var roleChanged = existing.Role != role;
             existing.Role = role;
             if (breakGlass)
                 existing.IsBreakGlass = true;
             await db.SaveChangesAsync(ct);
+            // A changed role (e.g. admin → viewer) must reach the user's open sessions, whose cookie still
+            // carries the old membership claim — rotate the stamp so they are re-issued or signed out.
+            if (roleChanged)
+                await RotateSecurityStampAsync(userId, ct);
             return existing;
         }
 
@@ -67,6 +72,19 @@ public class AdminMembershipService(RelayDbContext db) : IAdminMembershipService
         {
             db.AdminMemberships.Remove(membership);
             await db.SaveChangesAsync(ct);
+            // The revoked membership lives on as a claim in the user's cookie until it is re-validated;
+            // rotating the security stamp makes the next validation (cookie and Blazor circuit) end it.
+            await RotateSecurityStampAsync(membership.UserId, ct);
         }
     }
+
+    /// <summary>
+    /// Rotates the Identity security stamp of one admin account without loading the Identity stack — the value is
+    /// opaque to Identity (it only compares it), so any fresh random string invalidates every issued cookie. The
+    /// concurrency stamp is deliberately left alone, so a caller holding a tracked copy of the user can still
+    /// save it (e.g. re-issue its own cookie with <c>UpdateSecurityStampAsync</c>).
+    /// </summary>
+    private Task RotateSecurityStampAsync(int userId, CancellationToken ct)
+        => db.Users.Where(u => u.Id == userId).ExecuteUpdateAsync(s => s
+            .SetProperty(u => u.SecurityStamp, Guid.NewGuid().ToString("N").ToUpperInvariant()), ct);
 }

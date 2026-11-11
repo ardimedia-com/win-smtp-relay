@@ -18,7 +18,8 @@ public class ApiKeyAuthenticationHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,
     ILoggerFactory logger,
     UrlEncoder encoder,
-    IApiKeyService apiKeys)
+    IApiKeyService apiKeys,
+    ApiKeyFailureThrottle throttle)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -27,9 +28,23 @@ public class ApiKeyAuthenticationHandler(
         if (presented is null)
             return AuthenticateResult.NoResult();
 
+        // Refuse before the lookup while the source is throttled (answered 429 by the cookie challenge, see
+        // RelayAuthExtensions) — the attempt does not even reach the database.
+        var remoteIp = Context.Connection.RemoteIpAddress;
+        if (throttle.IsBlocked(remoteIp))
+        {
+            Context.Items[ApiKeyFailureThrottle.BlockedItemKey] = true;
+            return AuthenticateResult.Fail("Too many failed API key attempts from this address");
+        }
+
         var key = await apiKeys.ValidateAsync(presented, Context.RequestAborted);
         if (key is null)
+        {
+            throttle.RecordFailure(remoteIp);
+            Logger.LogWarning("Rejected API key {KeyPrefix}… from {RemoteIp}",
+                presented.Length >= 12 && presented.StartsWith("wsr_", StringComparison.Ordinal) ? presented[..12] : "(malformed)", remoteIp);
             return AuthenticateResult.Fail("Invalid or expired API key");
+        }
 
         var claims = new List<Claim>
         {

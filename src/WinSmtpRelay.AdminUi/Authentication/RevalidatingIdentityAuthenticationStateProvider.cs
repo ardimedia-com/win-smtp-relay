@@ -21,7 +21,9 @@ public class RevalidatingIdentityAuthenticationStateProvider(
 {
     private readonly IdentityOptions _options = optionsAccessor.Value;
 
-    protected override TimeSpan RevalidationInterval => TimeSpan.FromMinutes(30);
+    // Same cadence as the cookie's security-stamp validation: a disabled account or revoked membership ends an
+    // open circuit within a minute, not half an hour.
+    protected override TimeSpan RevalidationInterval => WinSmtpRelay.AdminApi.Auth.RelayAuthExtensions.SecurityStampValidationInterval;
 
     protected override async Task<bool> ValidateAuthenticationStateAsync(
         AuthenticationState authenticationState, CancellationToken cancellationToken)

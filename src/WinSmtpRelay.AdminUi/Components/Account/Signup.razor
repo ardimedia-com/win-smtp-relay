@@ -10,6 +10,7 @@
 @inject ITenantSignupService SignupService
 @inject IMessageQueue Queue
 @inject IOptions<AdminUiOptions> UiOptions
+@inject IOptions<Microsoft.AspNetCore.HostFiltering.HostFilteringOptions> HostFiltering
 @inject IPortalSettingsService PortalSettings
 @inject WinSmtpRelay.AdminUi.Services.ISignupRateLimiter SignupRateLimiter
 @inject NavigationManager Nav
@@ -132,15 +133,25 @@ else
             : UiOptions.Value.SignupFromAddress;
         if (!string.IsNullOrWhiteSpace(fromAddress) && result.ConfirmToken is not null)
         {
-            var confirmUrl = $"{Nav.BaseUri}account/confirm?userId={result.UserId}&token={Uri.EscapeDataString(result.ConfirmToken)}";
-            try
+            // Never from the Host header alone (H13) — see Login.razor. Without a safe base the host approves instead.
+            var confirmUrl = WinSmtpRelay.AdminApi.Auth.PublicLinks.Build(UiOptions.Value.PublicBaseUrl,
+                HostFiltering.Value.AllowedHosts, Nav.BaseUri,
+                $"account/confirm?userId={result.UserId}&token={Uri.EscapeDataString(result.ConfirmToken)}");
+            if (confirmUrl is null)
             {
-                await EnqueueVerificationEmailAsync(fromAddress, Input.Email, confirmUrl, result.TenantId);
-                emailed = true;
+                Logger.LogWarning("Signup confirmation link for {Email} not sent: set AdminUi:PublicBaseUrl (AllowedHosts is '*'); a host admin can approve the tenant instead", Input.Email);
             }
-            catch (Exception ex)
+            else
             {
-                Logger.LogWarning(ex, "Failed to enqueue signup verification email for {Email}", Input.Email);
+                try
+                {
+                    await EnqueueVerificationEmailAsync(fromAddress, Input.Email, confirmUrl, result.TenantId);
+                    emailed = true;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Failed to enqueue signup verification email for {Email}", Input.Email);
+                }
             }
         }
 

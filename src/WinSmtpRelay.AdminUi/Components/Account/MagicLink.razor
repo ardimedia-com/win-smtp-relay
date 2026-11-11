@@ -2,6 +2,7 @@
 @layout AccountLayout
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
+@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(WinSmtpRelay.AdminApi.Auth.RelayRateLimitPolicies.SignIn)]
 @inject SignInManager<AdminUser> SignInManager
 @inject WinSmtpRelay.Core.Interfaces.IRuntimeConfigCache ConfigCache
 @inject WinSmtpRelay.Core.Interfaces.IAdminMembershipService Memberships
@@ -19,47 +20,75 @@
 }
 else
 {
-    <p class="account-subtitle">Signing you in&hellip;</p>
+    @* Opening the link only shows this button: the link is consumed by the POST, so a mail scanner or link preview
+       that fetches the URL cannot use up the single-use token before the person clicks. *@
+    <p class="account-subtitle">Continue to sign in to WIN-SMTP-RELAY with this one-time link.</p>
+    <EditForm Model="Input" method="post" OnValidSubmit="SignInAsync" FormName="magic-link">
+        <input type="hidden" name="Input.UserId" value="@Input.UserId" />
+        <input type="hidden" name="Input.Token" value="@Input.Token" />
+        <button type="submit" class="account-button">Continue</button>
+    </EditForm>
 }
 
 @code {
+    private const string Invalid = "This sign-in link is invalid or has expired. Request a new one from the sign-in page.";
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = new();
+
     [SupplyParameterFromQuery(Name = "userId")]
-    private int UserId { get; set; }
+    private int QueryUserId { get; set; }
 
     [SupplyParameterFromQuery(Name = "token")]
-    private string? Token { get; set; }
+    private string? QueryToken { get; set; }
 
     private string? errorMessage;
 
     protected override async Task OnInitializedAsync()
     {
-        const string invalid = "This sign-in link is invalid or has expired. Request a new one from the sign-in page.";
-
         // Email recovery can be turned off per deployment; once off, outstanding links stop working.
         if (!(await PortalSettings.GetAsync()).EmailRecoveryEnabled)
         {
-            errorMessage = invalid;
+            errorMessage = Invalid;
             return;
         }
 
-        if (UserId <= 0 || string.IsNullOrEmpty(Token))
+        // On the GET, carry the link's parameters into the form; nothing is verified or consumed yet.
+        if (HttpMethods.IsGet(HttpContext.Request.Method))
         {
-            errorMessage = invalid;
+            Input.UserId = QueryUserId;
+            Input.Token = QueryToken ?? "";
+            if (Input.UserId <= 0 || string.IsNullOrEmpty(Input.Token))
+                errorMessage = Invalid;
+        }
+    }
+
+    private async Task SignInAsync()
+    {
+        if (errorMessage is not null)
+            return;
+        if (Input.UserId <= 0 || string.IsNullOrEmpty(Input.Token))
+        {
+            errorMessage = Invalid;
             return;
         }
 
-        var user = await SignInManager.UserManager.FindByIdAsync(UserId.ToString());
+        var user = await SignInManager.UserManager.FindByIdAsync(Input.UserId.ToString());
         if (user is null)
         {
-            errorMessage = invalid;
+            errorMessage = Invalid;
             return;
         }
 
         if (!await SignInManager.UserManager.VerifyUserTokenAsync(
-                user, MagicLinkDefaults.ProviderName, MagicLinkDefaults.Purpose, Token))
+                user, MagicLinkDefaults.ProviderName, MagicLinkDefaults.Purpose, Input.Token))
         {
-            Logger.LogWarning("Invalid magic-link sign-in token for user {UserId}", UserId);
-            errorMessage = invalid;
+            Logger.LogWarning("Invalid magic-link sign-in token for user {UserId}", Input.UserId);
+            await Audit.WriteAsync(AdminAuditActions.SignInFailed, user.Id, user.Email, targetUserId: user.Id, detail: "invalid or expired sign-in link");
+            errorMessage = Invalid;
             return;
         }
 
@@ -85,14 +114,39 @@ else
         // invalidates this (and any other outstanding) token — a captured/forwarded link cannot be
         // replayed. The cookie issued immediately after carries the NEW stamp, so this session stays valid.
         await SignInManager.UserManager.UpdateSecurityStampAsync(user);
-        // Session cookie (not persistent): a sign-in link has no "remember me" opt-in, so we don't leave a
-        // persistent session behind on the device — consistent with the opt-in persistence model (Login.razor).
-        await SignInManager.SignInAsync(user, isPersistent: false);
-        await Audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "sign-in link");
+
+        // The link proves control of the mailbox only — it is ONE factor. An account with two-factor enabled goes
+        // through the second factor exactly like a password sign-in (T1080): Identity stores the pending two-factor
+        // user and /account/login-2fa finishes it (a device remembered there is honoured the same way).
+        // Session cookie (not persistent): a sign-in link has no "remember me" opt-in, consistent with the
+        // opt-in persistence model (Login.razor).
+        var relay = SignInManager as WinSmtpRelay.AdminApi.Auth.RelaySignInManager
+            ?? throw new InvalidOperationException("The relay sign-in manager is not registered.");
+        var result = await relay.PasswordlessSignInOrTwoFactorAsync(user, isPersistent: false);
+        if (result.RequiresTwoFactor)
+        {
+            Logger.LogInformation("Sign-in link for {Email} accepted; second factor required", user.Email);
+            Nav.NavigateTo("/account/login-2fa?rememberMe=False");
+            return;
+        }
+        if (!result.Succeeded)
+        {
+            errorMessage = Invalid;
+            return;
+        }
+
+        await Audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id,
+            detail: await SignInManager.UserManager.GetTwoFactorEnabledAsync(user) ? "sign-in link (2FA remembered device)" : "sign-in link");
         Logger.LogInformation("Admin {Email} signed in via sign-in link", user.Email);
 
         // A temporary-password (MustChangePassword) account is funnelled to the change-password page by
         // MainLayout's post-sign-in redirect, exactly as for a password sign-in — no special-casing here.
         Nav.NavigateTo("/");
+    }
+
+    private sealed class InputModel
+    {
+        public int UserId { get; set; }
+        public string Token { get; set; } = "";
     }
 }
