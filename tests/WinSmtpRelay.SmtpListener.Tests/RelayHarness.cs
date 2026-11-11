@@ -313,6 +313,12 @@ internal sealed class FakeMessageQueue : IMessageQueue
     public Task<IReadOnlyList<QueuedMessage>> GetRecentAsync(int maxCount, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public Task<IReadOnlyList<QueuedMessage>> GetNonDeliveredAsync(int maxCount, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public Task<int> RequeueStaleDeliveringAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<IReadOnlyList<QueuedMessageSummary>> GetSummariesAsync(int maxCount, bool nonDeliveredOnly, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<int> RequeueExpiredLeasesAsync(DateTimeOffset nowUtc, IReadOnlyCollection<long> inFlightIds, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<IReadOnlyList<int>> GetDueTenantsAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<IReadOnlyList<QueueCandidate>> GetDueCandidatesAsync(int tenantId, DateTimeOffset nowUtc, int maxCount, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<QueuedMessage?> TryClaimAsync(long messageId, DateTimeOffset leaseExpiresUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task CompleteAttemptAsync(long messageId, DeliveryAttemptOutcome outcome, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public Task SetDeliveredRecipientsAsync(long messageId, string deliveredRecipients, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public Task StripBodyAsync(long messageId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 }
