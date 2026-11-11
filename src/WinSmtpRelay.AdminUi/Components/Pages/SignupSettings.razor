@@ -54,7 +54,7 @@ else
                 }
                 <div class="form-group" style="margin-bottom:0;">
                     <BbLabel For="from-address">From-address</BbLabel>
-                    <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <div class="row-flex">
                         <BbInput Id="from-address" @bind-Value="signupFromAddress" Placeholder="noreply@yourdomain.tld" />
                         <BbButton Variant="ButtonVariant.Default" @onclick="SaveFromAddressAsync">
                             <LucideIcon Name="save" /> Save
@@ -87,7 +87,7 @@ else
                 <div class="settings-group-title">Abuse protection</div>
                 <div class="form-group" style="margin-bottom:0;">
                     <BbLabel For="signup-attempts-per-ip-per-hour">Signup attempts per IP per hour</BbLabel>
-                    <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <div class="row-flex">
                         <BbInput Id="signup-attempts-per-ip-per-hour" Type="InputType.Number" @bind-Value="signupMaxPerHour" />
                         <BbButton Variant="ButtonVariant.Default" @onclick="SaveThrottleAsync">
                             <LucideIcon Name="save" /> Save

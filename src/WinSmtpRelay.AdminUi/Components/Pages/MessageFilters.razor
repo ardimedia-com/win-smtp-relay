@@ -174,15 +174,15 @@
             <BbDialogTitle>About Message Filters</BbDialogTitle>
             <BbDialogDescription>Rules applied to messages during delivery</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
-            <h4>Header Rewrites</h4>
+        <div class="dialog-body">
+            <h3>Header Rewrites</h3>
             <p>Modify, add, or remove email headers before delivery. Useful for adding tracking headers, removing internal headers, or standardizing header values.</p>
-            <ul style="padding-left:1.25rem;">
+            <ul>
                 <li><strong>Set</strong> &mdash; Set or replace a header value</li>
                 <li><strong>Remove</strong> &mdash; Remove headers matching the name and optional pattern</li>
                 <li><strong>Append</strong> &mdash; Add a value to existing headers</li>
             </ul>
-            <h4 style="margin-top:1rem;">Sender Rewrites</h4>
+            <h3>Sender Rewrites</h3>
             <p>Rewrite the envelope sender (MAIL FROM) address. The <em>From Pattern</em> is a regex matched against the sender address. If it matches, the sender is replaced with the <em>To Address</em>.</p>
         </div>
         <BbDialogFooter>

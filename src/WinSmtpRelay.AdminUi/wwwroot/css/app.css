@@ -56,7 +56,7 @@
     padding: 1rem;
     max-height: 600px;
     overflow-y: auto;
-    font-family: monospace;
+    font-family: var(--font-mono, monospace);
     font-size: 0.8rem;
 }
 
@@ -311,7 +311,7 @@ h1:focus-visible {
 }
 
 /* Utility */
-.mono { font-family: monospace; }
+.mono { font-family: var(--font-mono, monospace); }
 .nowrap { white-space: nowrap; }
 
 /* Button labels must never wrap (e.g. "Re-check" breaking onto two lines). Applies to every button,
@@ -732,3 +732,165 @@ select option {
 .h-\[320px\] { height: 320px; }
 .w-24 { width: 6rem; }
 .settings-subhead { font-size: 0.8rem; font-weight: 600; margin: 1rem 0 0.25rem; }
+
+/* Long, unbreakable values (addresses, Message-IDs, queue ids) wrap anywhere instead of pushing the table or
+   card wider than the viewport. */
+.wrap-anywhere { overflow-wrap: anywhere; word-break: normal; min-width: 0; }
+
+/* Single-line value cut with an ellipsis; pair it with a title attribute that carries the full text. */
+.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.truncate-inline {
+    display: inline-block;
+    max-width: 200px;
+    vertical-align: bottom;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cell-ellipsis {
+    max-width: 360px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Virtualized tables (Journal, Audit log) need a fixed row height: every cell stays on one line and long
+   values are cut with an ellipsis (full text in the title attribute). */
+.single-line-rows td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+}
+
+/* Recurring layout helpers that used to be inline styles. */
+.row-flex { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.row-flex-start { display: flex; gap: 0.4rem; align-items: flex-start; }
+.status-note { margin-left: 0.5rem; color: var(--muted-foreground); font-size: 0.875rem; }
+.form-error { color: var(--destructive); font-size: 0.85rem; margin-top: 0.25rem; }
+.hint { color: var(--muted-foreground); font-size: 0.8rem; margin-top: 0.25rem; }
+.field-narrow { max-width: 420px; }
+
+/* Help-dialog body text (the «About this page» dialogs). Headings are <h3>: the dialog title is the <h2>. */
+.dialog-body { font-size: 0.875rem; line-height: 1.6; }
+.dialog-body h3 { font-size: 0.95rem; font-weight: 600; margin: 1rem 0 0.25rem; }
+.dialog-body ol,
+.dialog-body ul { padding-left: 1.25rem; }
+.dialog-body p { margin: 0 0 0.5rem; }
+
+/* Multi-line text input that matches the themed inputs (e.g. the resend recipients). */
+.form-textarea {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.875rem;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 0.375rem);
+    background: var(--background);
+    color: var(--foreground);
+}
+.form-textarea:focus { outline: 2px solid var(--ring, var(--primary)); outline-offset: 1px; }
+
+/* Keyboard focus on rows that open a detail on click/Enter. */
+.list-row-clickable:focus-visible,
+.log-row-clickable:focus-visible {
+    outline: 2px solid var(--ring, var(--primary));
+    outline-offset: -2px;
+}
+
+/* App header (top bar above the content). */
+.app-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 2rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.app-header-end {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-width: 0;
+}
+
+/* Paging footer under a list («showing 100 of 2 345» + load more). */
+.list-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--muted-foreground);
+}
+
+/* Error boundary fallback inside the layout: a render error in one page no longer blanks the app. */
+.error-boundary-panel {
+    border: 1px solid color-mix(in oklch, var(--destructive) 35%, transparent);
+    background: color-mix(in oklch, var(--destructive) 8%, transparent);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+}
+.error-boundary-panel h1 { font-size: 1.15rem; font-weight: 600; margin: 0 0 0.5rem; }
+.error-boundary-panel p { margin: 0 0 0.75rem; font-size: 0.9rem; }
+
+/* Blazor's reconnect-independent error bar: shown by blazor.web.js when an unhandled exception ends the
+   circuit. Hidden until then. */
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    padding: 0.75rem 3rem 0.75rem 1.25rem;
+    background: var(--destructive);
+    color: var(--primary-foreground, #fff);
+    font-size: 0.9rem;
+    box-shadow: 0 -1px 6px rgba(0, 0, 0, 0.2);
+}
+#blazor-error-ui a { color: inherit; font-weight: 600; text-decoration: underline; margin-left: 0.5rem; }
+#blazor-error-ui .dismiss {
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    text-decoration: none;
+}
+
+/* Narrow screens (tablets, phones): less padding, the header wraps, and wide tables scroll inside their
+   container instead of widening the whole page. */
+@media (max-width: 900px) {
+    .app-header { padding: 0.6rem 1rem; flex-wrap: wrap; row-gap: 0.4rem; }
+    .app-header-end { gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
+    .header-user-link { max-width: 140px; }
+    .logout-button span { display: none; }
+    .app-main-inner { padding: 1rem; }
+    .must-change-banner { padding: 0.6rem 1rem; flex-wrap: wrap; }
+    .app-main table:not(.kv-table) {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+    }
+    .app-main thead th { position: static; }
+    .tabs-bar { flex-wrap: wrap; gap: 0.5rem; }
+    .cell-ellipsis { max-width: 200px; }
+}
+
+@media (max-width: 600px) {
+    .app-main-inner { padding: 0.75rem; }
+    .page-header h1 { font-size: 1.25rem; }
+    .header-user-link { display: none; }
+    .card-grid { grid-template-columns: 1fr; }
+    .form-grid { grid-template-columns: 1fr; }
+}

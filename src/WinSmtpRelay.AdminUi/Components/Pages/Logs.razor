@@ -164,26 +164,26 @@ else
             <BbDialogTitle>About the Event Log</BbDialogTitle>
             <BbDialogDescription>Windows Event Log viewer for WIN-SMTP-RELAY</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 This page reads entries from the <strong>Windows Event Log</strong> (Application log) written by
                 the WIN-SMTP-RELAY service. It provides a convenient way to inspect service-level events without
                 opening the Windows Event Viewer.
             </p>
-            <h4 style="margin-top:1rem;">Event levels</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Event levels</h3>
+            <ul>
                 <li><strong>Information</strong> &mdash; normal operations: service start/stop, configuration loaded, delivery summaries.</li>
                 <li><strong>Warning</strong> &mdash; non-critical issues: temporary delivery failures, rate-limit hits, certificate expiry warnings.</li>
                 <li><strong>Error</strong> &mdash; critical failures: unhandled exceptions, database errors, TLS handshake failures.</li>
             </ul>
-            <h4 style="margin-top:1rem;">Search &amp; filtering</h4>
+            <h3>Search &amp; filtering</h3>
             <p>
                 Use the <strong>search box</strong> to filter entries by source or message text. The
                 <strong>level dropdown</strong> filters by severity. The <strong>entry count</strong> field
                 limits how many entries are loaded (default 100). Changes apply immediately. Click
                 <strong>Refresh</strong> to reload entries from the Windows Event Log.
             </p>
-            <h4 style="margin-top:1rem;">Marking entries as handled</h4>
+            <h3>Marking entries as handled</h3>
             <p>
                 Click <strong>Mark all as handled</strong> to acknowledge all current entries. Handled entries
                 are dimmed and can be hidden with the <strong>Show handled</strong> toggle. The handled state

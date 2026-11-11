@@ -316,23 +316,23 @@ else
             <BbDialogTitle>About Setup</BbDialogTitle>
             <BbDialogDescription>How to read this page</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>This page checks your tenant's configuration in real time and groups it into three tiers:</p>
-            <ul style="padding-left:1.25rem;">
+            <ul>
                 <li><strong>Basic</strong> — your tenant and the sending identity the rest of the config builds on (public hostname + IP). The <em>Inbound</em> tile turns green once the tenant is active and clients can submit; the <em>Outbound</em> tile reflects whether mail actually leaves the relay.</li>
                 <li><strong>Best practices</strong> — secure submission (SMTP credentials) plus deliverability best practice (verified domains, DKIM, published DNS). Mail can still flow without them, but authenticated submission and these records keep it out of spam.</li>
                 <li><strong>Optional</strong> — refinements where a sensible default already applies (e.g. an empty list means "allow all"); these show as Done with the default noted.</li>
             </ul>
-            <h4 style="margin-top:1rem;">Status badges</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Status badges</h3>
+            <ul>
                 <li><strong>Done</strong> — configured, or a sensible default already applies; nothing to do.</li>
                 <li><strong>In progress</strong> — started but incomplete (e.g. some domains verified).</li>
                 <li><strong>To do</strong> — a recommended step that isn't set up yet (do its prerequisite first if it mentions one).</li>
             </ul>
-            <h4 style="margin-top:1rem;">Receiving mail</h4>
+            <h3>Receiving mail</h3>
             <p class="text-muted">Sending (outbound) needs nothing host-side. To <em>receive</em> mail for your domains, a host administrator must run an SMTP listener (Receive Connector) and your domain's <strong>MX</strong> record must point to it.</p>
-            <h4 style="margin-top:1rem;">Glossary</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Glossary</h3>
+            <ul>
                 <li><strong>SPF</strong> — a DNS record listing which servers may send mail for your domain.</li>
                 <li><strong>DKIM</strong> — a cryptographic signature on your mail proving it's genuine and unaltered.</li>
                 <li><strong>DMARC</strong> — a DNS policy telling receivers what to do when SPF/DKIM fail.</li>

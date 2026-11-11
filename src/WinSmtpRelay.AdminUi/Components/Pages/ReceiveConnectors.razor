@@ -110,10 +110,10 @@ else
             <BbDialogTitle>About Receive Connectors</BbDialogTitle>
             <BbDialogDescription>SMTP listener endpoints</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>Receive connectors define the SMTP endpoints that WIN-SMTP-RELAY listens on for incoming email.</p>
-            <h4 style="margin-top:1rem;">Common configurations</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Common configurations</h3>
+            <ul>
                 <li><strong>Port 25</strong> &mdash; Standard SMTP (no auth, for internal relay)</li>
                 <li><strong>Port 587</strong> &mdash; Submission (STARTTLS + auth required)</li>
                 <li><strong>Port 465</strong> &mdash; SMTPS (Implicit TLS + auth required)</li>

@@ -202,22 +202,22 @@ else
             <BbDialogTitle>About the Dashboard</BbDialogTitle>
             <BbDialogDescription>Understanding the server overview</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 The Dashboard provides an at-a-glance overview of your WIN-SMTP-RELAY server.
             </p>
-            <h4 style="margin-top:1rem;">Stat cards</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Stat cards</h3>
+            <ul>
                 <li><strong>Queue Depth</strong> &mdash; number of messages currently waiting to be delivered. A high number may indicate delivery issues.</li>
                 <li><strong>Server Uptime</strong> &mdash; how long the WIN-SMTP-RELAY Windows service has been running.</li>
                 <li><strong>Version</strong> &mdash; the installed software version.</li>
             </ul>
-            <h4 style="margin-top:1rem;">Email Volume</h4>
+            <h3>Email Volume</h3>
             <p>
                 Shows email throughput over four time windows. The <strong>Minute</strong> and <strong>Hour</strong> tabs
                 update in real time via SignalR. The <strong>Day</strong> and <strong>Month</strong> tabs refresh when selected.
             </p>
-            <h4 style="margin-top:1rem;">Recent Messages</h4>
+            <h3>Recent Messages</h3>
             <p>
                 Shows the 10 most recent messages across all statuses (queued, delivered, bounced).
                 This gives you a quick view of what is flowing through the relay.

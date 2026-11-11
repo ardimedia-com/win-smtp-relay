@@ -292,10 +292,10 @@
     </BbSidebar>
 
     <BbSidebarInset Class="app-inset">
-        <header style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem 2rem;border-bottom:1px solid var(--border);flex-shrink:0;">
+        <header class="app-header">
             <BbSidebarTrigger />
             <ThemeToggle />
-            <div style="margin-left:auto;display:flex;align-items:center;gap:1rem;">
+            <div class="app-header-end">
                 <TenantSwitcher />
                 <AuthorizeView>
                     <Authorized>
@@ -348,7 +348,23 @@
                 }
                 else
                 {
-                    @Body
+                    @* A render or lifecycle exception in one page shows this panel instead of ending the circuit;
+                       the boundary recovers on the next navigation (OnLocationChanged). *@
+                    <ErrorBoundary @ref="errorBoundary">
+                        <ChildContent>
+                            @Body
+                        </ChildContent>
+                        <ErrorContent>
+                            <div class="error-boundary-panel" role="alert">
+                                <h1 tabindex="-1">This page ran into a problem</h1>
+                                <p>Something went wrong while showing this page. The details were written to the server log.
+                                   Reload the page to try again, or go to another page.</p>
+                                <BbButton Variant="ButtonVariant.Outline" @onclick="ReloadPage">
+                                    <LucideIcon Name="refresh-cw" /> Reload page
+                                </BbButton>
+                            </div>
+                        </ErrorContent>
+                    </ErrorBoundary>
                 }
             </div>
         </main>
@@ -444,8 +460,15 @@
         }
     }
 
+    private ErrorBoundary? errorBoundary;
+
+    private void ReloadPage() => Nav.NavigateTo(Nav.Uri, forceLoad: true);
+
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
+        // Leave the error panel when the user navigates away from the page that failed.
+        _ = InvokeAsync(() => errorBoundary?.Recover());
+
         // Best-effort: scroll the content region back to the top. Fire-and-forget; a missed reset
         // (circuit tearing down, JS not yet available during prerender) is harmless.
         _ = InvokeAsync(async () =>

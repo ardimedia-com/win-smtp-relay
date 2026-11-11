@@ -88,7 +88,7 @@ else
         </BbDialogHeader>
         @if (selected is not null)
         {
-            <div style="font-size:0.875rem;line-height:1.6;">
+            <div class="dialog-body">
                 <p style="margin:0 0 0.5rem;"><strong>Address:</strong> <code>@selected.Address</code></p>
                 <p style="margin:0 0 0.5rem;"><strong>Reason:</strong> <span class="badge-status @ReasonCss(selected.Reason)">@selected.Reason</span></p>
                 <p style="margin:0 0 0.5rem;"><strong>Detail:</strong> @(selected.Detail ?? "—")</p>

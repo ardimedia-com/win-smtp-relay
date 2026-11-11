@@ -88,14 +88,14 @@
             <BbDialogTitle>About the Message Journal</BbDialogTitle>
             <BbDialogDescription>Per-recipient delivery audit trail</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 The journal records every delivery attempt for every recipient. Unlike the queue (which tracks
                 messages), the journal tracks <strong>individual deliveries</strong> &mdash; one message sent to
                 three recipients produces three journal entries.
             </p>
-            <h4 style="margin-top:1rem;">What each column means</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>What each column means</h3>
+            <ul>
                 <li><strong>Time</strong> &mdash; when the delivery attempt was made, shown in your browser's local time zone (hover for the exact UTC value).</li>
                 <li><strong>Msg ID</strong> &mdash; links back to the queued message by its internal queue ID.</li>
                 <li><strong>Sender</strong> &mdash; the message's envelope sender (recorded on the journal entry, so it survives the message being purged; older entries may show "-").</li>
@@ -104,17 +104,17 @@
                 <li><strong>Remote Server</strong> &mdash; the MX host or smart host that handled the delivery.</li>
                 <li><strong>Details</strong> &mdash; the status message from the remote server (truncated). Click any row to see the full message.</li>
             </ul>
-            <h4 style="margin-top:1rem;">Searching</h4>
+            <h3>Searching</h3>
             <p>
                 Use the search bar to filter by sender or recipient address, status code, status message, or remote server name.
                 The list loads more entries automatically as you scroll &mdash; there are no pages to click through.
             </p>
-            <h4 style="margin-top:1rem;">Live updates</h4>
+            <h3>Live updates</h3>
             <p>
                 While you are at the top of the list, the journal refreshes automatically as new delivery attempts
                 are recorded. Once you scroll down into older entries it stays still so rows don't shift while you read.
             </p>
-            <h4 style="margin-top:1rem;">Retention</h4>
+            <h3>Retention</h3>
             <p>
                 Journal entries are kept for the delivery-log retention window configured under
                 <strong>Settings &rarr; Data retention</strong> (an enforced minimum guarantees a baseline

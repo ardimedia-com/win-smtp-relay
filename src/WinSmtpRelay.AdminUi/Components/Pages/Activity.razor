@@ -56,13 +56,13 @@
             <BbDialogTitle>About Live Activity</BbDialogTitle>
             <BbDialogDescription>Real-time SMTP event monitoring</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 This page shows a real-time feed of what's happening on the SMTP relay, updated live as
                 events occur on the server (no page refresh needed).
             </p>
-            <h4 style="margin-top:1rem;">Event types</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Event types</h3>
+            <ul>
                 <li><strong>&gt;&gt;&gt; Message Received</strong> &mdash; an application submitted an email to the relay. Shows sender, recipients, and size.</li>
                 <li><strong>&lt;&lt;&lt; Delivery Attempt</strong> &mdash; the relay tried to deliver a message. Shows the SMTP status code (250 = success) and the remote server used.</li>
                 <li><strong>... SMTP Connection</strong> &mdash; a client connected to or disconnected from the SMTP listener.</li>

@@ -385,23 +385,23 @@
             <BbDialogTitle>About Listener</BbDialogTitle>
             <BbDialogDescription>Understanding the SMTP listener settings</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 The Listener tab configures how WIN-SMTP-RELAY accepts incoming SMTP connections.
             </p>
-            <h4 style="margin-top:1rem;">SMTP Endpoints</h4>
+            <h3>SMTP Endpoints</h3>
             <p>
                 Each endpoint defines a combination of bind address, port, TLS mode (off, STARTTLS, or implicit TLS),
                 and whether authentication is required. Common setups use port 25 for server-to-server relay and
                 port 587 for authenticated submission.
             </p>
-            <h4 style="margin-top:1rem;">Connection limits</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Connection limits</h3>
+            <ul>
                 <li><strong>Max message size</strong> &mdash; rejects messages larger than this limit during the SMTP DATA phase.</li>
                 <li><strong>Max connections</strong> &mdash; total concurrent SMTP connections allowed before new connections are refused.</li>
                 <li><strong>Allowed networks</strong> &mdash; CIDR ranges permitted to relay without authentication (e.g., internal subnets).</li>
             </ul>
-            <h4 style="margin-top:1rem;">Pickup folder</h4>
+            <h3>Pickup folder</h3>
             <p>
                 When configured, the relay monitors a directory for <code>.eml</code> files and queues them for delivery.
                 Useful for applications that write email files to disk instead of speaking SMTP.
@@ -421,23 +421,23 @@
             <BbDialogTitle>About Delivery</BbDialogTitle>
             <BbDialogDescription>Understanding the outbound delivery settings</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 The Delivery tab controls how WIN-SMTP-RELAY sends messages to their destination.
             </p>
-            <h4 style="margin-top:1rem;">Delivery settings</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Delivery settings</h3>
+            <ul>
                 <li><strong>Concurrent deliveries</strong> &mdash; maximum number of messages sent simultaneously.</li>
                 <li><strong>Max retry</strong> &mdash; how long a message stays in the queue before being bounced as undeliverable.</li>
                 <li><strong>Retry intervals</strong> &mdash; the delay between each delivery attempt (e.g., 1m, 5m, 15m, 60m).</li>
                 <li><strong>Opportunistic TLS</strong> &mdash; when enabled, the relay upgrades to TLS if the remote server supports STARTTLS.</li>
             </ul>
-            <h4 style="margin-top:1rem;">Smart host</h4>
+            <h3>Smart host</h3>
             <p>
                 Routes all outbound mail through a single upstream server instead of delivering directly via MX lookup.
                 Common when your network blocks outbound port 25.
             </p>
-            <h4 style="margin-top:1rem;">Domain routes</h4>
+            <h3>Domain routes</h3>
             <p>
                 Per-domain overrides that route specific recipient domains to a designated host, bypassing the default
                 smart host or MX delivery path.
@@ -457,22 +457,22 @@
             <BbDialogTitle>About Security</BbDialogTitle>
             <BbDialogDescription>Understanding the security settings</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 The Security tab covers encryption, email authentication, and abuse prevention.
             </p>
-            <h4 style="margin-top:1rem;">TLS</h4>
+            <h3>TLS</h3>
             <p>
                 Configure the server certificate used for STARTTLS and implicit TLS connections. You can provide
                 a PFX file path or reference a certificate by thumbprint from the Windows certificate store.
             </p>
-            <h4 style="margin-top:1rem;">DKIM</h4>
+            <h3>DKIM</h3>
             <p>
                 DomainKeys Identified Mail signs outbound messages with a cryptographic signature, allowing receiving
                 servers to verify the message was sent by an authorized sender for the domain.
             </p>
-            <h4 style="margin-top:1rem;">Rate limiting</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Rate limiting</h3>
+            <ul>
                 <li><strong>Per-IP</strong> &mdash; limits connections per minute from a single IP address.</li>
                 <li><strong>Per-sender</strong> &mdash; limits messages per minute and per day from a single envelope sender.</li>
                 <li><strong>Failed auth ban</strong> &mdash; temporarily bans an IP after repeated authentication failures.</li>
@@ -492,26 +492,26 @@
             <BbDialogTitle>About Advanced</BbDialogTitle>
             <BbDialogDescription>Understanding the advanced settings</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 The Advanced tab contains specialized settings for message processing, integrations, and infrastructure.
             </p>
-            <h4 style="margin-top:1rem;">Message filters</h4>
+            <h3>Message filters</h3>
             <p>
                 Header rewrites can add, remove, or modify email headers before delivery. Sender rewrites change the
                 envelope sender address based on pattern matching &mdash; useful for masking internal addresses.
             </p>
-            <h4 style="margin-top:1rem;">Webhooks</h4>
+            <h3>Webhooks</h3>
             <p>
                 HTTP callbacks triggered on events like message receipt. Can be signed with a shared secret for
                 verification. Useful for integrating with ticketing systems, chat platforms, or custom workflows.
             </p>
-            <h4 style="margin-top:1rem;">Backup MX</h4>
+            <h3>Backup MX</h3>
             <p>
                 When enabled, WIN-SMTP-RELAY acts as a secondary mail exchanger for the listed domains, holding messages
                 and retrying delivery to the primary server.
             </p>
-            <h4 style="margin-top:1rem;">Admin UI</h4>
+            <h3>Admin UI</h3>
             <p>
                 The bind address and port for this web interface (default: <code>127.0.0.1:8025</code>, loopback-only).
             </p>

@@ -195,7 +195,7 @@ else
             <BbDialogTitle>About Rejections</BbDialogTitle>
             <BbDialogDescription>The mail that never got in</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>The Journal shows what happened to mail the relay <strong>accepted</strong>. This page shows what it <strong>refused</strong> &mdash; the failure that is otherwise silent on both ends, because the relay only logs a warning and the sending device only reports a generic error and keeps retrying.</p>
             <p>Rows are aggregated: one line per client, reason and sender domain, with a count. A device retrying every 30 minutes for months is one row, not thousands.</p>
             <p><strong>From your networks</strong> means the client matched an allow rule (or the <code>AllowedNetworks</code> fallback) &mdash; a device you configured that cannot send. That is worth acting on. Everything else is background noise on port 25 and is only counted.</p>

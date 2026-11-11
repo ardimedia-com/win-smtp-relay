@@ -106,10 +106,10 @@ else
             <BbDialogTitle>About DKIM</BbDialogTitle>
             <BbDialogDescription>DomainKeys Identified Mail signing</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>DKIM adds a cryptographic signature to outbound emails, letting receiving servers verify the message was sent by an authorized server for that domain.</p>
-            <h4 style="margin-top:1rem;">Setup</h4>
-            <ol style="padding-left:1.25rem;">
+            <h3>Setup</h3>
+            <ol>
                 <li>Add a DKIM domain here with a selector — a key pair is generated and stored securely (no files to manage).</li>
                 <li>Publish the shown public key as a DNS TXT record at <code>selector._domainkey.domain</code>.</li>
                 <li>Enable it; outbound mail for that domain is then signed.</li>

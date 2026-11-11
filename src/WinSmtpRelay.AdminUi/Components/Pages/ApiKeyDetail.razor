@@ -47,7 +47,7 @@ else if (createdSecret is not null)
                 </div>
                 <div class="form-group">
                     <BbLabel For="secret">Secret</BbLabel>
-                    <div style="display:flex;gap:0.5rem;align-items:center;">
+                    <div class="row-flex">
                         <BbInput Id="secret" Value="@createdSecret" ReadOnly="true" Class="mono" />
                         <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopySecretAsync">
                             <LucideIcon Name="copy" /> Copy
@@ -214,7 +214,7 @@ else if (IsNew)
                     <BbButton Variant="ButtonVariant.Outline" @onclick="GoBack">Cancel</BbButton>
                     @if (!string.IsNullOrEmpty(statusMessage))
                     {
-                        <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                        <span class="status-note" role="status">@statusMessage</span>
                     }
                 </div>
             </BbCardFooter>
@@ -277,7 +277,7 @@ else if (key is not null)
                     <BbButton Variant="ButtonVariant.Outline" @onclick="GoBack">Back</BbButton>
                     @if (!string.IsNullOrEmpty(statusMessage))
                     {
-                        <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                        <span class="status-note" role="status">@statusMessage</span>
                     }
                 </div>
             </BbCardFooter>

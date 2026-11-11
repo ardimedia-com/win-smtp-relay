@@ -131,7 +131,7 @@ else
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
                 @if (!string.IsNullOrEmpty(statusMessage))
                 {
-                    <span class="text-muted" style="margin-left:0.5rem">@statusMessage</span>
+                    <span class="status-note" role="status">@statusMessage</span>
                 }
             </div>
         </BbCardFooter>

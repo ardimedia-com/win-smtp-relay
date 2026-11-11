@@ -131,24 +131,24 @@ else
             <BbDialogTitle>About the Message Queue</BbDialogTitle>
             <BbDialogDescription>Understanding message processing</BbDialogDescription>
         </BbDialogHeader>
-        <div style="font-size:0.875rem;line-height:1.6;">
+        <div class="dialog-body">
             <p>
                 Every email submitted to WIN-SMTP-RELAY is first stored in a persistent queue (SQLite database)
                 before delivery is attempted. This page shows messages that are waiting, being delivered, or have failed.
             </p>
-            <h4 style="margin-top:1rem;">Message lifecycle</h4>
-            <ol style="padding-left:1.25rem;">
+            <h3>Message lifecycle</h3>
+            <ol>
                 <li><strong>Queued</strong> &mdash; message received and waiting for the delivery worker to pick it up.</li>
                 <li><strong>Delivering</strong> &mdash; currently being sent to the recipient's mail server.</li>
                 <li><strong>Delivered</strong> &mdash; successfully accepted by the remote server (disappears from this view).</li>
                 <li><strong>Failed/Bounced</strong> &mdash; delivery failed permanently after all retry attempts.</li>
             </ol>
-            <h4 style="margin-top:1rem;">Actions</h4>
-            <ul style="padding-left:1.25rem;">
+            <h3>Actions</h3>
+            <ul>
                 <li><strong>Retry</strong> &mdash; re-queue a failed/bounced message for another delivery attempt.</li>
                 <li><strong>Delete</strong> &mdash; permanently remove a message from the queue.</li>
             </ul>
-            <h4 style="margin-top:1rem;">Retries</h4>
+            <h3>Retries</h3>
             <p>
                 The relay automatically retries delivery on temporary failures using configurable intervals
                 (e.g., 1, 5, 15, 30, 60 minutes). After the maximum retry window (default 48 hours),

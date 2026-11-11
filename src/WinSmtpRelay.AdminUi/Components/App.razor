@@ -23,6 +23,12 @@
 </head>
 <body>
     <Routes @rendermode="PageRenderMode" />
+    @* Shown by blazor.web.js when an unhandled exception ends the interactive circuit (styled in app.css). *@
+    <div id="blazor-error-ui" role="alert">
+        Something went wrong and this page stopped responding.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss" aria-label="Dismiss">&#x2715;</a>
+    </div>
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <script src="@Assets["_content/WinSmtpRelay.AdminUi/js/theme.js"]"></script>
     <script src="@Assets["_content/WinSmtpRelay.AdminUi/js/interop.js"]"></script>
