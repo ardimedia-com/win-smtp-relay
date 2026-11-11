@@ -96,7 +96,20 @@ else
             {
                 <BbTableRow Item="@r">
                     <BbTableCell>@r.Email</BbTableCell>
-                    <BbTableCell><span class="badge-status @(r.Enabled ? "badge-success" : "badge-muted")">@(r.Enabled ? "Enabled" : "Disabled")</span></BbTableCell>
+                    <BbTableCell>
+                        @switch (r.State)
+                        {
+                            case AccountState.Disabled:
+                                <span class="badge-status badge-muted">Disabled</span>
+                                break;
+                            case AccountState.Locked:
+                                <span class="badge-status badge-warning" title="Locked after too many failed sign-ins">Locked</span>
+                                break;
+                            default:
+                                <span class="badge-status badge-success">Enabled</span>
+                                break;
+                        }
+                    </BbTableCell>
                     <BbTableCell>
                         <div class="list-row-actions">
                             @if (r.IsSelf)
@@ -108,17 +121,23 @@ else
                                 <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Reset password"
                                           AriaLabel="@($"Reset password of {r.Email}")" Disabled="@busy"
                                           @onclick="() => AskConfirm(PendingAction.Reset, r)"><LucideIcon Name="key-round" /></BbButton>
-                                @if (r.Enabled)
+                                @if (r.State == AccountState.Locked)
+                                {
+                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Unlock"
+                                              AriaLabel="@($"Unlock {r.Email}")" Disabled="@busy"
+                                              @onclick="() => UnlockAsync(r.Id)"><LucideIcon Name="lock-open" /></BbButton>
+                                }
+                                @if (r.State == AccountState.Disabled)
+                                {
+                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Enable"
+                                              AriaLabel="@($"Enable {r.Email}")" Disabled="@busy"
+                                              @onclick="() => EnableAsync(r.Id)"><LucideIcon Name="play" /></BbButton>
+                                }
+                                else
                                 {
                                     <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Disable"
                                               AriaLabel="@($"Disable {r.Email}")" Disabled="@busy"
                                               @onclick="() => AskConfirm(PendingAction.Disable, r)"><LucideIcon Name="pause" /></BbButton>
-                                }
-                                else
-                                {
-                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Enable"
-                                              AriaLabel="@($"Enable {r.Email}")" Disabled="@busy"
-                                              @onclick="() => ToggleAsync(r.Id)"><LucideIcon Name="play" /></BbButton>
                                 }
                                 <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
                                           AriaLabel="@($"Delete {r.Email}")" Disabled="@busy"
@@ -153,11 +172,12 @@ else
                 @if (pendingAction == PendingAction.Reset)
                 {
                     <span>The current password of <strong>@pendingEmail</strong> stops working immediately. A one-time password
-                        is shown once; they must change it at the next sign-in.</span>
+                        is shown once; they must change it at the next sign-in. A lockout after failed sign-ins is lifted.</span>
                 }
                 else
                 {
-                    <span><strong>@pendingEmail</strong> can no longer sign in until an administrator enables the account again.</span>
+                    <span><strong>@pendingEmail</strong> can no longer sign in until an administrator enables the account again.
+                        Open sessions end at their next check.</span>
                 }
             </BbAlertDialogDescription>
         </BbAlertDialogHeader>
@@ -173,7 +193,8 @@ else
 </BbAlertDialog>
 
 @code {
-    private sealed record Row(int Id, string Email, bool Enabled, bool IsSelf);
+    private enum AccountState { Enabled, Locked, Disabled }
+    private sealed record Row(int Id, string Email, AccountState State, bool IsSelf);
 
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
@@ -211,7 +232,7 @@ else
         if (pendingAction == PendingAction.Reset)
             await ResetAsync(pendingUserId);
         else
-            await ToggleAsync(pendingUserId);
+            await DisableAsync(pendingUserId);
     }
     private int currentUserId;
     private string? currentEmail;
@@ -241,7 +262,10 @@ else
         var users = await um.Users.Where(u => hostUserIds.Contains(u.Id)).OrderBy(u => u.Email).ToListAsync();
         var now = DateTimeOffset.UtcNow;
         rows = users.Select(u => new Row(u.Id, u.Email ?? u.UserName ?? "",
-            u.LockoutEnd is null || u.LockoutEnd <= now, u.Id == currentUserId)).ToList();
+            AdminAccountService.IsDisabled(u) ? AccountState.Disabled
+                : AdminAccountService.IsBruteForceLocked(u, now) ? AccountState.Locked
+                : AccountState.Enabled,
+            u.Id == currentUserId)).ToList();
         isLoading = false;
     }
 
@@ -319,6 +343,16 @@ else
             createdPassword = password;
             createdEmail = user.Email;
             copyStatus = null;
+
+            // The new password is useless while a brute-force lockout runs, so the reset lifts it. An administrative
+            // disable stays: re-enabling is a separate, deliberate action.
+            if (AdminAccountService.IsBruteForceLocked(user, DateTimeOffset.UtcNow))
+            {
+                var unlock = await sp.GetRequiredService<IAdminAccountService>().UnlockAsync(user.Id, currentUserId, currentEmail);
+                if (!unlock.Succeeded)
+                    errorMessage = unlock.Error ?? UiMessages.Unexpected;
+            }
+            await RefreshAsync();
         }
         catch (Exception ex)
         {
@@ -328,35 +362,33 @@ else
         finally { busy = false; }
     }
 
-    private async Task ToggleAsync(int id)
+    private Task DisableAsync(int id) =>
+        RunAccountActionAsync(id, "Disabling", (accounts, uid) => accounts.DisableAsync(uid, currentUserId, currentEmail));
+
+    private Task EnableAsync(int id) =>
+        RunAccountActionAsync(id, "Enabling", (accounts, uid) => accounts.EnableAsync(uid, currentUserId, currentEmail));
+
+    private Task UnlockAsync(int id) =>
+        RunAccountActionAsync(id, "Unlocking", (accounts, uid) => accounts.UnlockAsync(uid, currentUserId, currentEmail));
+
+    // Disable / enable / unlock go through IAdminAccountService, which also ends the sessions (disable), clears the
+    // failed-attempt counter and writes the audit row. The page never sets a lockout itself.
+    private async Task RunAccountActionAsync(int id, string verb, Func<IAdminAccountService, int, Task<AdminAccountResult>> action)
     {
-        if (busy) return;                                    // double-submit guard (before the first await)
+        if (busy || id == currentUserId) return;             // double-submit guard (before the first await)
         busy = true;
         errorMessage = null;
         try
         {
             using var scope = ScopeFactory.CreateScope();
-            var sp = scope.ServiceProvider;
-            var um = sp.GetRequiredService<UserManager<AdminUser>>();
-            var memberships = sp.GetRequiredService<IAdminMembershipService>();
-            var audit = sp.GetRequiredService<IAdminAuditService>();
-            var user = await um.FindByIdAsync(id.ToString());
-            if (user is null || user.Id == currentUserId) return;
-
-            var isEnabled = user.LockoutEnd is null || user.LockoutEnd <= DateTimeOffset.UtcNow;
-            if (isEnabled && await memberships.CountHostAdminsAsync() <= 1)
-            {
-                errorMessage = "You can't disable the last enabled host admin.";
-                return;
-            }
-            await um.SetLockoutEnabledAsync(user, true);
-            await um.SetLockoutEndDateAsync(user, isEnabled ? DateTimeOffset.MaxValue : null);
-            await audit.WriteAsync(isEnabled ? AdminAuditActions.AdminDisabled : AdminAuditActions.AdminEnabled, currentUserId, currentEmail, targetUserId: user.Id);
+            var result = await action(scope.ServiceProvider.GetRequiredService<IAdminAccountService>(), id);
+            if (!result.Succeeded)
+                errorMessage = result.Error ?? UiMessages.Unexpected;
             await RefreshAsync();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Enabling/disabling host admin {UserId} failed", id);
+            Logger.LogError(ex, "{Verb} host admin {UserId} failed", verb, id);
             errorMessage = UiMessages.Unexpected;
         }
         finally { busy = false; }

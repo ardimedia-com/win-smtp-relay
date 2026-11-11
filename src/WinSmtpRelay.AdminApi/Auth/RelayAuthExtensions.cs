@@ -59,11 +59,11 @@ public static class RelayAuthExtensions
         services.AddScoped<WinSmtpRelay.Storage.ITenantSignupService, WinSmtpRelay.Storage.TenantSignupService>();
 
         // Account lifecycle (disable/enable/unlock/reset with session + audit consequences), first-run setup with
-        // its one-time token, and the single consent + audit gate in front of message bodies.
+        // its one-time token. (The consent + audit gate in front of message bodies, IMessageBodyAccess, is registered
+        // by AddRelayStorage, next to the resend service that depends on it.)
         services.AddScoped<IAdminAccountService, AdminAccountService>();
         services.AddScoped<IInitialAdminSetup, InitialAdminSetup>();
         services.TryAddSingleton(new InitialSetupToken());
-        services.AddScoped<IMessageBodyAccess, MessageBodyAccess>();
         services.TryAddSingleton(sp => new ApiKeyFailureThrottle(sp.GetService<TimeProvider>() ?? TimeProvider.System));
 
         // Re-check the cookie against the security stamp every minute instead of every 30 (the default), so a

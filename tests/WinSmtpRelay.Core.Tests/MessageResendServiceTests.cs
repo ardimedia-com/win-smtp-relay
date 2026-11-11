@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
 using WinSmtpRelay.Storage;
 
@@ -14,6 +15,7 @@ public class MessageResendServiceTests
 {
     private RelayDbContext _db = null!;
     private MessageResendService _svc = null!;
+    private FakeBodyAccess _bodies = null!;
 
     [TestInitialize]
     public void Setup()
@@ -24,7 +26,8 @@ public class MessageResendServiceTests
         _db = new RelayDbContext(options, new CurrentTenant());
         _db.Database.OpenConnection();
         _db.Database.EnsureCreated();
-        _svc = new MessageResendService(_db);
+        _bodies = new FakeBodyAccess(_db);
+        _svc = new MessageResendService(_db, _bodies);
     }
 
     [TestCleanup]
@@ -111,6 +114,63 @@ public class MessageResendServiceTests
         var outcome = await _svc.ResendAsync(999999, ["b@x.com"]);
 
         Assert.IsFalse(outcome.Success);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task Resend_ReadsTheBodyThroughTheGate_WithPurposeResend()
+    {
+        var id = await AddAsync("x"u8.ToArray());
+
+        var outcome = await _svc.ResendAsync(id, ["b@x.com"]);
+
+        Assert.IsTrue(outcome.Success, outcome.Error);
+        CollectionAssert.AreEqual(new[] { (id, "resend") }, _bodies.Reads);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task Resend_Stops_WhenTheGateRefuses()
+    {
+        var id = await AddAsync("x"u8.ToArray());
+        _bodies.Force = MessageBodyReadStatus.Forbidden;
+
+        var outcome = await _svc.ResendAsync(id, ["b@x.com"]);
+
+        Assert.IsFalse(outcome.Success);
+        StringAssert.Contains(outcome.Error, "tenant-admin membership");
+        Assert.AreEqual(1, await _db.QueuedMessages.CountAsync(), "nothing may be queued without consent");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task Resend_InvalidRecipients_DoNotReadTheBody()
+    {
+        var id = await AddAsync("x"u8.ToArray());
+
+        await _svc.ResendAsync(id, ["not-an-email"]);
+
+        Assert.AreEqual(0, _bodies.Reads.Count);
+    }
+
+    /// <summary>Stands in for <see cref="MessageBodyAccess"/>: returns the stored body unless a status is forced.</summary>
+    private sealed class FakeBodyAccess(RelayDbContext db) : IMessageBodyAccess
+    {
+        public List<(long, string)> Reads { get; } = [];
+        public MessageBodyReadStatus? Force { get; set; }
+
+        public async Task<MessageBodyReadResult> ReadAsync(long messageId, string purpose, CancellationToken ct = default)
+        {
+            Reads.Add((messageId, purpose));
+            if (Force is { } forced)
+                return new MessageBodyReadResult(forced);
+            var body = await db.QueuedMessages.AsNoTracking().Where(m => m.Id == messageId).Select(m => m.RawMessage).FirstOrDefaultAsync(ct);
+            if (body is null)
+                return new MessageBodyReadResult(MessageBodyReadStatus.NotFound);
+            return body.Length == 0
+                ? new MessageBodyReadResult(MessageBodyReadStatus.NoBody)
+                : new MessageBodyReadResult(MessageBodyReadStatus.Ok, body);
+        }
     }
 
     private async Task<long> AddAsync(byte[] body, string recipients = "a@x.com;b@x.com", string? delivered = "a@x.com")

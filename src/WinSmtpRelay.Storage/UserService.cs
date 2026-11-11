@@ -24,8 +24,23 @@ public class UserService(
             .Where(u => u.Username == username && u.IsEnabled)
             .ToListAsync(cancellationToken);
 
+        if (candidates.Count == 0)
+        {
+            // No such user: still pay for one BCrypt verification at the same work factor, so the response time of
+            // SMTP AUTH does not reveal whether a username exists (user enumeration).
+            BCrypt.Net.BCrypt.Verify(password ?? "", DummyHash);
+            return null;
+        }
+
         return candidates.FirstOrDefault(u => BCrypt.Net.BCrypt.Verify(password, u.PasswordHash));
     }
+
+    /// <summary>BCrypt work factor for SMTP AUTH user passwords.</summary>
+    private const int WorkFactor = 12;
+
+    // Hash of a random value nobody knows, at the same work factor as real user hashes — only ever used to spend the
+    // same time on an unknown username as on a known one. Computed once per process.
+    private static readonly string DummyHash = BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString("N"), workFactor: WorkFactor);
 
     public async Task<RelayUser?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default)
     {
@@ -46,7 +61,7 @@ public class UserService(
 
     public async Task CreateUserAsync(string username, string password, CancellationToken cancellationToken = default)
     {
-        var hash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
+        var hash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: WorkFactor);
 
         var user = new RelayUser
         {

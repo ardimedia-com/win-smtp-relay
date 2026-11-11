@@ -28,6 +28,35 @@
     </div>
     <p class="account-subtitle" style="margin-top:1rem;text-align:center;"><a href="/account/profile">Back to your account</a></p>
 }
+else if (enabled && confirmAction is not null)
+{
+    @* Second step of a destructive action: this static SSR page has no dialogs, so the first POST only asks and the
+       action runs on the confirming POST. Cancel is a plain link back (a GET), which changes nothing. *@
+    <div class="account-error" role="alert">
+        @if (confirmAction == ActionDisable)
+        {
+            <strong>Turn off two-factor authentication?</strong>
+            <span>Signing in will need only your password again, and your authenticator app and recovery codes stop working.</span>
+        }
+        else
+        {
+            <strong>Regenerate recovery codes?</strong>
+            <span>Your @recoveryLeft remaining recovery code(s) stop working at once; you get 10 new ones to save.</span>
+        }
+    </div>
+    <EditForm Model="Input" method="post" OnValidSubmit="HandleSubmitAsync" FormName="two-factor">
+        <DataAnnotationsValidator />
+        @if (confirmAction == ActionDisable)
+        {
+            <button type="submit" name="Input.Action" value="@ActionDisableConfirmed" class="account-button" style="background:var(--destructive);">Yes, turn off two-factor</button>
+        }
+        else
+        {
+            <button type="submit" name="Input.Action" value="@ActionRegenConfirmed" class="account-button">Yes, regenerate recovery codes</button>
+        }
+    </EditForm>
+    <p class="account-subtitle" style="margin-top:1rem;text-align:center;"><a href="/account/two-factor">Cancel</a></p>
+}
 else if (enabled)
 {
     <p class="account-subtitle">Two-factor authentication is <strong>on</strong>. You'll be asked for a code from your authenticator app at sign-in.</p>
@@ -35,8 +64,8 @@ else if (enabled)
 
     <EditForm Model="Input" method="post" OnValidSubmit="HandleSubmitAsync" FormName="two-factor">
         <DataAnnotationsValidator />
-        <button type="submit" name="Input.Action" value="regen" class="account-button account-button-secondary">Regenerate recovery codes</button>
-        <button type="submit" name="Input.Action" value="disable" class="account-button" style="margin-top:0.5rem;background:var(--destructive);">Turn off two-factor</button>
+        <button type="submit" name="Input.Action" value="@ActionRegen" class="account-button account-button-secondary">Regenerate recovery codes…</button>
+        <button type="submit" name="Input.Action" value="@ActionDisable" class="account-button" style="margin-top:0.5rem;background:var(--destructive);">Turn off two-factor…</button>
     </EditForm>
     <p class="account-subtitle" style="margin-top:1rem;text-align:center;"><a href="/account/profile">Back to your account</a></p>
 }
@@ -66,6 +95,14 @@ else
     [SupplyParameterFromForm] private InputModel Input { get; set; } = new();
 
     private const string Issuer = "WIN-SMTP-RELAY";
+
+    // Form actions. «disable» and «regen» only ask for confirmation; the «-confirmed» actions do the work.
+    private const string ActionDisable = "disable";
+    private const string ActionDisableConfirmed = "disable-confirmed";
+    private const string ActionRegen = "regen";
+    private const string ActionRegenConfirmed = "regen-confirmed";
+
+    private string? confirmAction;
 
     private bool enabled;
     private int recoveryLeft;
@@ -126,7 +163,15 @@ else
                 enabled = true;
                 break;
 
-            case "disable":
+            case ActionDisable:
+            case ActionRegen:
+                if (enabled)
+                    confirmAction = Input.Action;
+                break;
+
+            case ActionDisableConfirmed:
+                if (!enabled)
+                    break;
                 await UserManager.SetTwoFactorEnabledAsync(user, false);
                 await UserManager.ResetAuthenticatorKeyAsync(user); // invalidate the old secret
                 await SignInManager.RefreshSignInAsync(user);
@@ -136,7 +181,9 @@ else
                 await OnInitializedAsync(); // re-populate the setup view
                 break;
 
-            case "regen":
+            case ActionRegenConfirmed:
+                if (!enabled)
+                    break;
                 recoveryCodes = (await UserManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10))?.ToArray();
                 await Audit.WriteAsync(AdminAuditActions.MfaRecoveryCodesRegenerated, user.Id, user.Email, targetUserId: user.Id);
                 break;

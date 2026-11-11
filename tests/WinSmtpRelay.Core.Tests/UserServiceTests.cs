@@ -71,6 +71,19 @@ public class UserServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
+    public async Task ValidateAndGet_UnknownUser_ReturnsNull_AfterSpendingAVerification()
+    {
+        // An unknown username runs one BCrypt verification against a dummy hash (anti user-enumeration); it must
+        // still return null, also for an empty password, and never match the dummy.
+        await _sut.CreateUserAsync("known", "password");
+
+        Assert.IsNull(await _sut.ValidateAndGetAsync("unknown", "password"));
+        Assert.IsNull(await _sut.ValidateAndGetAsync("unknown", ""));
+        Assert.IsNotNull(await _sut.ValidateAndGetAsync("known", "password"));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
     public async Task ValidateCredentials_DisabledUser_ReturnsFalse()
     {
         await _sut.CreateUserAsync("disabled_user", "password");

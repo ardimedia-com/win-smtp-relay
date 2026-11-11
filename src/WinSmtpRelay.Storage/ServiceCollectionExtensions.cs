@@ -46,6 +46,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IHealthCheckSnapshotService, HealthCheckSnapshotService>();
         services.AddScoped<IMessageFilterService, MessageFilterService>();
         services.AddScoped<ISuppressionService, SuppressionService>();
+        // The single consent + audit gate in front of message bodies; resend reads the body only through it.
+        services.AddScoped<IMessageBodyAccess, MessageBodyAccess>();
         services.AddScoped<IMessageResendService, MessageResendService>();
 
         // Setup readiness (live checklist) for the current tenant
