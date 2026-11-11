@@ -22,7 +22,8 @@
 </div>
 
 <div class="search-bar">
-    <BbNativeSelect TValue="string" @bind-Value="actionFilter" @bind-Value:after="OnFilterChanged">
+    <label for="audit-action" class="sr-only">Action</label>
+    <BbNativeSelect TValue="string" Id="audit-action" @bind-Value="actionFilter" @bind-Value:after="OnFilterChanged">
         <option value="">All actions</option>
         @foreach (var a in KnownActions)
         {
@@ -30,14 +31,17 @@
         }
     </BbNativeSelect>
     <div class="search-input-wrapper">
-        <BbInput @bind-Value="search" @bind-Value:after="OnFilterChanged" Placeholder="Search actor or detail…" />
+        <BbInput @bind-Value="search" @bind-Value:after="OnFilterChanged" Placeholder="Search actor or detail…"
+                 aria-label="Search actor or detail" />
     </div>
 </div>
 
 @* Infinite scroll: <Virtualize> renders only the visible rows and pulls the next window from the server
    (IAdminAuditService.QueryAsync skip/take) as you scroll — no page picker. Newest first; the <thead>
    stays sticky and the scroll happens in .app-main. *@
-<table>
+@* Virtualize needs a fixed row height (ItemSize): cells stay on one line (single-line-rows), long values are
+   cut with an ellipsis and carry the full text in the title. *@
+<table class="single-line-rows">
     <thead>
         <tr>
             <th>When</th>
@@ -55,8 +59,8 @@
             <ItemContent>
                 <tr>
                     <td><LocalTime Utc="@r.When" Format="yyyy-MM-dd HH:mm:ss" /></td>
-                    <td>@Humanize(r.Action)</td>
-                    <td>
+                    <td title="@r.Action">@Humanize(r.Action)</td>
+                    <td title="@r.Actor">
                         @if (r.ActorApiKeyId is not null)
                         {
                             @* Programmatic actor (automation/MCP) — visibly distinct from a human admin. *@
@@ -68,16 +72,16 @@
                             @(r.Actor ?? "—")
                         }
                     </td>
-                    <td>@(r.Target ?? "—")</td>
+                    <td title="@r.Target">@(r.Target ?? "—")</td>
                     <td>@(r.TenantId?.ToString() ?? "—")</td>
-                    <td><span class="text-muted" style="font-size:0.82rem;">@r.Detail</span></td>
+                    <td class="text-muted audit-detail" title="@r.Detail">@r.Detail</td>
                 </tr>
             </ItemContent>
             <Placeholder>
-                <tr><td colspan="6" style="text-align:center;color:var(--muted-foreground);padding:0.75rem;">Loading…</td></tr>
+                <tr><td colspan="6" class="table-placeholder">Loading…</td></tr>
             </Placeholder>
             <EmptyContent>
-                <tr><td colspan="6" style="text-align:center;padding:1rem;">No audit events</td></tr>
+                <tr><td colspan="6" class="table-empty">No audit events</td></tr>
             </EmptyContent>
         </Virtualize>
     </tbody>

@@ -4,6 +4,8 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject IAuthorizationService AuthorizationService
+@inject ILogger<Tenants> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -27,6 +29,11 @@
     </BbButton>
 </div>
 
+@if (!string.IsNullOrEmpty(statusMessage))
+{
+    <p class="@(statusIsError ? "form-error" : "text-muted") mb-1" role="@(statusIsError ? "alert" : "status")">@statusMessage</p>
+}
+
 @if (isLoading)
 {
     <BbSkeleton Class="h-[200px] w-full" />
@@ -48,24 +55,26 @@ else
         <BbTableBody>
             @foreach (var t in tenants)
             {
-                <BbTableRow Item="@t" class="list-row-clickable" @onclick="() => Edit(t.Id)">
+                <BbTableRow Item="@t" class="list-row-clickable" tabindex="0" role="link" aria-label="@($"Open tenant {t.Name}")"
+                            @onclick="() => Edit(t.Id)" @onkeydown="e => OnRowKey(e, t.Id)">
                     <BbTableCell>@t.Id</BbTableCell>
-                    <BbTableCell>@t.Name</BbTableCell>
-                    <BbTableCell><span class="mono">@t.Slug</span></BbTableCell>
+                    <BbTableCell class="wrap-anywhere">@t.Name</BbTableCell>
+                    <BbTableCell><span class="mono wrap-anywhere">@t.Slug</span></BbTableCell>
                     <BbTableCell>
-                        <span class="badge-status @(t.IsEnabled ? "" : "badge-muted")">@(t.IsEnabled ? "Enabled" : "Disabled")</span>
+                        <span class="badge-status @(t.IsEnabled ? "badge-success" : "badge-muted")">@(t.IsEnabled ? "Enabled" : "Disabled")</span>
                     </BbTableCell>
                     <BbTableCell><span class="mono text-muted">@(string.IsNullOrWhiteSpace(t.EgressIpAddress) ? "—" : t.EgressIpAddress)</span></BbTableCell>
                     <BbTableCell><LocalTime Utc="@t.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell>
-                        <div class="list-row-actions" @onclick:stopPropagation="true">
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => Edit(t.Id)">
+                        <div class="list-row-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" aria-label="@($"Edit tenant {t.Name}")" @onclick="() => Edit(t.Id)">
                                 <LucideIcon Name="pencil" />
                             </BbButton>
                             @if (t.Id != TenantDefaults.DefaultTenantId)
                             {
                                 <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
-                                        @onclick="() => { deleteTargetId = t.Id; showDeleteConfirm = true; }">
+                                          aria-label="@($"Delete tenant {t.Name}")" Disabled="@busy"
+                                          @onclick="() => AskDelete(t)">
                                     <LucideIcon Name="trash-2" />
                                 </BbButton>
                             }
@@ -80,46 +89,116 @@ else
 <BbAlertDialog @bind-Open="showDeleteConfirm">
     <BbAlertDialogContent>
         <BbAlertDialogHeader>
-            <BbAlertDialogTitle>Delete Tenant</BbAlertDialogTitle>
-            <BbAlertDialogDescription>This permanently deletes the tenant <strong>and all of its data</strong> — relay users, mail queue, delivery logs, connectors, domains, DKIM keys, filters, API keys, and admin accounts. This cannot be undone.</BbAlertDialogDescription>
+            <BbAlertDialogTitle>Delete tenant «@deleteTargetName»?</BbAlertDialogTitle>
+            <BbAlertDialogDescription>
+                This permanently deletes the tenant <strong>@deleteTargetName</strong> (ID @deleteTargetId, slug
+                <span class="mono">@deleteTargetSlug</span>) <strong>and all of its data</strong> — relay users, mail
+                queue, delivery logs, connectors, domains, DKIM keys, filters, API keys, and admin accounts. This
+                cannot be undone.
+            </BbAlertDialogDescription>
         </BbAlertDialogHeader>
         <BbAlertDialogFooter>
             <BbAlertDialogCancel>
                 <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
             </BbAlertDialogCancel>
             <BbAlertDialogAction>
-                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteAsync">Delete</BbButton>
+                <BbButton Variant="ButtonVariant.Destructive" Disabled="@busy" @onclick="ConfirmDeleteAsync">Delete @deleteTargetName</BbButton>
             </BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
 </BbAlertDialog>
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
     private IReadOnlyList<Tenant> tenants = [];
     private bool isLoading = true;
+    private bool busy;
     private bool showDeleteConfirm;
     private int deleteTargetId;
+    private string deleteTargetName = "";
+    private string deleteTargetSlug = "";
+    private string? statusMessage;
+    private bool statusIsError;
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();
 
     private async Task RefreshAsync()
     {
         isLoading = true;
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
-        tenants = await svc.GetAllAsync();
-        isLoading = false;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
+            tenants = await svc.GetAllAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Loading tenants failed");
+            statusMessage = UiMessages.Unexpected;
+            statusIsError = true;
+        }
+        finally
+        {
+            isLoading = false;
+        }
     }
 
     private void Edit(int id) => Nav.NavigateTo($"/tenants/{id}");
 
+    private void OnRowKey(KeyboardEventArgs e, int id)
+    {
+        if (e.Key is "Enter" or " ")
+            Edit(id);
+    }
+
+    private void AskDelete(Tenant t)
+    {
+        deleteTargetId = t.Id;
+        deleteTargetName = t.Name;
+        deleteTargetSlug = t.Slug;
+        statusMessage = null;
+        showDeleteConfirm = true;
+    }
+
     private async Task ConfirmDeleteAsync()
     {
-        showDeleteConfirm = false;
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
-        try { await svc.PurgeAndDeleteAsync(deleteTargetId); }
-        catch (InvalidOperationException) { /* surfaced on the detail page; ignore here */ }
+        if (busy) return;                                   // double-submit guard (before the first await)
+        busy = true;
+        var name = deleteTargetName;
+        try
+        {
+            if (!await AuthorizationService.IsAllowedAsync(AuthState, AuthorizationPolicies.HostAdmin))
+            {
+                statusMessage = UiMessages.Forbidden;
+                statusIsError = true;
+                return;
+            }
+
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<ITenantService>();
+            await svc.PurgeAndDeleteAsync(deleteTargetId);
+            statusMessage = $"Tenant «{name}» and all of its data were deleted.";
+            statusIsError = false;
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The service refuses with an operator-facing reason (e.g. the default tenant cannot be deleted).
+            Logger.LogWarning(ex, "Deleting tenant {TenantId} was refused", deleteTargetId);
+            statusMessage = ex.Message;
+            statusIsError = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Deleting tenant {TenantId} failed", deleteTargetId);
+            statusMessage = UiMessages.Unexpected;
+            statusIsError = true;
+        }
+        finally
+        {
+            busy = false;
+            showDeleteConfirm = false;
+        }
         await RefreshAsync();
     }
 }

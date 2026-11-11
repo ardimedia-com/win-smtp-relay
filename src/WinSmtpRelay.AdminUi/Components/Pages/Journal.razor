@@ -4,6 +4,7 @@
 @using Microsoft.Extensions.DependencyInjection
 @using WinSmtpRelay.Core.Interfaces
 @using WinSmtpRelay.Core.Models
+@inject ILogger<Journal> Logger
 @inject ITenantScopeFactory ScopeFactory
 @inject IActivityFeed Feed
 @inject ICurrentTenant CurrentTenant
@@ -35,7 +36,8 @@
 
 @* A form so Enter in the search box triggers the search (the BbButton stays type="button"). *@
 <form class="search-bar" @onsubmit="ApplySearch" @onsubmit:preventDefault>
-    <BbInput Type="InputType.Search" @bind-Value="searchTerm" Placeholder="Search by recipient, message ID, or status..." />
+    <BbInput Type="InputType.Search" @bind-Value="searchTerm" Placeholder="Search by recipient, message ID, or status..."
+             aria-label="Search the journal by recipient, message ID, or status" />
     <BbButton Variant="ButtonVariant.Secondary" @onclick="ApplySearch">
         <LucideIcon Name="search" />
         Search
@@ -45,7 +47,9 @@
 @* Infinite scroll: <Virtualize> renders only the visible rows and pulls the next window from the server
    via the ItemsProvider as you scroll, so the whole journal is browsable without a page picker. Newest
    first; scroll down to load older entries. The scroll happens in .app-main and the <thead> stays sticky. *@
-<table>
+@* Virtualize needs a fixed row height (ItemSize): every cell stays on one line (single-line-rows) and long
+   values are cut with an ellipsis — the full text is in the title and in the row's detail dialog. *@
+<table class="single-line-rows">
     <thead>
         <tr>
             <th>Time</th>
@@ -62,21 +66,23 @@
         <Virtualize @ref="virtualize" TItem="DeliveryLog" ItemsProvider="LoadRows" Context="log"
                     ItemSize="42" SpacerElement="tr" OverscanCount="6">
             <ItemContent>
-                <tr class="log-row-clickable" @onclick="() => selected = log">
+                <tr class="log-row-clickable" tabindex="0" role="button"
+                    aria-label="@($"Delivery to {log.Recipient}, status {log.StatusCode}")"
+                    @onclick="() => selected = log" @onkeydown="e => OnRowKey(e, log)">
                     <td><LocalTime Utc="@log.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /></td>
                     <td title="@($"Queue ID: {log.QueuedMessageId}")">@log.QueuedMessageId</td>
-                    <td>@(log.Sender ?? "-")</td>
-                    <td>@log.Recipient</td>
+                    <td title="@log.Sender">@(log.Sender ?? "-")</td>
+                    <td title="@log.Recipient">@log.Recipient</td>
                     <td><span class="badge-status @GetStatusCss(log.StatusCode)">@log.StatusCode</span></td>
-                    <td>@(log.RemoteServer ?? "-")</td>
-                    <td>@Truncate(log.StatusMessage, 60)</td>
+                    <td title="@log.RemoteServer">@(log.RemoteServer ?? "-")</td>
+                    <td title="@log.StatusMessage">@log.StatusMessage</td>
                 </tr>
             </ItemContent>
             <Placeholder>
-                <tr><td colspan="7" style="text-align:center;color:var(--muted-foreground);padding:0.75rem;">Loading…</td></tr>
+                <tr><td colspan="7" class="table-placeholder">Loading…</td></tr>
             </Placeholder>
             <EmptyContent>
-                <tr><td colspan="7" style="text-align:center;padding:1rem;">No delivery log entries found.</td></tr>
+                <tr><td colspan="7" class="table-empty">No delivery log entries found.</td></tr>
             </EmptyContent>
         </Virtualize>
     </tbody>
@@ -137,18 +143,18 @@
                 <BbDialogTitle><span class="badge-status @GetStatusCss(selected.StatusCode)">@selected.StatusCode</span> @selected.Recipient</BbDialogTitle>
                 <BbDialogDescription><LocalTime Utc="@selected.TimestampUtc" Format="yyyy-MM-dd HH:mm:ss" /> &middot; Msg @selected.QueuedMessageId</BbDialogDescription>
             </BbDialogHeader>
-            <div style="font-size:0.875rem;line-height:1.6;max-height:60vh;overflow-y:auto;">
-                <div style="margin-bottom:0.5rem;">
+            <div class="dialog-body log-entry-body">
+                <div class="mb-half">
                     <strong class="text-muted">Sender</strong><br />
-                    <span style="word-break:break-word;">@(selected.Sender ?? "-")</span>
+                    <span class="wrap-anywhere">@(selected.Sender ?? "-")</span>
                 </div>
-                <div style="margin-bottom:0.5rem;">
+                <div class="mb-half">
                     <strong class="text-muted">Remote server</strong><br />
-                    <span style="word-break:break-word;">@(selected.RemoteServer ?? "-")</span>
+                    <span class="wrap-anywhere">@(selected.RemoteServer ?? "-")</span>
                 </div>
                 <div>
                     <strong class="text-muted">Status message</strong><br />
-                    <span class="mono" style="word-break:break-word;white-space:pre-wrap;">@selected.StatusMessage</span>
+                    <span class="mono wrap-anywhere pre-wrap">@selected.StatusMessage</span>
                 </div>
             </div>
             <BbDialogFooter>
@@ -189,7 +195,12 @@
                     await virtualize.RefreshDataAsync();
                 });
             }
-            catch { } // the circuit may be tearing down; a missed background refresh is harmless
+            catch (Exception ex)
+            {
+                // The circuit may be tearing down; a missed background refresh is harmless, but log real failures.
+                if (ex is not (ObjectDisposedException or TaskCanceledException or JSDisconnectedException))
+                    Logger.LogWarning(ex, "Background refresh of the journal failed");
+            }
         }, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         Feed.Received += OnActivity;
     }
@@ -263,8 +274,11 @@
         _ => "badge-muted"
     };
 
-    private static string Truncate(string text, int maxLen) =>
-        text.Length > maxLen ? text[..maxLen] + "..." : text;
+    private void OnRowKey(KeyboardEventArgs e, DeliveryLog log)
+    {
+        if (e.Key is "Enter" or " ")
+            selected = log;
+    }
 
     public void Dispose()
     {

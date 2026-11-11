@@ -912,3 +912,18 @@ select option {
 .resend-suppressed { font-size: 0.85rem; color: var(--warning); margin-top: 0.25rem; min-width: 0; }
 .resend-suppressed p { margin: 0 0 0.4rem; }
 .resend-suppressed-row { margin: 0 0 0.3rem 1.4rem; min-width: 0; }
+
+/* Event Log page */
+.logs-level { width: 140px; flex-shrink: 0; }
+.logs-count { width: 100px; flex-shrink: 0; }
+.log-fields { width: 100%; table-layout: fixed; }
+.log-fields td { padding: 0; }
+.log-field-label { width: 70px; color: var(--muted-foreground); font-size: 0.75rem; white-space: nowrap; padding-right: 0.5rem !important; }
+.log-entry-body { max-height: 60vh; overflow-y: auto; }
+.mb-half { margin-bottom: 0.5rem; }
+.pre-wrap { white-space: pre-wrap; }
+.table-placeholder { text-align: center; color: var(--muted-foreground); padding: 0.75rem; }
+.table-empty { text-align: center; padding: 1rem; }
+.single-line-rows td.audit-detail { font-size: 0.82rem; max-width: 420px; }
+.activity-status { flex-shrink: 0; font-weight: 600; min-width: 5.5rem; }
+.rejection-buffer { font-size: 0.75rem; }

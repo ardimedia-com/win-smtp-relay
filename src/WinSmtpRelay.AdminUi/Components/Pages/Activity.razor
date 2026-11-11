@@ -27,7 +27,7 @@
     </BbButton>
 </div>
 
-<div style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem;">
+<div class="row-flex mb-1">
     <span class="badge-status badge-success">Live</span>
     <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Outline" @onclick="ClearFeed">
         <LucideIcon Name="eraser" />
@@ -35,16 +35,21 @@
     </BbButton>
 </div>
 
-<div class="activity-feed">
+<div class="activity-feed" role="log" aria-live="polite" aria-label="Live activity">
     @if (events.Count == 0)
     {
-        <p style="text-align:center;" class="text-muted">Waiting for activity...</p>
+        <p class="text-muted table-empty">Waiting for activity...</p>
     }
     @foreach (var evt in events)
     {
         <div class="activity-item @evt.CssClass">
             <span class="activity-time"><LocalTime Utc="@evt.Timestamp" Format="HH:mm:ss" /></span>
-            <span class="activity-icon">@evt.Icon</span>
+            <span class="activity-icon" aria-hidden="true">@evt.Icon</span>
+            @* The outcome is spelled out, not carried by the colour alone. *@
+            @if (!string.IsNullOrEmpty(evt.Status))
+            {
+                <span class="activity-status">@evt.Status</span>
+            }
             <span class="activity-text">@evt.Text</span>
         </div>
     }
@@ -94,16 +99,16 @@
         if (_disposed || !CurrentTenant.Owns(e))
             return;
 
-        var (icon, text, css) = e.Kind switch
+        var (icon, status, text, css) = e.Kind switch
         {
             ActivityKind.MessageReceived =>
-                (">>>", $"Message received from {e.Sender} to {e.Recipients} ({e.SizeBytes} bytes)", "activity-received"),
+                (">>>", "RECEIVED", $"Message received from {e.Sender} to {e.Recipients} ({e.SizeBytes} bytes)", "activity-received"),
             ActivityKind.DeliveryAttempt =>
-                ("<<<", $"Delivery to {e.Recipient}: {e.StatusCode} via {e.RemoteServer}",
+                ("<<<", DeliveryStatus(e.StatusCode), $"Delivery to {e.Recipient}: {e.StatusCode} via {e.RemoteServer}",
                     e.StatusCode == "250" ? "activity-delivered" : "activity-error"),
             ActivityKind.SmtpConnection =>
-                ("...", $"SMTP {e.EventType} from {e.SourceIp}", "activity-connection"),
-            _ => ("", "", "")
+                ("...", "", $"SMTP {e.EventType} from {e.SourceIp}", "activity-connection"),
+            _ => ("", "", "", "")
         };
         if (icon.Length == 0)
             return; // e.g. QueueChanged — not shown in this feed
@@ -113,7 +118,7 @@
         _ = InvokeAsync(() =>
         {
             if (_disposed) return;
-            events.Insert(0, new FeedItem(e.TimestampUtc, icon, text, css));
+            events.Insert(0, new FeedItem(e.TimestampUtc, icon, status, text, css));
             if (events.Count > MaxEvents)
                 events.RemoveAt(events.Count - 1);
             StateHasChanged();
@@ -128,5 +133,12 @@
         Feed.Received -= OnActivity;
     }
 
-    private record FeedItem(DateTimeOffset Timestamp, string Icon, string Text, string CssClass);
+    private static string DeliveryStatus(string? statusCode) => statusCode switch
+    {
+        "250" => "DELIVERED",
+        { } c when c.StartsWith('4') => "DEFERRED",
+        _ => "FAILED"
+    };
+
+    private record FeedItem(DateTimeOffset Timestamp, string Icon, string Status, string Text, string CssClass);
 }
