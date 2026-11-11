@@ -907,3 +907,8 @@ select option {
     white-space: nowrap;
     border-width: 0;
 }
+
+/* Message detail: suppressed recipients listed in the resend dialog. */
+.resend-suppressed { font-size: 0.85rem; color: var(--warning); margin-top: 0.25rem; min-width: 0; }
+.resend-suppressed p { margin: 0 0 0.4rem; }
+.resend-suppressed-row { margin: 0 0 0.3rem 1.4rem; min-width: 0; }
