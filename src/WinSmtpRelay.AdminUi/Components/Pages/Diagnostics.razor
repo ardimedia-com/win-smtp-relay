@@ -240,8 +240,8 @@ else
 
     private static string BarColor(HealthSeverity s) => s switch
     {
-        HealthSeverity.Error => "#dc2626",
-        HealthSeverity.Warning => "#d97706",
+        HealthSeverity.Error => "var(--destructive)",
+        HealthSeverity.Warning => "var(--warning)",
         HealthSeverity.Ok => "var(--primary)",
         _ => "var(--border)",
     };

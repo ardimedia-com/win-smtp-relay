@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Loading placeholders have their height again** — about 30 skeletons (queue, setup, logs, dashboard cards) used
+  size classes that no stylesheet declared, so they collapsed to nothing while a page loaded. The sub-headings on
+  the accepted-domain and DKIM detail pages are styled as well.
+- **Status colours on Diagnostics, DNS setup and Setup follow the theme** — the bars and alignment marks used fixed
+  red and amber values that ignored dark mode.
+
 ## [1.0.0-beta1-build79] - 2026-10-19
 
 ### Changed

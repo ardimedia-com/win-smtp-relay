@@ -743,8 +743,8 @@ else
 
     private static string AuthColor(OutboundAuthCheck c) =>
         c.WillPassDmarc ? "var(--primary)"
-        : c.Alignment.SpfAuthorized ? "#d97706"
-        : "#dc2626";
+        : c.Alignment.SpfAuthorized ? "var(--warning)"
+        : "var(--destructive)";
 
     /// <summary>Prefills the From field with the tenant's first sender domain (best-effort).</summary>
     private async Task PrefillTestFromAsync()

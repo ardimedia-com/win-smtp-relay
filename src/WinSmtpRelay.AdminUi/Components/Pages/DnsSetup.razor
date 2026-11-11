@@ -638,10 +638,10 @@ else
     private static string AlignmentColor(DmarcAlignmentVerdict v) => v switch
     {
         DmarcAlignmentVerdict.DkimAligned => "var(--primary)",
-        DmarcAlignmentVerdict.SpfConditional => "#d97706",
+        DmarcAlignmentVerdict.SpfConditional => "var(--warning)",
         DmarcAlignmentVerdict.SmartHostDependent => "var(--muted-foreground)",
-        DmarcAlignmentVerdict.Unverified => "#d97706",
-        _ => "#dc2626"
+        DmarcAlignmentVerdict.Unverified => "var(--warning)",
+        _ => "var(--destructive)"
     };
 
     private static string BadgeClass(DnsRecordStatus status) => status switch

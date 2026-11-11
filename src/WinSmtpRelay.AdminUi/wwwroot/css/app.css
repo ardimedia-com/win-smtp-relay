@@ -721,3 +721,14 @@ select option {
 .setup-row-title { font-weight: 500; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .setup-row-detail { font-size: 0.8rem; color: var(--muted-foreground); margin-top: 0.1rem; }
 .setup-row-action { flex: 0 0 auto; }
+
+/* Skeleton sizes and small utilities used in markup. There is no Tailwind build in this app, so every utility
+   class a page uses must be declared here (or come from BlazorBlueprint's stylesheet). */
+.h-\[120px\] { height: 120px; }
+.h-\[140px\] { height: 140px; }
+.h-\[160px\] { height: 160px; }
+.h-\[260px\] { height: 260px; }
+.h-\[300px\] { height: 300px; }
+.h-\[320px\] { height: 320px; }
+.w-24 { width: 6rem; }
+.settings-subhead { font-size: 0.8rem; font-weight: 600; margin: 1rem 0 0.25rem; }
