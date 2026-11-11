@@ -9,9 +9,15 @@ namespace WinSmtpRelay.SmtpListener;
 /// rejected" but the literal line the device sent — so it is worth keeping. It is also the one place a
 /// credential can reach the database: an <c>AUTH PLAIN &lt;base64&gt;</c> line whose payload is
 /// malformed fails in the parser like any other command and carries the whole line, credential
-/// included. (A well-formed AUTH that merely fails authentication throws nothing and never produces a
-/// buffer, and <c>AUTH LOGIN</c> sends its credentials on continuation lines that bypass the command
-/// parser entirely — so this narrow case is the whole exposure.)
+/// included. A well-formed AUTH that merely fails authentication throws nothing and never produces a
+/// buffer, and the continuation lines of an AUTH that RUNS are read by the AUTH command itself.
+/// </para>
+/// <para>
+/// The second exposure is an AUTH that is refused before it runs (AUTH where it is not offered, e.g. on a
+/// plain-text connection, or out of sequence): the client does not know that, and sends its base64 user
+/// name and password as the next lines — which then reach the command parser, fail it, and arrive here
+/// looking like any other garbage line. The session pipe marks the lines that follow an AUTH command line
+/// (<see cref="SessionKeys.RedactRejectedLine"/>), and such a line is stored as a marker only.
 /// </para>
 /// <para>
 /// Redaction is therefore fail-safe by prefix, not fail-open by pattern: anything that looks like an
@@ -27,14 +33,21 @@ public static class RejectionBuffer
 
     private const string TruncationMarker = "…[truncated]";
 
+    /// <summary>What is stored instead of a line that may be an AUTH continuation (a credential).</summary>
+    public const string AuthContinuationMarker = "[redacted: line after AUTH]";
+
     /// <summary>
     /// Renders the failing command line for storage: AUTH lines reduced to verb + mechanism, everything
-    /// else escaped to printable ASCII and capped. Returns null when there is nothing to store.
+    /// else escaped to printable ASCII and capped. A line that followed an AUTH command
+    /// (<paramref name="followsAuth"/>) is never stored at all. Returns null when there is nothing to store.
     /// </summary>
-    public static string? Redact(byte[]? raw)
+    public static string? Redact(byte[]? raw, bool followsAuth = false)
     {
         if (raw is null || raw.Length == 0)
             return null;
+
+        if (followsAuth)
+            return AuthContinuationMarker;
 
         // Truncation is tracked from the RAW length, not the rendered one: an all-printable line is
         // escaped 1:1, so a 2 KB command would render as exactly MaxLength characters and look complete.

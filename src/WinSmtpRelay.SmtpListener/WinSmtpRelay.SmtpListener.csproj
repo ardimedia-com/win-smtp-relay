@@ -20,4 +20,8 @@
     <ProjectReference Include="..\WinSmtpRelay.Storage\WinSmtpRelay.Storage.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSmtpRelay.SmtpListener.Tests" />
+  </ItemGroup>
+
 </Project>

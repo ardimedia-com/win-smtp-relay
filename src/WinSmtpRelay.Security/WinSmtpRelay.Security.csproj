@@ -25,4 +25,8 @@
     <EmbeddedResource Include="Resources\public_suffix_list.dat" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSmtpRelay.Security.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -1,5 +1,5 @@
 using System.Net;
-using System.Security.Cryptography.X509Certificates;
+using System.Security.Authentication;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -8,6 +8,7 @@ using SmtpServer;
 using SmtpServer.Authentication;
 using SmtpServer.ComponentModel;
 using SmtpServer.Net;
+using SmtpServer.Protocol;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -17,6 +18,16 @@ namespace WinSmtpRelay.SmtpListener;
 
 public class SmtpRelayServer : BackgroundService
 {
+    /// <summary>
+    /// Headroom between the message size limit and the receive-buffer guard: the buffer that holds a DATA
+    /// body also holds the end-of-data marker and any commands pipelined behind it. The exact limit is
+    /// checked on the received message (RelayMessageStore); this only bounds memory.
+    /// </summary>
+    internal const int DataBufferSlackBytes = 64 * 1024;
+
+    /// <summary>TLS versions offered on implicit TLS and STARTTLS.</summary>
+    internal const SslProtocols SupportedTlsProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
+
     private readonly SmtpListenerOptions _config;
     private readonly RelayMessageStore _messageStore;
     private readonly RelayMailboxFilter _mailboxFilter;
@@ -48,34 +59,44 @@ public class SmtpRelayServer : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var endpoints = await LoadEndpointsAsync(stoppingToken);
-        if (endpoints.Count == 0)
+        var configured = await LoadEndpointsAsync(stoppingToken);
+        if (configured.Count == 0)
         {
             _logger.LogWarning("No SMTP endpoints configured (no enabled receive connectors and SmtpListener:Endpoints is empty) — the SMTP listener will not start.");
             return;
         }
 
         var certificate = _certificateLoader.LoadCertificate();
-        var hasTlsEndpoints = endpoints.Any(e => e.ImplicitTls || e.RequireTls);
+        var endpoints = ValidateEndpoints(configured, certificate is not null, _logger);
 
-        if (hasTlsEndpoints && certificate == null)
+        // A listener that cannot accept mail must not look healthy: the service manager has to see it fail.
+        if (endpoints.Count == 0)
         {
-            _logger.LogError("TLS endpoints configured but no certificate available. " +
-                             "Configure Tls:CertificatePath or Tls:CertificateThumbprint.");
-            return;
+            _logger.LogCritical(
+                "None of the {Count} configured SMTP endpoint(s) can run (see the errors above). The service is stopping " +
+                "so that the failure is visible to the service manager instead of running without an SMTP listener.",
+                configured.Count);
+            Environment.ExitCode = 1;
+            throw new InvalidOperationException("No SMTP endpoint can be started; see the log for the misconfigured endpoints.");
         }
 
         var optionsBuilder = new SmtpServerOptionsBuilder()
             .ServerName("WinSmtpRelay")
-            .MaxMessageSize(_config.MaxMessageSizeBytes);
+            // Strict: the library also bounds a command line by this size. A DATA body is bounded by the
+            // session pipe (LenientEndpointListenerFactory), whose guard fires first and answers 552.
+            .MaxMessageSize(_config.MaxMessageSizeBytes + DataBufferSlackBytes, MaxMessageSizeHandling.Strict);
+
+        var certificateFactory = new ReloadingCertificateFactory(_certificateLoader);
+        var requireTlsEndpoints = new HashSet<IPEndPoint>();
 
         foreach (var endpoint in endpoints)
         {
             var listenAddress = IPAddress.Parse(endpoint.Address);
+            var ipEndPoint = new IPEndPoint(listenAddress, endpoint.Port);
             optionsBuilder.Endpoint(builder =>
             {
                 builder.Port(endpoint.Port, endpoint.ImplicitTls);
-                builder.Endpoint(new IPEndPoint(listenAddress, endpoint.Port));
+                builder.Endpoint(ipEndPoint);
 
                 if (endpoint.RequireAuth)
                 {
@@ -87,9 +108,17 @@ public class SmtpRelayServer : BackgroundService
                     builder.AllowUnsecureAuthentication(false);
                 }
 
-                if (certificate != null && (endpoint.ImplicitTls || endpoint.RequireTls))
-                    builder.Certificate(certificate);
+                if (endpoint.ImplicitTls || endpoint.RequireTls)
+                {
+                    // The factory returns the CURRENT certificate per handshake, so a renewal needs no restart.
+                    builder.Certificate(certificateFactory);
+                    builder.SupportedSslProtocols(SupportedTlsProtocols);
+                }
             });
+
+            // RequireTls on a plain endpoint means "STARTTLS before MAIL" (enforced in RelayMailboxFilter).
+            if (endpoint.RequireTls && !endpoint.ImplicitTls)
+                requireTlsEndpoints.Add(ipEndPoint);
 
             _logger.LogInformation(
                 "Configured SMTP endpoint on {Address}:{Port} (ImplicitTls={ImplicitTls}, RequireTls={RequireTls}, Auth={RequireAuth})",
@@ -135,7 +164,14 @@ public class SmtpRelayServer : BackgroundService
         // firmware that cannot be fixed sends it, and the library answers 502. Syntax only: the normalised
         // line then goes through the unchanged parser and every gate in RelayMailboxFilter. Untrusted
         // clients stay strict. See LenientEndpointListenerFactory and design/lenient-address-syntax.md.
-        serviceProvider.Add(new LenientEndpointListenerFactory(IsTrustedSourceAsync, _logger));
+        // The same pipe carries the session guards: concurrent-connection caps and the DATA size stop.
+        var guards = new SessionGuards
+        {
+            Connections = new ConnectionLimiter(_config.MaxConnections, _config.MaxConnectionsPerIp),
+            MaxDataBytes = (long)_config.MaxMessageSizeBytes + DataBufferSlackBytes,
+            OnRejected = RecordGuardRejection
+        };
+        serviceProvider.Add(new LenientEndpointListenerFactory(IsTrustedSourceAsync, _logger, guards));
 
         var smtpServer = new SmtpServer.SmtpServer(options, serviceProvider);
 
@@ -152,6 +188,25 @@ public class SmtpRelayServer : BackgroundService
             // against SmtpServer v11.1.0; re-verify on a version change (the reference floats on 11.*).
             // See design/observable-rejections.md for the full coverage map.
             args.Context.ResponseException += OnResponseException;
+
+            // Endpoint policy the mailbox filter enforces, and the client's greeting for the Received header.
+            if (args.Context.EndpointDefinition.Endpoint is { } local && requireTlsEndpoints.Contains(local))
+                args.Context.Properties[SessionKeys.RequireTls] = true;
+
+            args.Context.CommandExecuting += (_, e) =>
+            {
+                switch (e.Command)
+                {
+                    case EhloCommand ehlo:
+                        e.Context.Properties[SessionKeys.HeloName] = ehlo.DomainOrAddress;
+                        e.Context.Properties[SessionKeys.UsedEhlo] = true;
+                        break;
+                    case HeloCommand helo:
+                        e.Context.Properties[SessionKeys.HeloName] = helo.DomainOrAddress;
+                        e.Context.Properties[SessionKeys.UsedEhlo] = false;
+                        break;
+                }
+            };
         };
 
         smtpServer.SessionCompleted += (sender, args) =>
@@ -211,7 +266,10 @@ public class SmtpRelayServer : BackgroundService
             if (e.Exception.Properties.TryGetValue(SmtpSessionBufferKey, out var raw) && raw is byte[] bytes)
                 rawBuffer = bytes;
 
-            var tenantId = e.Context.Properties.TryGetValue("TenantId", out var tid) && tid is int t ? t : (int?)null;
+            var tenantId = e.Context.Properties.TryGetValue(SessionKeys.TenantId, out var tid) && tid is int t ? t : (int?)null;
+
+            // A line that followed a refused AUTH may be the client's base64 user name or password.
+            var followsAuth = e.Context.Properties.TryGetValue(SessionKeys.RedactRejectedLine, out var r) && r is true;
 
             _rejectionRecorder.Record(
                 clientIp,
@@ -219,13 +277,73 @@ public class SmtpRelayServer : BackgroundService
                 replyCode,
                 tenantId: tenantId,
                 detail: e.Exception.Response.Message,
-                rawBuffer: RejectionBuffer.Redact(rawBuffer));
+                rawBuffer: RejectionBuffer.Redact(rawBuffer, followsAuth));
         }
         catch (Exception ex)
         {
             // Observability must never break a session, and this handler runs inside one.
             _logger.LogDebug(ex, "Recording a protocol-level rejection failed");
         }
+    }
+
+    /// <summary>Records a refusal made by a session guard (connection cap, oversize DATA).</summary>
+    private void RecordGuardRejection(ISessionContext context, RejectReason reason, int replyCode)
+    {
+        try
+        {
+            var clientIp = (context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep)
+                ? ep as IPEndPoint
+                : null)?.Address.ToString();
+            var tenantId = context.Properties.TryGetValue(SessionKeys.TenantId, out var tid) && tid is int t ? t : (int?)null;
+            _rejectionRecorder.Record(clientIp, reason, replyCode, tenantId: tenantId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Recording a session-guard rejection failed");
+        }
+    }
+
+    /// <summary>
+    /// Drops endpoints that cannot work, each with a critical log entry naming why: an endpoint that needs
+    /// TLS without a certificate (the library would offer neither implicit TLS nor STARTTLS), and an endpoint
+    /// that requires AUTH without TLS (AUTH is never offered in plain text, so no client could ever send).
+    /// </summary>
+    internal static List<EndpointOptions> ValidateEndpoints(IReadOnlyList<EndpointOptions> endpoints, bool hasCertificate, ILogger logger)
+    {
+        var valid = new List<EndpointOptions>();
+        foreach (var endpoint in endpoints)
+        {
+            var needsTls = endpoint.ImplicitTls || endpoint.RequireTls;
+
+            if (!IPAddress.TryParse(endpoint.Address, out _))
+            {
+                logger.LogCritical("SMTP endpoint {Address}:{Port} is not started: the address is not an IP address.",
+                    endpoint.Address, endpoint.Port);
+                continue;
+            }
+
+            if (endpoint.RequireAuth && !needsTls)
+            {
+                logger.LogCritical(
+                    "SMTP endpoint {Address}:{Port} is not started: it requires AUTH, but AUTH is only offered over TLS and the " +
+                    "endpoint has neither ImplicitTls nor RequireTls. No client could ever send through it.",
+                    endpoint.Address, endpoint.Port);
+                continue;
+            }
+
+            if (needsTls && !hasCertificate)
+            {
+                logger.LogCritical(
+                    "SMTP endpoint {Address}:{Port} is not started: it requires TLS (ImplicitTls={ImplicitTls}, RequireTls={RequireTls}) " +
+                    "but no certificate could be loaded. Configure Tls:CertificatePath or Tls:CertificateThumbprint.",
+                    endpoint.Address, endpoint.Port, endpoint.ImplicitTls, endpoint.RequireTls);
+                continue;
+            }
+
+            valid.Add(endpoint);
+        }
+
+        return valid;
     }
 
     /// <summary>

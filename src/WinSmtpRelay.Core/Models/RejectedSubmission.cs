@@ -52,7 +52,7 @@ public enum RejectReason
     /// <summary>Per-user rate limit exceeded. Temporary — the sender is throttled, not refused.</summary>
     UserRateLimitExceeded = 11,
 
-    /// <summary>SPF hard fail while enforcement is in Reject mode.</summary>
+    /// <summary>SPF hard fail, no DMARC record for the From domain, enforcement in Reject mode.</summary>
     SpfFail = 12,
 
     /// <summary>The recipient domain is hosted but its ownership is not verified.</summary>
@@ -60,6 +60,34 @@ public enum RejectReason
 
     /// <summary>Open-relay protection: relaying externally needs authentication or an explicit allow rule.</summary>
     OpenRelayDenied = 14,
+
+    /// <summary>
+    /// A null sender (<c>MAIL FROM:&lt;&gt;</c>, i.e. a bounce or auto-reply) addressed an external
+    /// recipient. Null-sender mail is accepted only for domains this relay hosts, so it cannot be used to
+    /// reflect backscatter at third parties.
+    /// </summary>
+    NullSenderRelayDenied = 15,
+
+    /// <summary>The endpoint requires TLS and the client issued MAIL before STARTTLS.</summary>
+    TlsRequired = 16,
+
+    /// <summary>The message exceeded the per-message recipient cap. Temporary (452) — the client sends the rest later.</summary>
+    TooManyRecipients = 17,
+
+    /// <summary>DMARC failed and the From domain's policy is reject (enforcement mode Reject).</summary>
+    DmarcReject = 18,
+
+    /// <summary>The DMARC/SPF verdict could not be reached because of a DNS failure. Temporary (451).</summary>
+    EmailAuthTempError = 19,
+
+    /// <summary>The message carries more than one From header.</summary>
+    MultipleFromHeaders = 20,
+
+    /// <summary>The message carries more Received headers than the hop limit — a mail loop.</summary>
+    HopLimitExceeded = 21,
+
+    /// <summary>The global or per-IP concurrent-session cap was reached. Temporary (421).</summary>
+    TooManyConnections = 22,
 
     /// <summary>The command line could not be parsed. The only reason that carries a raw buffer.</summary>
     CommandSyntaxError = 100,
@@ -84,7 +112,10 @@ public static class RejectReasonExtensions
     public static bool IsTemporary(this RejectReason reason) => reason is
         RejectReason.IpRateLimitExceeded or
         RejectReason.SenderRateLimitExceeded or
-        RejectReason.UserRateLimitExceeded;
+        RejectReason.UserRateLimitExceeded or
+        RejectReason.TooManyRecipients or
+        RejectReason.EmailAuthTempError or
+        RejectReason.TooManyConnections;
 
     /// <summary>A short operator-facing description of the gate that refused.</summary>
     public static string Describe(this RejectReason reason) => reason switch
@@ -101,9 +132,17 @@ public static class RejectReasonExtensions
         RejectReason.SenderDomainNotVerified => "the sender domain's ownership is not verified",
         RejectReason.SendAsDenied => "the user may not send as this address",
         RejectReason.UserRateLimitExceeded => "per-user rate limit exceeded",
-        RejectReason.SpfFail => "SPF hard fail while enforcement is set to Reject",
+        RejectReason.SpfFail => "SPF hard fail (no DMARC record) while enforcement is set to Reject",
         RejectReason.RecipientDomainNotVerified => "the recipient domain's ownership is not verified",
         RejectReason.OpenRelayDenied => "relaying externally requires authentication or an explicit allow rule",
+        RejectReason.NullSenderRelayDenied => "a null sender (bounce) may only address domains this relay hosts",
+        RejectReason.TlsRequired => "the endpoint requires STARTTLS before MAIL",
+        RejectReason.TooManyRecipients => "the message exceeded the per-message recipient cap",
+        RejectReason.DmarcReject => "DMARC failed under the From domain's reject policy",
+        RejectReason.EmailAuthTempError => "SPF failed and the DMARC record could not be looked up (DNS error)",
+        RejectReason.MultipleFromHeaders => "the message carries more than one From header",
+        RejectReason.HopLimitExceeded => "the message exceeded the hop limit (mail loop)",
+        RejectReason.TooManyConnections => "the concurrent-connection limit was reached",
         RejectReason.CommandSyntaxError => "the client sent a command the SMTP parser could not read",
         RejectReason.CommandSequenceError => "the client sent a command out of sequence",
         RejectReason.InvalidMailboxName => "the client sent an address that could not be interpreted",
