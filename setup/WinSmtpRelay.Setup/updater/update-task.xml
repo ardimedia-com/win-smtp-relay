@@ -1,0 +1,59 @@
+<!--
+  WIN-SMTP-RELAY unattended updater task - TEMPLATE.
+
+  NOTE: intentionally NO <?xml ... encoding ...?> declaration; the custom action writes the final XML as UTF-16
+  for schtasks.exe.
+
+  This file is not installed. It is embedded, together with Update-WinSmtpRelay.ps1, in the installer's custom-action
+  assembly. The deferred custom action RegisterUpdateTask (running as SYSTEM) replaces {ENCODED_COMMAND} with the
+  script as a base64 -EncodedCommand and registers the task with schtasks.exe. Nothing is read from a folder the
+  service account can write (decision T1076); the registered definition lives under C:\Windows\System32\Tasks.
+
+  The task runs as SYSTEM and is the security boundary of the self-update: see Update-WinSmtpRelay.ps1 for what it
+  verifies (signature incl. revocation, publisher, product identity, newer version) before it installs anything.
+  Trigger: Application event 9100 from source WinSmtpRelay.Service, written by the relay service after it staged
+  %ProgramData%\Ardimedia\WinSmtpRelay\updates\pending.msi.
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>WIN-SMTP-RELAY unattended updater. Triggered by the relay service (Application event 9100); copies the staged MSI to a SYSTEM-only folder, verifies its Authenticode signature (with revocation), publisher, product identity and version, and installs it as SYSTEM.</Description>
+    <URI>\WinSmtpRelayUpdate</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <EventTrigger>
+      <Enabled>true</Enabled>
+      <Subscription>&lt;QueryList&gt;&lt;Query Id="0" Path="Application"&gt;&lt;Select Path="Application"&gt;*[System[Provider[@Name='WinSmtpRelay.Service'] and (EventID=9100)]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>
+    </EventTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>false</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+    <Priority>5</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand {ENCODED_COMMAND}</Arguments>
+    </Exec>
+  </Actions>
+</Task>

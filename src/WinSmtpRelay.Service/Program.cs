@@ -21,11 +21,58 @@ using WinSmtpRelay.SmtpListener;
 using WinSmtpRelay.Storage;
 using WinSmtpRelay.Storage.Identity;
 
-// Windows Services run from System32 — set working directory to exe location
-// so relative paths (SQLite DB, config files) resolve correctly
-Directory.SetCurrentDirectory(Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory);
+// ===== BEGIN data location (T1076) — content root, data directory, configuration files =====
+// An installed service keeps everything it writes in %ProgramData%\Ardimedia\WinSmtpRelay (see RelayDataDirectory);
+// the program folder is read-only for the service account. That folder is the content root, so appsettings.json /
+// appsettings.{Environment}.json load from it by the standard rules, and the working directory, so relative paths
+// in the configuration (the default "Data Source=winsmtprelay.db") resolve there too. A development run (not a
+// Windows service) keeps the data next to the executable, as before.
+var runningAsService = Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService();
+var dataDirectory = WinSmtpRelay.DataLocation.RelayDataDirectory.Resolve(runningAsService);
+using (var dataLoggerFactory = LoggerFactory.Create(b =>
+{
+    b.AddConsole();
+    if (OperatingSystem.IsWindows())
+        b.AddEventLog(s => s.SourceName = "WinSmtpRelay.Service");
+}))
+{
+    var dataLogger = dataLoggerFactory.CreateLogger("WinSmtpRelay.DataLocation");
+    Directory.CreateDirectory(dataDirectory);
+    if (runningAsService && !WinSmtpRelay.DataLocation.LegacyDataMigrator.IsMigrated(dataDirectory))
+    {
+        // Normally the installer moved the data before the service started (MigrateLegacyData custom action) and
+        // left the marker. This is the fallback for an install that did not run it: move the data now, exactly once.
+        // If the move fails the service refuses to start — starting would create an EMPTY database in the data
+        // directory, and the migration would then (rightly) never overwrite it, leaving the real data behind.
+        var migrator = new WinSmtpRelay.DataLocation.LegacyDataMigrator(m => dataLogger.LogWarning("{Step}", m));
+        try
+        {
+            migrator.Migrate(AppContext.BaseDirectory, dataDirectory);
+            migrator.Commit(dataDirectory);
+        }
+        catch (Exception ex)
+        {
+            dataLogger.LogCritical(ex,
+                "Moving the data from {Legacy} to {Data} failed; the move was rolled back and the service will not start. " +
+                "Re-run the installer (it moves the data as SYSTEM) or move the files by hand.", AppContext.BaseDirectory, dataDirectory);
+            migrator.Rollback(dataDirectory);
+            throw;
+        }
+    }
+    dataLogger.LogInformation("Data directory: {DataDirectory} (program folder {ProgramFolder})", dataDirectory, AppContext.BaseDirectory);
+}
+Directory.SetCurrentDirectory(dataDirectory);
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = dataDirectory,
+    // Static web assets stay with the binaries in the program folder.
+    WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot"),
+});
+// appsettings.Local.json (machine-local secrets, optional) layers over appsettings.{Environment}.json.
+WinSmtpRelay.DataLocation.RelayDataDirectory.AddLocalSettings(builder.Configuration, dataDirectory, builder.Environment.EnvironmentName);
+// ===== END data location =====
 
 builder.Services.AddWindowsService(options =>
 {
@@ -56,7 +103,7 @@ builder.Services.Configure<UpdateOptions>(builder.Configuration.GetSection(Updat
 // resets) undecryptable on the next restart — i.e. a restart or in-place update would log everyone out,
 // defeating the long cookie lifetime. Encrypted at rest with DPAPI at LocalMachine scope (matching
 // SecretProtector), so the keys survive a service-account change rather than being locked to one profile.
-var keysDirectory = new DirectoryInfo(Path.Combine(Directory.GetCurrentDirectory(), "keys"));
+var keysDirectory = new DirectoryInfo(Path.Combine(dataDirectory, "keys")); // data location (T1076)
 keysDirectory.Create();
 builder.Services.AddDataProtection()
     .SetApplicationName("WinSmtpRelay")
@@ -114,7 +161,7 @@ if (adminUiConfig.Enabled && adminUiConfig.UseHttps)
             b.AddEventLog(s => s.SourceName = "WinSmtpRelay.Service");
     });
     var initialCert = WinSmtpRelay.Security.AdminUiCertificate.Resolve(
-        adminUiConfig, AppContext.BaseDirectory,
+        adminUiConfig, dataDirectory, // data location (T1076): the generated admin-cert.pfx lives in the data directory
         certLoggerFactory.CreateLogger("WinSmtpRelay.AdminUiCertificate"));
     if (initialCert is not null)
         adminCertProvider.Set(initialCert);

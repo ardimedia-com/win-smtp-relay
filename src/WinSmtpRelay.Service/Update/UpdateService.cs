@@ -1,21 +1,27 @@
 using System.Diagnostics;
+using System.Reflection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Interfaces;
+using WinSmtpRelay.DataLocation;
 
 namespace WinSmtpRelay.Service.Update;
 
 /// <summary>
 /// Unattended self-update for the low-privilege relay service. It downloads the MSI from the pinned official
-/// release URL, verifies its Authenticode signature + publisher, stages it as <c>pending.msi</c> in a drop
-/// folder, then fires the elevated SYSTEM updater scheduled task (registered by the installer) via its
-/// Event-Log trigger. The actual <c>msiexec</c> install runs as SYSTEM out-of-process, because this account
-/// (NetworkService) cannot install an MSI; that task re-verifies the signature before installing.
+/// release URL, verifies its Authenticode signature (with online revocation), the publisher, the product identity
+/// and that it is newer than the installed version, stages it as <c>pending.msi</c> in the drop folder
+/// (<c>%ProgramData%\Ardimedia\WinSmtpRelay\updates</c>), then fires the elevated SYSTEM updater scheduled task
+/// (registered by the installer) via its Event-Log trigger. The actual <c>msiexec</c> install runs as SYSTEM
+/// out-of-process, because this account (NetworkService) cannot install an MSI; that task re-verifies everything
+/// before installing.
 /// </summary>
 public class UpdateService(
     IHttpClientFactory httpClientFactory,
     IOptions<UpdateOptions> options,
+    IConfiguration configuration,
     ILogger<UpdateService> logger) : IUpdateService
 {
     public bool IsSupported => OperatingSystem.IsWindows() && options.Value.Enabled;
@@ -68,16 +74,16 @@ public class UpdateService(
             return new(false, $"Download failed: {ex.Message}");
         }
 
-        // 2) Verify Authenticode + publisher (pre-check — the SYSTEM updater re-verifies before installing).
-        string? signer = null, verifyError = null;
-        if (!OperatingSystem.IsWindows() ||
-            !AuthenticodeVerifier.Verify(tempPath, opts.ExpectedPublisher, out signer, out verifyError))
+        // 2) Verify (pre-check — the SYSTEM updater re-verifies all of it independently before installing):
+        //    Authenticode signature incl. online revocation, the pinned publisher (O=), and that the package is
+        //    WinSmtpRelay's MSI (UpgradeCode + ProductName) with a version strictly greater than the installed one.
+        //    The pins are compiled in (UpdatePackageIdentity), not read from the service-writable configuration.
+        if (!VerifyPackage(tempPath, out var verifyError))
         {
-            logger.LogWarning("Update package failed signature verification: {Error}", verifyError);
+            logger.LogWarning("Update package {Version} rejected: {Error}", targetVersion, verifyError);
             TryDelete(tempPath);
-            return new(false, verifyError ?? "The installer is not validly signed.");
+            return new(false, verifyError ?? "The installer did not pass verification.");
         }
-        logger.LogInformation("Update package verified — signed by {Signer}", signer);
 
         // 3) Stage as pending.msi, then fire the elevated updater task.
         try
@@ -102,14 +108,67 @@ public class UpdateService(
         return new(true, $"Update {targetVersion} verified and handed to the system updater. The service will stop, install, and restart shortly.");
     }
 
-    private static string ResolveDropFolder(UpdateOptions opts) =>
-        string.IsNullOrWhiteSpace(opts.DropFolder)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "WinSmtpRelay", "updates")
-            : opts.DropFolder;
+    // The SYSTEM updater task watches %ProgramData%\Ardimedia\WinSmtpRelay\updates (fixed in the task). A configured
+    // DropFolder is still honoured, but the task does not pick a package up from anywhere else.
+    private string ResolveDropFolder(UpdateOptions opts)
+    {
+        if (string.IsNullOrWhiteSpace(opts.DropFolder))
+            return RelayDataDirectory.UpdateDropFolder;
+        logger.LogWarning("Update:DropFolder is set to {Folder}; the SYSTEM updater only installs packages from {Default}.",
+            opts.DropFolder, RelayDataDirectory.UpdateDropFolder);
+        return opts.DropFolder;
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private bool VerifyPackage(string path, out string? error)
+    {
+        if (!AuthenticodeVerifier.Verify(path, UpdatePackageIdentity.SignerOrganization, PinnedThumbprints(), out var signer, out error))
+            return false;
+        logger.LogInformation("Update package signature valid — signed by {Signer}", signer);
+
+        MsiPackageInspector.PackageInfo package;
+        try
+        {
+            package = MsiPackageInspector.ReadPackage(path);
+        }
+        catch (Exception ex)
+        {
+            error = $"The downloaded file could not be read as an installer package: {ex.Message}";
+            return false;
+        }
+
+        if (!UpdatePackageIdentity.IsOurProduct(package.UpgradeCode, package.ProductName, out var reason))
+        {
+            error = $"The installer is signed, but {reason}. The update was NOT installed.";
+            return false;
+        }
+
+        // The installed MSI version; the running binary's file version (= MSI version + ".0") as the fallback.
+        var installed = MsiPackageInspector.InstalledVersion(UpdatePackageIdentity.UpgradeCode)
+            ?? typeof(UpdateService).Assembly.GetCustomAttribute<AssemblyFileVersionAttribute>()?.Version;
+        if (!UpdatePackageIdentity.IsNewer(package.ProductVersion, installed, out reason))
+        {
+            error = $"The installer is WinSmtpRelay, but {reason}. The self-update installs only newer builds (no downgrade, no reinstall).";
+            return false;
+        }
+
+        logger.LogInformation("Update package is {Product} {Version} (installed: {Installed})",
+            package.ProductName, package.ProductVersion, installed ?? "unknown");
+        return true;
+    }
+
+    // The certificate thumbprints this pre-check accepts: Update:SignerThumbprints (a list, for a certificate rollover),
+    // defaulting to the compiled-in release certificate. This only widens or narrows the service-side PRE-check — the
+    // SYSTEM updater script carries its own compiled-in list and never reads the (service-writable) configuration.
+    private IReadOnlyList<string> PinnedThumbprints()
+    {
+        var configured = configuration.GetSection("Update:SignerThumbprints").Get<string[]>();
+        return configured is { Length: > 0 } ? configured : UpdatePackageIdentity.DefaultSignerThumbprints;
+    }
 
     // Fires the SYSTEM updater scheduled task by writing its trigger event to the Windows Event Log. The
     // task (registered by the installer, immutable to this low-privilege account) listens for this source +
-    // event ID, then re-verifies the staged package's signature and installs it as SYSTEM.
+    // event ID, then re-verifies the staged package and installs it as SYSTEM.
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private bool TriggerUpdaterTask(UpdateOptions opts, string targetVersion, out string? error)
     {

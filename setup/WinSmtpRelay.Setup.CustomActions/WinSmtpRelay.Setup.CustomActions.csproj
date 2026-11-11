@@ -5,6 +5,9 @@
     (always present on Windows 10/11) because WiX DTF hosts managed custom actions on the .NET Framework
     CLR, independent of the net10.0 application. Kept dependency-free (no JSON library): the config is
     written as a tiny appsettings.Production.json via string formatting.
+
+    In a release build the intermediate assembly is Authenticode-signed BEFORE PackCustomAction packs it, and the
+    packed .CA.dll afterwards (see .github/workflows/release.yml).
   -->
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
@@ -16,6 +19,34 @@
   <ItemGroup>
     <PackageReference Include="WixToolset.Dtf.CustomAction" Version="5.0.2" />
   </ItemGroup>
+
+  <!-- Shared with the service: the one implementation of the legacy-data move (decision T1076). The installer runs it
+       as SYSTEM before InstallFiles; the service runs it only as a fallback when the installer did not. -->
+  <ItemGroup>
+    <Compile Include="..\..\src\WinSmtpRelay.Service\DataLocation\LegacyDataMigrator.cs" Link="Shared\LegacyDataMigrator.cs" />
+  </ItemGroup>
+
+  <!-- The SYSTEM updater task definition is embedded here and registered by RegisterUpdateTask (running as SYSTEM),
+       so it never comes from a folder the service account can write. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\WinSmtpRelay.Setup\updater\update-task.xml" LogicalName="WinSmtpRelay.Setup.CustomActions.update-task.xml" />
+    <EmbeddedResource Include="..\WinSmtpRelay.Setup\updater\Update-WinSmtpRelay.ps1" LogicalName="WinSmtpRelay.Setup.CustomActions.Update-WinSmtpRelay.ps1" />
+  </ItemGroup>
+
+  <!--
+    Release signing (decision T1084 D). When CustomActionSignCommand is set (the release workflow sets it as an
+    environment variable: signtool sign with the certificate thumbprint and timestamp, the file path is appended),
+    the managed assembly is signed after compiling and BEFORE PackCustomAction packs it, and the packed .CA.dll —
+    the file Windows Installer loads — right after packing. Unset (every other build): nothing is signed.
+  -->
+  <Target Name="SignCustomActionAssembly" AfterTargets="CoreCompile" BeforeTargets="PackCustomAction"
+          Condition="'$(CustomActionSignCommand)' != '' and Exists('@(IntermediateAssembly)')">
+    <Exec Command="$(CustomActionSignCommand) &quot;@(IntermediateAssembly->'%(FullPath)')&quot;" />
+  </Target>
+  <Target Name="SignCustomActionPackage" AfterTargets="PackCustomAction"
+          Condition="'$(CustomActionSignCommand)' != '' and Exists('$(IntermediateOutputPath)$(TargetCAFileName)')">
+    <Exec Command="$(CustomActionSignCommand) &quot;$(ProjectDir)$(IntermediateOutputPath)$(TargetCAFileName)&quot;" />
+  </Target>
 
   <!-- Packed into the custom-action package (MakeSfxCA includes @(Content)); MakeSfxCA uses a file named
        CustomAction.config as the SFXCA CLR host config so the managed CA loads under .NET Framework 4.x. -->

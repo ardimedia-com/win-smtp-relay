@@ -1,8 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text;
+using WinSmtpRelay.DataLocation;
 using WixToolset.Dtf.WindowsInstaller;
 
 namespace WinSmtpRelay.Setup.CustomActions
@@ -11,6 +16,11 @@ namespace WinSmtpRelay.Setup.CustomActions
     {
         // Admin-UI port fallbacks tried in order when 8025 is already in use.
         private static readonly int[] AdminPortCandidates = { 8025, 8125, 8225, 8325, 8425, 8525, 8625, 8725, 8825, 8925 };
+
+        private const string AdminUiReadyText =
+            " (also added to the Start menu). The built-in certificate is self-signed, so your browser will warn once"
+            + " - you can import a trusted certificate later in the admin UI. On the first visit the admin UI asks you to"
+            + " create the first administrator. Configuration and data are kept in %ProgramData%\\Ardimedia\\WinSmtpRelay.";
 
         /// <summary>
         /// Immediate CA (runs in the UI and execute sequences before the config is written). Detects
@@ -41,12 +51,7 @@ namespace WinSmtpRelay.Setup.CustomActions
                 session["ADMINUIURL"] = "https://localhost:" + adminPort;
 
                 // Build the exit-dialog text dynamically so the operator sees any port issues at the end.
-                string text = "WIN-SMTP-RELAY is installed. Open the admin UI at https://localhost:" + adminPort
-                    + " (also added to the Start menu). The built-in certificate is self-signed, so your browser "
-                    + "will warn once — you can import a trusted certificate later in the admin UI."
-                    + "  Sign in as admin@local — the one-time initial password is in "
-                    + "'initial-admin-password.txt' in the install folder (also in the Windows Event Log, "
-                    + "source WinSmtpRelay.Service).";
+                string text = "WIN-SMTP-RELAY is installed. Open the admin UI at https://localhost:" + adminPort + AdminUiReadyText;
                 if (adminReassigned)
                     text = "Port 8025 was already in use, so the admin UI was moved to port " + adminPort + ". " + text;
                 if (port25InUse)
@@ -69,27 +74,45 @@ namespace WinSmtpRelay.Setup.CustomActions
         }
 
         /// <summary>
-        /// Immediate CA, scheduled (UI and execute sequence) only when the registry holds no saved admin
-        /// port — i.e. maintenance or upgrade of a pre-build45 install. Reads the existing
-        /// appsettings.Production.json so the options dialog reflects the current state and the admin port
-        /// is preserved — CheckPorts does not run then, and the ADMINUIPORT default (8025) would otherwise
-        /// be wrong if the install had chosen another port. Sets ADMINUIPORT/ADMINUIURL to the current
-        /// port and NETWORKACCESS=1 when the current bind is anything but loopback (so the network
-        /// checkbox is pre-checked). Port/BindAddress are read from the "AdminUi" section only — other
-        /// sections may carry keys with the same names. (The WSRMAINTUI maintenance marker is set by a
-        /// SetProperty in the UI sequence, not here.)
+        /// Immediate CA in both sequences, after every source of ADMINUIPORT (command line, the saved registry value,
+        /// CheckPorts, ReadExistingConfig): refuses the installation when it is not a port number 1-65535. The value
+        /// ends up in a firewall rule and in the admin binding, so it is never passed on unchecked.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult ValidateAdminPort(Session session)
+        {
+            var value = session["ADMINUIPORT"];
+            if (InstallerInput.TryParsePort(value, out _))
+                return ActionResult.Success;
+
+            var message = "ADMINUIPORT must be a TCP port number between 1 and 65535 (got '" + value + "'). Installation stopped.";
+            session.Log("WinSmtpRelay ValidateAdminPort: " + message);
+            using (var record = new Record(0))
+            {
+                record.FormatString = message;
+                session.Message(InstallMessage.Error | (InstallMessage)MessageButtons.OK, record);
+            }
+            return ActionResult.Failure;
+        }
+
+        /// <summary>
+        /// Immediate CA, scheduled (UI and execute sequence) only when the installer's registry key holds no saved admin
+        /// port — the first upgrade from a version that kept it elsewhere, or a pre-build45 install. Reads the existing
+        /// appsettings.Production.json (data folder first, then the legacy program folder) so the options dialog reflects
+        /// the current state and the admin port is preserved. Sets ADMINUIPORT/ADMINUIURL to the current port and
+        /// NETWORKACCESS=1 when the current bind is anything but loopback. Port/BindAddress are read from the "AdminUi"
+        /// section only — other sections may carry keys with the same names. Invalid ports are ignored.
         /// </summary>
         [CustomAction]
         public static ActionResult ReadExistingConfig(Session session)
         {
             try
             {
-                var dir = session["INSTALLFOLDER"];
-                if (string.IsNullOrEmpty(dir))
-                    return ActionResult.Success;
-
-                var path = Path.Combine(dir, "appsettings.Production.json");
-                if (!File.Exists(path))
+                string path = new[] { session["WsrDataFolder"], session["INSTALLFOLDER"] }
+                    .Where(d => !string.IsNullOrEmpty(d))
+                    .Select(d => Path.Combine(d, "appsettings.Production.json"))
+                    .FirstOrDefault(p => { try { return File.Exists(p); } catch { return false; } });
+                if (path == null)
                     return ActionResult.Success;
 
                 var json = File.ReadAllText(path);
@@ -98,12 +121,12 @@ namespace WinSmtpRelay.Setup.CustomActions
                 var section = json.Substring(sectionStart, sectionEnd - sectionStart + 1);
 
                 var port = System.Text.RegularExpressions.Regex.Match(section, "\"Port\"\\s*:\\s*(\\d+)");
-                if (port.Success)
+                if (port.Success && InstallerInput.TryParsePort(port.Groups[1].Value, out var portNum))
                 {
-                    session["ADMINUIPORT"] = port.Groups[1].Value;
+                    session["ADMINUIPORT"] = portNum.ToString();
                     // Keep the Start-menu shortcut (and exit text) on the real port — both use ADMINUIURL,
                     // and a Repair rewrites the shortcut with the current property value.
-                    session["ADMINUIURL"] = "https://localhost:" + port.Groups[1].Value;
+                    session["ADMINUIURL"] = "https://localhost:" + portNum;
                 }
 
                 // Pre-check the network checkbox for ANY non-loopback bind (0.0.0.0 or a specific address),
@@ -114,7 +137,7 @@ namespace WinSmtpRelay.Setup.CustomActions
                 if (bind.Success && !IsLoopback(bind.Groups[1].Value))
                     session["NETWORKACCESS"] = "1";
 
-                session.Log("WinSmtpRelay ReadExistingConfig: port={0}, bind={1}",
+                session.Log("WinSmtpRelay ReadExistingConfig: {0}: port={1}, bind={2}", path,
                     port.Success ? port.Groups[1].Value : "(default)",
                     bind.Success ? bind.Groups[1].Value : "(none)");
                 return ActionResult.Success;
@@ -127,12 +150,10 @@ namespace WinSmtpRelay.Setup.CustomActions
         }
 
         /// <summary>
-        /// Deferred CA. Patches appsettings.Production.json next to the service binaries with the chosen
-        /// admin-UI port and bind address. The service is installed to run in the Production environment
-        /// (ServiceInstall Arguments="--environment Production"), so ASP.NET Core layers this file over the
-        /// shipped appsettings.json via the standard appsettings.{Environment}.json convention — no custom
-        /// loading and no parsing of appsettings.json. Data is passed via CustomActionData as
-        /// "DIR=&lt;installdir&gt;|PORT=&lt;port&gt;|NET=&lt;0|1&gt;".
+        /// Deferred CA. Patches appsettings.Production.json in the data folder with the chosen admin-UI port and bind
+        /// address. The service runs in the Production environment (--environment Production) with the data folder
+        /// as its content root, so ASP.NET Core layers this file over appsettings.json by the standard
+        /// appsettings.{Environment}.json convention. CustomActionData: "DIR=&lt;datafolder&gt;|PORT=&lt;port&gt;|NET=&lt;0|1&gt;".
         /// MERGES into an existing file: only the AdminUi Port/BindAddress values are touched, every other
         /// operator-added setting in the file survives a Repair or upgrade byte-for-byte. A hand-configured
         /// specific bind address (e.g. 192.168.1.5) is preserved when network access stays enabled.
@@ -141,21 +162,36 @@ namespace WinSmtpRelay.Setup.CustomActions
         [CustomAction]
         public static ActionResult WriteAdminConfig(Session session)
         {
+            Dictionary<string, string> data;
             try
             {
-                var data = ParseCustomActionData(session["CustomActionData"]);
-                string dir = data.TryGetValue("DIR", out var d) ? d : null;
-                string port = data.TryGetValue("PORT", out var p) ? p : "8025";
-                // NET=1 → expose on the network; otherwise loopback only (secure default).
-                string net = data.TryGetValue("NET", out var n) ? n : "0";
+                data = InstallerInput.ParseCustomActionData(session["CustomActionData"], "DIR", "PORT", "NET");
+            }
+            catch (FormatException ex)
+            {
+                session.Log("WinSmtpRelay WriteAdminConfig: rejected CustomActionData - " + ex.Message);
+                return ActionResult.Failure;
+            }
 
-                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            string dir = data.TryGetValue("DIR", out var d) ? d : null;
+            string port = data.TryGetValue("PORT", out var p) ? p : "8025";
+            // NET=1 → expose on the network; otherwise loopback only (secure default).
+            string net = data.TryGetValue("NET", out var n) ? n : "0";
+
+            if (!InstallerInput.TryParsePort(port, out var portNum))
+            {
+                session.Log("WinSmtpRelay WriteAdminConfig: rejected admin port '{0}' (must be 1-65535).", port);
+                return ActionResult.Failure;
+            }
+
+            try
+            {
+                if (string.IsNullOrEmpty(dir))
                 {
-                    session.Log("WinSmtpRelay WriteAdminConfig: install directory '{0}' not found — skipping.", dir);
+                    session.Log("WinSmtpRelay WriteAdminConfig: no data folder passed - skipping.");
                     return ActionResult.Success;
                 }
-
-                if (!int.TryParse(port, out var portNum)) portNum = 8025;
+                Directory.CreateDirectory(dir);
 
                 string path = Path.Combine(dir, "appsettings.Production.json");
                 string existing = File.Exists(path) ? File.ReadAllText(path) : null;
@@ -214,9 +250,303 @@ namespace WinSmtpRelay.Setup.CustomActions
             catch (Exception ex)
             {
                 session.Log("WinSmtpRelay WriteAdminConfig failed: " + ex);
-                // Don't fail the install: the service still runs on the appsettings.json defaults.
+                // Don't fail the install on an I/O problem: the service still runs on the appsettings.json defaults.
                 return ActionResult.Success;
             }
+        }
+
+        // ============================================================================================
+        // Data folder (decision T1076): move the data of a pre-ProgramData install exactly once.
+        // Deferred (as SYSTEM, before InstallFiles), with a rollback action that moves everything back and a
+        // commit action that drops the journal. CustomActionData: "LEGACY=<program folder>|DATA=<data folder>".
+        // ============================================================================================
+
+        [CustomAction]
+        public static ActionResult MigrateLegacyData(Session session)
+        {
+            try
+            {
+                var data = InstallerInput.ParseCustomActionData(session["CustomActionData"], "LEGACY", "DATA");
+                // Lock the data folders down BEFORE anything is moved into them: a freshly created folder under
+                // ProgramData would otherwise inherit read access for every local user.
+                ProtectDataFolders(session, Value(data, "DATA"));
+                var migrator = new LegacyDataMigrator(m => session.Log("WinSmtpRelay " + m));
+                migrator.Migrate(Value(data, "LEGACY"), Value(data, "DATA"));
+                return ActionResult.Success;
+            }
+            catch (Exception ex)
+            {
+                // Fail the installation: the rollback action moves back what was moved. Starting the new version
+                // without its data would create an empty database in the data folder.
+                session.Log("WinSmtpRelay MigrateLegacyData FAILED: " + ex);
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
+        public static ActionResult MigrateLegacyDataRollback(Session session)
+        {
+            try
+            {
+                var data = InstallerInput.ParseCustomActionData(session["CustomActionData"], "LEGACY", "DATA");
+                new LegacyDataMigrator(m => session.Log("WinSmtpRelay " + m)).Rollback(Value(data, "DATA"));
+            }
+            catch (Exception ex)
+            {
+                session.Log("WinSmtpRelay MigrateLegacyDataRollback failed: " + ex);
+            }
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult MigrateLegacyDataCommit(Session session)
+        {
+            try
+            {
+                var data = InstallerInput.ParseCustomActionData(session["CustomActionData"], "LEGACY", "DATA");
+                new LegacyDataMigrator(m => session.Log("WinSmtpRelay " + m)).Commit(Value(data, "DATA"));
+            }
+            catch (Exception ex)
+            {
+                session.Log("WinSmtpRelay MigrateLegacyDataCommit failed: " + ex);
+            }
+            return ActionResult.Success;
+        }
+
+        // ============================================================================================
+        // Folder permissions (decision T1076). Deferred, as SYSTEM, after InstallFiles. Every folder gets an explicit
+        // ACL with inheritance broken; a failure fails the installation (an unhardened folder would let the service
+        // account write what SYSTEM later trusts). CustomActionData: "PROGRAM=<program folder>|DATA=<data folder>".
+        //   program folder        SYSTEM, Administrators: Full   Users, NetworkService: Read & Execute
+        //   data folder           SYSTEM, Administrators: Full   NetworkService: Modify
+        //   data\updates          SYSTEM, Administrators: Full   NetworkService: Modify (the service downloads here)
+        //   data\updater-work     SYSTEM, Administrators: Full   (nobody else)
+        // ============================================================================================
+
+        [CustomAction]
+        public static ActionResult HardenFolders(Session session)
+        {
+            try
+            {
+                var data = InstallerInput.ParseCustomActionData(session["CustomActionData"], "PROGRAM", "DATA");
+                string program = Value(data, "PROGRAM"), dataFolder = Value(data, "DATA");
+
+                // Keep the program folder's previous ACL so a rolled-back upgrade gives the restored old version its
+                // write access back (it still keeps its database in the program folder).
+                ProtectDataFolders(session, dataFolder);
+                var backup = Path.Combine(dataFolder, ProgramAclBackupFileName);
+                if (Directory.Exists(program) && !File.Exists(backup))
+                    File.WriteAllText(backup, Directory.GetAccessControl(program, AccessControlSections.Access)
+                        .GetSecurityDescriptorSddlForm(AccessControlSections.Access));
+
+                Protect(session, program,
+                    Grant(Sid(WellKnownSidType.LocalSystemSid), FileSystemRights.FullControl),
+                    Grant(Sid(WellKnownSidType.BuiltinAdministratorsSid), FileSystemRights.FullControl),
+                    Grant(Sid(WellKnownSidType.BuiltinUsersSid), FileSystemRights.ReadAndExecute),
+                    Grant(Sid(WellKnownSidType.NetworkServiceSid), FileSystemRights.ReadAndExecute));
+                return ActionResult.Success;
+            }
+            catch (Exception ex)
+            {
+                session.Log("WinSmtpRelay HardenFolders FAILED: " + ex);
+                return ActionResult.Failure;
+            }
+        }
+
+        private const string ProgramAclBackupFileName = ".program-folder-acl";
+
+        [CustomAction]
+        public static ActionResult HardenFoldersRollback(Session session)
+        {
+            try
+            {
+                var data = InstallerInput.ParseCustomActionData(session["CustomActionData"], "PROGRAM", "DATA");
+                string program = Value(data, "PROGRAM");
+                var backup = Path.Combine(Value(data, "DATA"), ProgramAclBackupFileName);
+                if (File.Exists(backup) && Directory.Exists(program))
+                {
+                    var security = new DirectorySecurity();
+                    security.SetSecurityDescriptorSddlForm(File.ReadAllText(backup), AccessControlSections.Access);
+                    Directory.SetAccessControl(program, security);
+                    session.Log("WinSmtpRelay HardenFoldersRollback: restored the previous ACL of {0}.", program);
+                }
+                if (File.Exists(backup))
+                    File.Delete(backup);
+            }
+            catch (Exception ex)
+            {
+                session.Log("WinSmtpRelay HardenFoldersRollback failed: " + ex);
+            }
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult HardenFoldersCommit(Session session)
+        {
+            try
+            {
+                var data = InstallerInput.ParseCustomActionData(session["CustomActionData"], "PROGRAM", "DATA");
+                var backup = Path.Combine(Value(data, "DATA"), ProgramAclBackupFileName);
+                if (File.Exists(backup))
+                    File.Delete(backup);
+            }
+            catch (Exception ex)
+            {
+                session.Log("WinSmtpRelay HardenFoldersCommit failed: " + ex);
+            }
+            return ActionResult.Success;
+        }
+
+        private static void ProtectDataFolders(Session session, string dataFolder)
+        {
+            var system = Sid(WellKnownSidType.LocalSystemSid);
+            var admins = Sid(WellKnownSidType.BuiltinAdministratorsSid);
+            var networkService = Sid(WellKnownSidType.NetworkServiceSid);
+            Protect(session, dataFolder,
+                Grant(system, FileSystemRights.FullControl), Grant(admins, FileSystemRights.FullControl),
+                Grant(networkService, FileSystemRights.Modify));
+            Protect(session, Path.Combine(dataFolder, "updates"),
+                Grant(system, FileSystemRights.FullControl), Grant(admins, FileSystemRights.FullControl),
+                Grant(networkService, FileSystemRights.Modify));
+            Protect(session, Path.Combine(dataFolder, "updater-work"),
+                Grant(system, FileSystemRights.FullControl), Grant(admins, FileSystemRights.FullControl));
+        }
+
+        private static SecurityIdentifier Sid(WellKnownSidType type) => new SecurityIdentifier(type, null);
+
+        private static FileSystemAccessRule Grant(SecurityIdentifier sid, FileSystemRights rights) =>
+            new FileSystemAccessRule(sid, rights, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow);
+
+        private static void Protect(Session session, string path, params FileSystemAccessRule[] rules)
+        {
+            if (string.IsNullOrEmpty(path))
+                throw new ArgumentException("A folder path is missing.");
+            Directory.CreateDirectory(path);
+            var security = new DirectorySecurity();
+            security.SetAccessRuleProtection(true, false); // break inheritance, drop inherited entries
+            foreach (var rule in rules)
+                security.AddAccessRule(rule);
+            // SetNamedSecurityInfo propagates the inheritable entries to the existing files and sub-folders.
+            Directory.SetAccessControl(path, security);
+            session.Log("WinSmtpRelay HardenFolders: {0} -> {1}", path,
+                string.Join(", ", rules.Select(r => r.IdentityReference.Value + ":" + r.FileSystemRights)));
+        }
+
+        // ============================================================================================
+        // SYSTEM updater task (decision T1076). The definition comes from resources embedded in THIS assembly (the
+        // task XML template + Update-WinSmtpRelay.ps1), never from a folder the service account can write. Deferred, as
+        // SYSTEM, after HardenFolders; the temporary XML file is written into the SYSTEM-only updater-work folder.
+        // CustomActionData: "WORK=<updater-work folder>".
+        // ============================================================================================
+
+        [CustomAction]
+        public static ActionResult RegisterUpdateTask(Session session)
+        {
+            string xmlPath = null;
+            try
+            {
+                var data = InstallerInput.ParseCustomActionData(session["CustomActionData"], "WORK");
+                var work = Value(data, "WORK");
+                Directory.CreateDirectory(work);
+
+                var xml = UpdateTaskDefinition.Build(
+                    UpdateTaskDefinition.ReadResource(UpdateTaskDefinition.TemplateResourceName),
+                    UpdateTaskDefinition.ReadResource(UpdateTaskDefinition.ScriptResourceName));
+                xmlPath = Path.Combine(work, "update-task-" + Guid.NewGuid().ToString("N") + ".xml");
+                File.WriteAllText(xmlPath, xml, Encoding.Unicode);
+
+                int exit = RunSchtasks(session, "/Create /TN " + UpdateTaskDefinition.TaskName + " /XML \"" + xmlPath + "\" /F");
+                if (exit != 0)
+                {
+                    session.Log("WinSmtpRelay RegisterUpdateTask FAILED: schtasks exit code {0}.", exit);
+                    return ActionResult.Failure;
+                }
+                session.Log("WinSmtpRelay RegisterUpdateTask: task {0} registered.", UpdateTaskDefinition.TaskName);
+                return ActionResult.Success;
+            }
+            catch (Exception ex)
+            {
+                session.Log("WinSmtpRelay RegisterUpdateTask FAILED: " + ex);
+                return ActionResult.Failure;
+            }
+            finally
+            {
+                if (xmlPath != null)
+                {
+                    try { File.Delete(xmlPath); } catch { /* best effort */ }
+                }
+            }
+        }
+
+        [CustomAction]
+        public static ActionResult UnregisterUpdateTask(Session session)
+        {
+            try
+            {
+                int exit = RunSchtasks(session, "/Delete /TN " + UpdateTaskDefinition.TaskName + " /F");
+                session.Log("WinSmtpRelay UnregisterUpdateTask: schtasks exit code {0}.", exit);
+            }
+            catch (Exception ex)
+            {
+                session.Log("WinSmtpRelay UnregisterUpdateTask failed: " + ex);
+            }
+            return ActionResult.Success; // a task that is already gone is fine
+        }
+
+        private static int RunSchtasks(Session session, string arguments)
+        {
+            var exe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "schtasks.exe");
+            var info = new ProcessStartInfo(exe, arguments)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using (var process = Process.Start(info))
+            {
+                var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+                process.WaitForExit();
+                session.Log("WinSmtpRelay schtasks {0}: {1}", arguments, output.Trim());
+                return process.ExitCode;
+            }
+        }
+
+        // ============================================================================================
+        // REMOVEDATA=1 on uninstall: delete the data folder (database = the operator's mail history, keys,
+        // configuration). Default is to keep it. Never runs during a major upgrade (the old product's removal).
+        // CustomActionData: "DATA=<data folder>".
+        // ============================================================================================
+
+        [CustomAction]
+        public static ActionResult RemoveData(Session session)
+        {
+            try
+            {
+                var data = InstallerInput.ParseCustomActionData(session["CustomActionData"], "DATA");
+                var folder = Value(data, "DATA");
+                if (Directory.Exists(folder))
+                {
+                    Directory.Delete(folder, true);
+                    session.Log("WinSmtpRelay RemoveData: deleted {0}.", folder);
+                }
+                var parent = Path.GetDirectoryName(folder.TrimEnd('\\'));
+                if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent) && !Directory.EnumerateFileSystemEntries(parent).Any())
+                    Directory.Delete(parent);
+            }
+            catch (Exception ex)
+            {
+                session.Log("WinSmtpRelay RemoveData failed (the remaining files stay): " + ex);
+            }
+            return ActionResult.Success;
+        }
+
+        private static string Value(Dictionary<string, string> data, string key)
+        {
+            if (!data.TryGetValue(key, out var value) || string.IsNullOrEmpty(value))
+                throw new ArgumentException("CustomActionData has no " + key + ".");
+            return value;
         }
 
         /// <summary>
@@ -283,19 +613,6 @@ namespace WinSmtpRelay.Setup.CustomActions
                 ports.Add(ep.Port);
             // Active outbound connections' local ports don't block a listener bind, so only listeners matter.
             return ports;
-        }
-
-        private static Dictionary<string, string> ParseCustomActionData(string raw)
-        {
-            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrEmpty(raw)) return result;
-            foreach (var pair in raw.Split('|'))
-            {
-                var idx = pair.IndexOf('=');
-                if (idx > 0)
-                    result[pair.Substring(0, idx)] = pair.Substring(idx + 1);
-            }
-            return result;
         }
     }
 }

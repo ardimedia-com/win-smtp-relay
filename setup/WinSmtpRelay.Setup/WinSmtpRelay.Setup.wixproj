@@ -4,12 +4,12 @@
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
     <SuppressIces>ICE61</SuppressIces>
-    <!-- ProductVersion reads from Directory.Build.props $(Version), overridable via -p:ProductVersion -->
-    <ProductVersion Condition="'$(ProductVersion)' == ''">$(Version)</ProductVersion>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">1.0.0</ProductVersion>
-    <!-- VersionLabel: e.g. "1.0.0-beta4" or "1.0.0" for stable -->
-    <VersionLabel Condition="'$(VersionSuffix)' != ''">$(ProductVersion)-$(VersionSuffix)</VersionLabel>
-    <VersionLabel Condition="'$(VersionSuffix)' == ''">$(ProductVersion)</VersionLabel>
+    <!-- ProductVersion = the MSI version major.minor.<build number> (Directory.Build.props MsiProductVersion,
+         decision T1077). CI passes it explicitly from the tag (-p:ProductVersion=...). -->
+    <ProductVersion Condition="'$(ProductVersion)' == ''">$(MsiProductVersion)</ProductVersion>
+    <!-- VersionLabel: the human-readable release, e.g. "1.0.0-beta1-build80" (part of the ProductName). -->
+    <VersionLabel Condition="'$(VersionSuffix)' != ''">$(Version)-$(VersionSuffix)</VersionLabel>
+    <VersionLabel Condition="'$(VersionSuffix)' == ''">$(Version)</VersionLabel>
     <DefineConstants>ProductVersion=$(ProductVersion);VersionLabel=$(VersionLabel);VersionSuffix=$(VersionSuffix);SelfContained=$(SelfContained);HarvestPath=$(HarvestPath)</DefineConstants>
   </PropertyGroup>
 
@@ -18,16 +18,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.*" />
-    <PackageReference Include="WixToolset.Firewall.wixext" Version="5.0.*" />
-    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.*" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Firewall.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
   </ItemGroup>
 
-  <!-- Managed custom actions (port detection + appsettings.Production.json). The packed *.CA.dll is
+  <!-- Managed custom actions (ports, configuration, data migration, folder ACLs, updater task). The packed *.CA.dll is
        referenced as a Binary in Package.wxs via $(var.WinSmtpRelay.Setup.CustomActions.TargetDir). -->
   <ItemGroup>
     <ProjectReference Include="..\WinSmtpRelay.Setup.CustomActions\WinSmtpRelay.Setup.CustomActions.csproj" />
   </ItemGroup>
-
 
 </Project>

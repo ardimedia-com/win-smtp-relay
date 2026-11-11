@@ -20,4 +20,14 @@
     <ProjectReference Include="..\..\src\WinSmtpRelay.Storage\WinSmtpRelay.Storage.csproj" />
   </ItemGroup>
 
+  <!-- Installer, data-location and self-update logic (review area E). These classes live in the Windows-only service
+       and the net48 custom-action projects, which this test project cannot reference; their pure source files are
+       compiled in here. -->
+  <ItemGroup>
+    <Compile Include="..\..\src\WinSmtpRelay.Service\DataLocation\LegacyDataMigrator.cs" Link="Linked\LegacyDataMigrator.cs" />
+    <Compile Include="..\..\src\WinSmtpRelay.Service\Update\UpdatePackageIdentity.cs" Link="Linked\UpdatePackageIdentity.cs" />
+    <Compile Include="..\..\setup\WinSmtpRelay.Setup.CustomActions\InstallerInput.cs" Link="Linked\InstallerInput.cs" />
+    <Compile Include="..\..\setup\WinSmtpRelay.Setup.CustomActions\UpdateTaskDefinition.cs" Link="Linked\UpdateTaskDefinition.cs" />
+  </ItemGroup>
+
 </Project>
