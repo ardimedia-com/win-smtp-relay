@@ -326,4 +326,62 @@ public class UpdateTaskDefinitionTests
             Assert.Contains("'" + thumbprint + "'", script);
         Assert.IsTrue(script.All(c => c < 128), "Windows PowerShell 5.1 script must be ASCII");
     }
+
+    /// <summary>
+    /// build80's updater could not read any package: the staged path came from Join-Path, PowerShell wraps cmdlet
+    /// output in a PSObject, and IDispatch rejects that with DISP_E_TYPEMISMATCH. Runs the script's own Invoke-Com in
+    /// Windows PowerShell 5.1 against a package database built from a Join-Path path, exactly as the SYSTEM task does.
+    /// </summary>
+    [TestMethod]
+    [TestCategory("Integration")]
+    public void TheUpdaterReadsAPackageWhosePathComesFromJoinPath()
+    {
+        if (!OperatingSystem.IsWindows())
+            Assert.Inconclusive("Windows Installer automation only exists on Windows.");
+
+        var function = System.Text.RegularExpressions.Regex.Match(Script.Replace("\r\n", "\n"),
+            @"^function Invoke-Com\b.*?^}\n", System.Text.RegularExpressions.RegexOptions.Multiline |
+            System.Text.RegularExpressions.RegexOptions.Singleline).Value;
+        Assert.IsFalse(string.IsNullOrEmpty(function), "the script defines Invoke-Com");
+
+        var folder = Path.Combine(Path.GetTempPath(), "wsr-updater-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var probe = Path.Combine(folder, "probe.ps1");
+            File.WriteAllText(probe, "$ErrorActionPreference = 'Stop'\n" + function +
+                "$path = Join-Path '" + folder + "' 'staged.msi'\n" +
+                "$installer = New-Object -ComObject WindowsInstaller.Installer\n" +
+                "$db = Invoke-Com $installer 'OpenDatabase' 'InvokeMethod' @($path, 3)\n" +
+                "foreach ($sql in @('CREATE TABLE `Property` (`Property` CHAR(72) NOT NULL, `Value` LONGCHAR NOT NULL PRIMARY KEY `Property`)',\n" +
+                "                   \"INSERT INTO `Property` (`Property`, `Value`) VALUES ('ProductVersion', '1.0.81')\")) {\n" +
+                "    $v = Invoke-Com $db 'OpenView' 'InvokeMethod' @($sql); Invoke-Com $v 'Execute' 'InvokeMethod' $null | Out-Null; Invoke-Com $v 'Close' 'InvokeMethod' $null | Out-Null\n" +
+                "}\n" +
+                "Invoke-Com $db 'Commit' 'InvokeMethod' $null | Out-Null\n" +
+                "$v =Invoke-Com $db 'OpenView' 'InvokeMethod' @(\"SELECT `Value` FROM `Property` WHERE `Property`='ProductVersion'\")\n" +
+                "Invoke-Com $v 'Execute' 'InvokeMethod' $null | Out-Null\n" +
+                "$r = Invoke-Com $v 'Fetch' 'InvokeMethod' $null\n" +
+                "'VERSION=' + (Invoke-Com $r 'StringData' 'GetProperty' @(1))\n" +
+                "Invoke-Com $v 'Close' 'InvokeMethod' $null | Out-Null\n" +
+                "[void][Runtime.InteropServices.Marshal]::ReleaseComObject($db)\n", Encoding.ASCII);
+
+            var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe",
+                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + probe + "\"")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            using var process = System.Diagnostics.Process.Start(psi)!;
+            var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            Assert.Contains("VERSION=1.0.81", output, output);
+            Assert.DoesNotContain("DISP_E_TYPEMISMATCH", output);
+        }
+        finally
+        {
+            try { Directory.Delete(folder, recursive: true); } catch (IOException) { }
+        }
+    }
 }

@@ -35,7 +35,7 @@ $EventSource = 'WinSmtpRelay.Service'
 $base = Join-Path $env:ProgramData 'Ardimedia\WinSmtpRelay'
 $pending = Join-Path $base 'updates\pending.msi'
 $work = Join-Path $base 'updater-work'
-$staged = Join-Path $work 'staged.msi'
+$staged = [string](Join-Path $work 'staged.msi')
 $log = Join-Path $work 'update.log'
 $msiLog = Join-Path $work 'msiexec.log'
 
@@ -61,6 +61,11 @@ function ConvertTo-MsiVersion([string]$Text) {
 }
 
 function Invoke-Com($Object, [string]$Member, [string]$Kind, $Arguments) {
+    # Cmdlet output (Join-Path, ...) arrives wrapped in a PSObject, which IDispatch rejects with DISP_E_TYPEMISMATCH
+    # (build80 could not read any package for that reason). Hand COM the plain .NET values.
+    if ($null -ne $Arguments) {
+        $Arguments = [object[]]@($Arguments | ForEach-Object { if ($null -eq $_) { $null } else { $_.PSObject.BaseObject } })
+    }
     return $Object.GetType().InvokeMember($Member, $Kind, $null, $Object, $Arguments)
 }
 

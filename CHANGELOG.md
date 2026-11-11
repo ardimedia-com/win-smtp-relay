@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- «Install on this server» never installed anything since build80: the SYSTEM updater could not read the downloaded
+  package («Type mismatch», `update.log`), because PowerShell hands a path built with `Join-Path` to Windows Installer
+  as a wrapped object. The updater now passes plain values. A host on build80 or build81 still carries the broken
+  updater, so install this release once by hand (run the MSI as administrator); from then on the button works again.
+
 ## [1.0.0-beta1-build81] - 2026-11-11
 
 ### Fixed
