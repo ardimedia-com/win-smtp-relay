@@ -20,18 +20,19 @@ public class ActivityHub : Hub
         await base.OnConnectedAsync();
     }
 
-    /// <summary>The SignalR group name for a connection, derived from its tenant claims.</summary>
+    /// <summary>
+    /// The SignalR group name for a connection, derived from its membership claims exactly like the data scope
+    /// (<see cref="RelayAccess.CurrentScopeTenant"/>): a host admin in host scope joins <see cref="AllTenantsGroup"/>,
+    /// anyone acting in a tenant joins that tenant's group — only with a membership that may view it — and a
+    /// principal without a usable scope joins a group that receives nothing.
+    /// </summary>
     public static string ResolveGroup(ClaimsPrincipal? user)
     {
-        if (user?.HasClaim(RelayClaimTypes.IsHostAdmin, "true") == true)
-        {
-            return int.TryParse(user.FindFirst(RelayClaimTypes.ActiveTenant)?.Value, out var active)
-                ? TenantGroup(active)
-                : AllTenantsGroup; // host admin, all-tenants scope
-        }
-        return int.TryParse(user?.FindFirst(RelayClaimTypes.TenantId)?.Value, out var tenantId)
-            ? TenantGroup(tenantId)
-            : TenantGroup(-1); // authenticated but no tenant → a group that receives nothing
+        if (user?.Identity?.IsAuthenticated != true)
+            return TenantGroup(-1);
+        if (RelayAccess.CurrentScopeTenant(user) is int tenantId)
+            return RelayAccess.CanView(user) ? TenantGroup(tenantId) : TenantGroup(-1);
+        return RelayAccess.HasHostMembership(user) ? AllTenantsGroup : TenantGroup(-1);
     }
 
     public static string TenantGroup(int tenantId) => $"tenant:{tenantId}";
@@ -71,7 +72,9 @@ public class ActivityNotifier(IHubContext<ActivityHub> hub, IActivityFeed feed) 
     {
         feed.Publish(new ActivityEvent(ActivityKind.SmtpConnection, null, DateTimeOffset.UtcNow,
             SourceIp: sourceIp, EventType: eventType));
-        await hub.Clients.All.SendAsync("SmtpConnection", new
+        // A connection is not attributed to a tenant yet, and its client IP may belong to any tenant's devices —
+        // host administrators only, never every connected tenant user.
+        await hub.Clients.Group(ActivityHub.AllTenantsGroup).SendAsync("SmtpConnection", new
         {
             SourceIp = sourceIp,
             EventType = eventType,

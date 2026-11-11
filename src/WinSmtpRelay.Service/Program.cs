@@ -6,6 +6,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.HostFiltering;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using WinSmtpRelay.AdminApi;
 using WinSmtpRelay.AdminApi.Auth;
@@ -74,6 +77,26 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 WinSmtpRelay.DataLocation.RelayDataDirectory.AddLocalSettings(builder.Configuration, dataDirectory, builder.Environment.EnvironmentName);
 // ===== END data location =====
 
+// ---- Admin hardening: explicit environment (area C) ------------------------------------------------------------
+// The environment selects real resources (overlay config, HTTPS/dev endpoints, detailed errors). An unset one
+// silently means Production to the framework, so refuse to start instead. The installed service passes
+// --environment Production; dotnet run / Visual Studio set ASPNETCORE_ENVIRONMENT through launchSettings.json.
+if (string.IsNullOrWhiteSpace(builder.Configuration[Microsoft.Extensions.Hosting.HostDefaults.EnvironmentKey]))
+{
+    using var envLoggerFactory = LoggerFactory.Create(b =>
+    {
+        b.AddConsole();
+        if (OperatingSystem.IsWindows())
+            b.AddEventLog(s => s.SourceName = "WinSmtpRelay.Service");
+    });
+    envLoggerFactory.CreateLogger("WinSmtpRelay.Startup").LogError(
+        "No environment set. Start the service with --environment Production (the installer does), or set "
+        + "ASPNETCORE_ENVIRONMENT / DOTNET_ENVIRONMENT to Development, Test or Production. Refusing to start.");
+    Environment.ExitCode = 1;
+    return;
+}
+// ---- end: explicit environment ----------------------------------------------------------------------------------
+
 builder.Services.AddWindowsService(options =>
 {
     options.ServiceName = "WinSmtpRelay";
@@ -134,6 +157,21 @@ var adminUiConfig = builder.Configuration.GetSection(AdminUiOptions.SectionName)
 var bindsToLoopback = System.Net.IPAddress.TryParse(adminUiConfig.BindAddress, out var adminBindIp)
     && System.Net.IPAddress.IsLoopback(adminBindIp);
 
+// ---- Admin hardening: public URL + allowed hosts (area C) -------------------------------------------------------
+// Mailed links (sign-in link, password reset, signup confirmation) are built from AdminUi:PublicBaseUrl, never
+// from the Host header. Without AllowedHosts in the configuration the admin plane answers only loopback, this
+// machine's names and addresses, and the PublicBaseUrl host — a forged Host header gets 400 before any page runs.
+if (!string.IsNullOrWhiteSpace(adminUiConfig.PublicBaseUrl) && !PublicLinks.IsValidBaseUrl(adminUiConfig.PublicBaseUrl))
+    throw new InvalidOperationException(
+        $"AdminUi:PublicBaseUrl '{adminUiConfig.PublicBaseUrl}' is not an absolute http(s) URL, e.g. https://relay.example.com:8025/.");
+var allowedHostsConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["AllowedHosts"]);
+if (!allowedHostsConfigured)
+{
+    var defaultHosts = PublicLinks.DefaultAllowedHosts(adminUiConfig);
+    builder.Services.Configure<HostFilteringOptions>(o => o.AllowedHosts = [.. defaultHosts]);
+}
+// ---- end: public URL + allowed hosts ----------------------------------------------------------------------------
+
 // Development convenience: in the Development environment with a loopback bind, ALSO expose a plain-HTTP
 // endpoint on the next port (Port+1, 127.0.0.1 only) alongside HTTPS. Browsers disable the password
 // manager (autofill/save) on the self-signed-HTTPS warning page, so this gives a localhost HTTP URL where
@@ -193,8 +231,13 @@ if (adminUiConfig.Enabled)
     });
 
     // Admin authentication/authorization (cookie + API key) and tenant-aware policies.
+    // First-run setup token: in Development the developer's own account may read the token file too (no elevation).
+    builder.Services.AddSingleton(new WinSmtpRelay.Storage.Identity.InitialSetupToken(
+        grantCurrentUserRead: builder.Environment.IsDevelopment()));
     builder.Services.AddRelayAdminAuth();
     builder.Services.AddRelayAdminUiAuth();
+    // IP-partitioned throttle in front of every sign-in form post and the passkey sign-in (M15).
+    builder.Services.AddRelaySignInRateLimiting(adminUiConfig.SignInRequestsPerIpPerMinute);
 
     // (Deliverability DNS checks, the local auth self-test, public-suffix lookup, and the public DNS
     // resolver are registered by AddRelaySecurity above — engine services, not UI-gated.)
@@ -300,6 +343,23 @@ if (adminUiConfig.Enabled && adminUiConfig.UseHttps)
 
 if (adminUiConfig.Enabled)
 {
+    // ---- Admin hardening: browser headers, throttling, host check (area C) ----
+    app.UseRelaySecurityHeaders();
+    if (adminHttpsActive && !app.Environment.IsDevelopment())
+        app.UseHsts();
+    app.UseRateLimiter();
+    if (!app.Environment.IsDevelopment())
+    {
+        var effectiveHosts = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<HostFilteringOptions>>().Value.AllowedHosts;
+        if (effectiveHosts.Count == 0 || effectiveHosts.Contains("*"))
+            app.Logger.LogWarning(
+                "AllowedHosts is '*': the admin plane answers any Host header. Set AdminUi:PublicBaseUrl (or AllowedHosts) "
+                + "to the names the admin UI is reached by; until then no sign-in or reset link is mailed.");
+        else
+            app.Logger.LogInformation("Admin UI answers the host names {AllowedHosts}", string.Join(", ", effectiveHosts));
+    }
+    // ---- end: admin hardening ----
+
     app.UseAuthentication();
     app.UseAuthorization();
     app.UseRelayTenantContext();
@@ -313,14 +373,18 @@ if (adminUiConfig.Enabled)
 
     // Machine-readable OpenAPI document for the REST API at /openapi/v1.json (the API shape only — the
     // endpoints still enforce API-key authentication). Point Scalar/Swagger or a client generator at it.
-    app.MapOpenApi();
+    // Only for signed-in admins / valid API keys: the document maps the whole management surface.
+    app.MapOpenApi().RequireAuthorization(AuthorizationPolicies.AdminView);
 
     // SignalR hub for live activity — authenticated admins only
     app.MapHub<ActivityHub>("/hubs/activity").RequireAuthorization();
 
     // Cookie sign-out endpoint (posted from the admin layout)
-    app.MapPost("/account/logout", async (SignInManager<AdminUser> signInManager) =>
+    // Antiforgery-checked (the layout's form carries the token): a cross-site post cannot sign the admin out.
+    app.MapPost("/account/logout", async (HttpContext ctx, IAntiforgery antiforgery, SignInManager<AdminUser> signInManager) =>
     {
+        if (!await antiforgery.IsRequestValidAsync(ctx))
+            return Results.BadRequest();
         await signInManager.SignOutAsync();
         return Results.LocalRedirect("/account/login");
     });
@@ -352,7 +416,9 @@ if (adminUiConfig.Enabled)
             return Results.LocalRedirect("/");
         }
 
-        await ctx.SignInAsync(IdentityConstants.ApplicationScheme, new ClaimsPrincipal(identity));
+        // Re-issue with the persistence the admin chose at sign-in («Keep me signed in»), not a session cookie.
+        await ctx.SignInAsync(IdentityConstants.ApplicationScheme, new ClaimsPrincipal(identity),
+            await CurrentCookiePropertiesAsync(ctx));
         return Results.LocalRedirect("/");
     }).RequireAuthorization();
 
@@ -371,6 +437,9 @@ if (adminUiConfig.Enabled)
         await memberships.GrantAsync(user.Id, tenantId, RelayRoles.TenantAdmin, user.Id, breakGlass: true);
         await audit.WriteAsync(AdminAuditActions.BreakGlassEntered, user.Id, user.Email,
             targetUserId: user.Id, tenantId: tenantId, detail: reason);
+        // A changed role rotates the stamp in the store; issue the new cookie with a fresh stamp of our own so
+        // this session survives the next validation.
+        await users.UpdateSecurityStampAsync(user);
 
         var principal = await claimsFactory.CreateAsync(user);
         if (principal.Identity is ClaimsIdentity id)
@@ -379,7 +448,7 @@ if (adminUiConfig.Enabled)
                 id.RemoveClaim(c);
             id.AddClaim(new Claim(RelayClaimTypes.ActiveTenant, tenantId.ToString()));
         }
-        await ctx.SignInAsync(IdentityConstants.ApplicationScheme, principal);
+        await ctx.SignInAsync(IdentityConstants.ApplicationScheme, principal, await CurrentCookiePropertiesAsync(ctx));
         return Results.LocalRedirect("/");
     }).RequireAuthorization(AuthorizationPolicies.HostAdmin);
 
@@ -425,7 +494,7 @@ if (adminUiConfig.Enabled)
     {
         var optionsJson = await sm.MakePasskeyRequestOptionsAsync(user: null);
         return Results.Content(optionsJson, "application/json");
-    }).AllowAnonymous();
+    }).AllowAnonymous().RequireRateLimiting(RelayRateLimitPolicies.SignIn);
 
     // Verify the assertion, apply the same gates as the other sign-in paths, then sign in (anonymous).
     app.MapPost("/account/passkey/signin", async (HttpContext ctx, UserManager<AdminUser> um, SignInManager<AdminUser> sm,
@@ -434,7 +503,10 @@ if (adminUiConfig.Enabled)
         var credentialJson = await new StreamReader(ctx.Request.Body).ReadToEndAsync();
         var assertion = await sm.PerformPasskeyAssertionAsync(credentialJson);
         if (!assertion.Succeeded)
+        {
+            await audit.WriteAsync(AdminAuditActions.SignInFailed, (int?)null, null, detail: "passkey assertion failed");
             return Results.Unauthorized();
+        }
 
         var user = assertion.User;
         // Same gates as password / magic-link sign-in: locked-out (e.g. pending signup) and no-usable-scope
@@ -449,7 +521,7 @@ if (adminUiConfig.Enabled)
         await sm.SignInAsync(user, isPersistent: false);
         await audit.WriteAsync(AdminAuditActions.SignInSucceeded, user.Id, user.Email, targetUserId: user.Id, detail: "passkey");
         return Results.Ok();
-    }).AllowAnonymous();
+    }).AllowAnonymous().RequireRateLimiting(RelayRateLimitPolicies.SignIn);
 
     // Remove one of your own passkeys (authenticated).
     app.MapPost("/account/passkey/remove", async (HttpContext ctx, [FromForm] string credentialId, UserManager<AdminUser> um, IAdminAuditService audit) =>
@@ -457,7 +529,15 @@ if (adminUiConfig.Enabled)
         var user = await um.GetUserAsync(ctx.User);
         if (user is not null && !string.IsNullOrEmpty(credentialId))
         {
-            var id = Convert.FromBase64String(credentialId.Replace('-', '+').Replace('_', '/').PadRight(credentialId.Length + (4 - credentialId.Length % 4) % 4, '='));
+            byte[] id;
+            try
+            {
+                id = System.Buffers.Text.Base64Url.DecodeFromChars(credentialId);
+            }
+            catch (FormatException)
+            {
+                return Results.BadRequest("Invalid passkey id.");
+            }
             await um.RemovePasskeyAsync(user, id);
             await audit.WriteAsync(AdminAuditActions.PasskeyRemoved, user.Id, user.Email, targetUserId: user.Id);
         }
@@ -493,3 +573,11 @@ if (adminUiConfig.Enabled)
 }
 
 await app.RunAsync();
+
+// The cookie properties of the current admin session — re-used when the tenant switcher or break-glass re-issues the
+// cookie, so a «Keep me signed in» (persistent) session stays persistent and a session cookie stays one.
+static async Task<AuthenticationProperties> CurrentCookiePropertiesAsync(HttpContext ctx)
+{
+    var current = await ctx.AuthenticateAsync(IdentityConstants.ApplicationScheme);
+    return new AuthenticationProperties { IsPersistent = current.Properties?.IsPersistent ?? false };
+}

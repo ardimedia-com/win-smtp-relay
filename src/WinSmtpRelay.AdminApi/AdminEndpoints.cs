@@ -37,6 +37,33 @@ public static class AdminEndpoints
         // ApiScopeMetadata; the filter fails closed for unclassified endpoints.
         group.AddEndpointFilter(ApiKeyScopeFilter.InvokeAsync);
 
+        // Expected failures of the services are client errors, not 500s: a refused state change (409), a missing
+        // row (404), an invalid argument (400), a write that collides with existing data (409). The messages of
+        // the first three are operator-facing by convention; a database error's text is never echoed.
+        group.AddEndpointFilter(async (ctx, next) =>
+        {
+            try
+            {
+                return await next(ctx);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { Error = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { Error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { Error = ex.Message });
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { Error = "The change conflicts with existing data (a duplicate, or the row is still referenced)." });
+            }
+        });
+
         // Tenant writes (groups marked TenantWriteMetadata) from a host-scope caller that named no tenant
         // (header X-Relay-Tenant): narrowed to the only tenant, or refused with the tenant list when there
         // are several — tenant-owned rows default to the Default tenant and would land there silently.
@@ -140,6 +167,7 @@ public static class AdminEndpoints
         queue.MapGet("/messages", async (IMessageQueue q, CancellationToken ct,
             int limit = 50) =>
         {
+            limit = Math.Clamp(limit, 1, MaxPageSize);
             var messages = await q.GetPendingAsync(limit, ct);
             return Results.Ok(messages.Select(m => new MessageSummary(
                 m.Id, m.MessageId, m.Sender, m.Recipients, m.SizeBytes,
@@ -164,16 +192,23 @@ public static class AdminEndpoints
 
         // The raw message body is the most sensitive data the relay holds (customer mail content).
         // AdminFull is required explicitly — the group convention only elevates non-GET endpoints —
-        // and an API key additionally needs the explicit messages:body scope (never implied).
-        queue.MapGet("/messages/{id:long}/body", async (long id, RelayDbContext db, CancellationToken ct) =>
+        // and an API key additionally needs the explicit messages:body scope (never implied). On top, the
+        // consent rule of the UI applies (T1081): only a tenant-admin membership in the message's tenant — or a
+        // tenant-admin key of that tenant — may read it; a host admin in host scope or a host key narrowed with
+        // X-Relay-Tenant may not. Every read is audited (IMessageBodyAccess).
+        queue.MapGet("/messages/{id:long}/body", async (long id, IMessageBodyAccess bodies, CancellationToken ct) =>
         {
-            var body = await db.QueuedMessages.AsNoTracking()
-                .Where(m => m.Id == id)
-                .Select(m => m.RawMessage)
-                .FirstOrDefaultAsync(ct);
-            return body is null or { Length: 0 }
-                ? Results.NotFound()
-                : Results.Bytes(body, "message/rfc822");
+            var read = await bodies.ReadAsync(id, "api download", ct);
+            return read.Status switch
+            {
+                MessageBodyReadStatus.Ok => Results.Bytes(read.Body!, "message/rfc822"),
+                MessageBodyReadStatus.Forbidden => Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                    title: "No consent for this tenant's mail",
+                    detail: "Reading a message body needs a tenant-admin membership in the message's tenant (in the UI: "
+                          + "a granted membership or break-glass), or a tenant-admin API key of that tenant. A host "
+                          + "membership or host-level key is not enough."),
+                _ => Results.NotFound(),
+            };
         })
         .RequireAuthorization(AuthorizationPolicies.AdminFull)
         .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Messages, explicitScope: ApiKeyScopes.MessagesBody));
@@ -210,6 +245,10 @@ public static class AdminEndpoints
 
         users.MapPost("/", async (CreateUserRequest req, IUserService svc, CancellationToken ct) =>
         {
+            if (AdminRequestValidation.Required(req.Username, "Username") is { } userError)
+                return Results.BadRequest(new { Error = userError });
+            if (string.IsNullOrEmpty(req.Password) || AdminRequestValidation.NoLineBreaks(req.Password, "Password") is not null)
+                return Results.BadRequest(new { Error = "Password is required and must not contain control characters." });
             var existing = await svc.GetByUsernameAsync(req.Username, ct);
             if (existing is not null)
                 return Results.Conflict(new { Error = $"User '{req.Username}' already exists" });
@@ -222,6 +261,8 @@ public static class AdminEndpoints
         {
             if (!await db.RelayUsers.AsNoTracking().AnyAsync(u => u.Id == id, ct))
                 return Results.NotFound();
+            if (req.RateLimitPerMinute is < 0 || req.RateLimitPerDay is < 0)
+                return Results.BadRequest(new { Error = "Rate limits must not be negative." });
 
             // Through the service (not raw DbContext) so the mutation is audited at the source.
             await svc.UpdateUserAsync(id, req.IsEnabled, req.AllowedSenderAddresses,
@@ -230,8 +271,10 @@ public static class AdminEndpoints
             return Results.Ok(new { Message = "User updated" });
         });
 
-        users.MapDelete("/{id:int}", async (int id, IUserService svc, CancellationToken ct) =>
+        users.MapDelete("/{id:int}", async (int id, IUserService svc, RelayDbContext db, CancellationToken ct) =>
         {
+            if (!await db.RelayUsers.AsNoTracking().AnyAsync(u => u.Id == id, ct))
+                return Results.NotFound();
             await svc.DeleteUserAsync(id, ct);
             return Results.Ok(new { Message = "User deleted" });
         });
@@ -242,8 +285,11 @@ public static class AdminEndpoints
         // DKIM key generation/management deals with host-level private-key files — host admins only.
         group.MapPost("/dkim/generate", (DkimGenerateRequest req) =>
         {
-            var (privateKey, publicKey, dnsTxt) = DkimKeyGenerator.GenerateKeyPair(
-                req.Domain, req.Selector, req.KeySize > 0 ? req.KeySize : 2048);
+            var keySize = req.KeySize > 0 ? req.KeySize : 2048;
+            if ((AdminRequestValidation.HostName(req.Domain, "Domain") ?? AdminRequestValidation.Selector(req.Selector)
+                ?? (DkimKeySizes.Contains(keySize) ? null : "KeySize must be 2048, 3072 or 4096.")) is { } error)
+                return Results.BadRequest(new { Error = error });
+            var (privateKey, publicKey, dnsTxt) = DkimKeyGenerator.GenerateKeyPair(req.Domain.Trim(), req.Selector.Trim(), keySize);
 
             return Results.Ok(new
             {
@@ -268,6 +314,8 @@ public static class AdminEndpoints
         keys.MapPost("/", async (GenerateDkimKeyRequest req, IDkimDomainService dkim,
             IAcceptedSenderDomainService senders, CancellationToken ct) =>
         {
+            if (req.KeySize is int size && !DkimKeySizes.Contains(size))
+                return Results.BadRequest(new { Error = "KeySize must be 2048, 3072 or 4096." });
             try
             {
                 var created = await DkimKeyOperations.GenerateAsync(req.Domain, req.Selector, req.KeySize, req.Replace, dkim, senders, ct);
@@ -306,6 +354,9 @@ public static class AdminEndpoints
         logs.MapGet("/", async (RelayDbContext db, CancellationToken ct,
             long? messageId = null, int limit = 50, int offset = 0) =>
         {
+            if (offset < 0)
+                return Results.BadRequest(new { Error = "offset must not be negative." });
+            limit = Math.Clamp(limit, 1, MaxPageSize);
             var query = db.DeliveryLogs.AsNoTracking().AsQueryable();
             if (messageId.HasValue)
                 query = query.Where(l => l.QueuedMessageId == messageId.Value);
@@ -358,6 +409,8 @@ public static class AdminEndpoints
 
         ep.MapPost("/", async (CreateTenantRequest req, ITenantService svc, CancellationToken ct) =>
         {
+            if ((AdminRequestValidation.Required(req.Name, "Name") ?? AdminRequestValidation.Required(req.Slug, "Slug")) is { } error)
+                return Results.BadRequest(new { Error = error });
             try
             {
                 var created = await svc.CreateAsync(req.Name, req.Slug, ct);
@@ -371,13 +424,19 @@ public static class AdminEndpoints
 
         ep.MapPut("/{id:int}", async (int id, UpdateTenantRequest req, ITenantService svc, CancellationToken ct) =>
         {
-            await svc.UpdateAsync(id, req.Name, req.IsEnabled, ct);
+            if (AdminRequestValidation.Required(req.Name, "Name") is { } error)
+                return Results.BadRequest(new { Error = error });
+            if (await svc.GetByIdAsync(id, ct) is null)
+                return Results.NotFound();
+            await svc.UpdateAsync(id, req.Name.Trim(), req.IsEnabled, ct);
             return Results.Ok(new { Message = "Tenant updated" });
         });
 
         // Destructive: removes the tenant and ALL its data. Host-only (group is HostAdmin-gated).
         ep.MapDelete("/{id:int}", async (int id, ITenantService svc, CancellationToken ct) =>
         {
+            if (await svc.GetByIdAsync(id, ct) is null)
+                return Results.NotFound();
             try
             {
                 await svc.PurgeAndDeleteAsync(id, ct);
@@ -404,12 +463,19 @@ public static class AdminEndpoints
                 k.Id, k.TenantId, k.Name, k.KeyPrefix, k.Role, k.Scopes, k.IsEnabled, k.CreatedUtc, k.ExpiresUtc, k.LastUsedUtc)));
         });
 
-        ep.MapPost("/", async (CreateApiKeyRequest req, IApiKeyService svc, ICurrentTenant tenant, CancellationToken ct) =>
+        ep.MapPost("/", async (CreateApiKeyRequest req, IApiKeyService svc, ICurrentTenant tenant, HttpContext http, CancellationToken ct) =>
         {
             if (!RelayRoles.All.Contains(req.Role))
                 return Results.BadRequest(new { Error = "Invalid role" });
+            if (AdminRequestValidation.Required(req.Name, "Name") is { } nameError)
+                return Results.BadRequest(new { Error = nameError });
             if (ValidateScopes(req.Scopes) is { } scopeError)
                 return Results.BadRequest(new { Error = scopeError });
+            if (req.ExpiresUtc is { } expires && expires <= DateTimeOffset.UtcNow)
+                return Results.BadRequest(new { Error = "ExpiresUtc must lie in the future." });
+            // A key may only mint keys within its own power: never a higher role, never a scope it lacks.
+            if (ApiKeyCeiling.Check(http.User, req.Role, req.Scopes) is { } ceilingError)
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Beyond this key's own power", detail: ceilingError);
 
             int? tenantId;
             if (tenant.FilterEnabled)
@@ -429,7 +495,7 @@ public static class AdminEndpoints
         });
 
         // Scopes are the only mutable part of a key (see IApiKeyService.UpdateScopesAsync).
-        ep.MapPut("/{id:int}", async (int id, UpdateApiKeyRequest req, IApiKeyService svc, ICurrentTenant tenant, RelayDbContext db, CancellationToken ct) =>
+        ep.MapPut("/{id:int}", async (int id, UpdateApiKeyRequest req, IApiKeyService svc, ICurrentTenant tenant, RelayDbContext db, HttpContext http, CancellationToken ct) =>
         {
             if (ValidateScopes(req.Scopes) is { } scopeError)
                 return Results.BadRequest(new { Error = scopeError });
@@ -440,6 +506,8 @@ public static class AdminEndpoints
             // Out-of-scope keys are invisible to a tenant-scoped admin.
             if (tenant.FilterEnabled && key.TenantId != tenant.FilterTenantId)
                 return Results.NotFound();
+            if (ApiKeyCeiling.Check(http.User, key.Role, req.Scopes) is { } ceilingError)
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Beyond this key's own power", detail: ceilingError);
 
             await svc.UpdateScopesAsync(id, req.Scopes, ct);
             return Results.Ok(new { Message = "API key scopes updated" });
@@ -559,8 +627,9 @@ public static class AdminEndpoints
         // (accept domain / allow IP / ignore) stay UI-only for now — they compose config changes with
         // recorded operator context.
         group.MapGet("/rejections", async (RelayDbContext db, ICurrentTenant tenant, CancellationToken ct,
-            bool includeIgnored = false) =>
+            bool includeIgnored = false, int limit = 200) =>
         {
+            limit = Math.Clamp(limit, 1, MaxPageSize);
             // RejectedSubmission is deliberately NOT ITenantOwned (a row whose tenant attribution
             // FAILED has no tenant), so the tenant split must be applied by hand — same as the UI page.
             var query = db.RejectedSubmissions.AsNoTracking();
@@ -569,9 +638,9 @@ public static class AdminEndpoints
             if (!includeIgnored)
                 query = query.Where(r => r.IgnoredUtc == null);
 
-            var rows = await query.ToListAsync(ct);
+            // Ordered and bounded in SQL (DateTimeOffset is stored as a sortable ISO string) — never the whole table.
+            var rows = await query.OrderByDescending(r => r.LastSeenUtc).Take(limit).ToListAsync(ct);
             return Results.Ok(rows
-                .OrderByDescending(r => r.LastSeenUtc)
                 .Select(r => new RejectionSummary(
                     r.Id, r.TenantId, r.ClientIp, r.Reason.ToString(), r.Reason.Describe(), r.ReplyCode,
                     r.SenderDomain, r.Detail, r.IsTrustedSource, r.Reason.IsTemporary(), r.Count,
@@ -605,21 +674,29 @@ public static class AdminEndpoints
         ep.MapGet("/", async (IReceiveConnectorService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
 
-        ep.MapPost("/", async (ReceiveConnector connector, IReceiveConnectorService svc, CancellationToken ct) =>
+        ep.MapPost("/", async (ReceiveConnectorRequest req, IReceiveConnectorService svc, CancellationToken ct) =>
         {
-            var created = await svc.CreateAsync(connector, ct);
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            var created = await svc.CreateAsync(req.ToEntity(), ct);
             return Results.Created($"/api/connectors/receive/{created.Id}", created);
         });
 
-        ep.MapPut("/{id:int}", async (int id, ReceiveConnector connector, IReceiveConnectorService svc, CancellationToken ct) =>
+        ep.MapPut("/{id:int}", async (int id, ReceiveConnectorRequest req, IReceiveConnectorService svc, CancellationToken ct) =>
         {
-            connector.Id = id;
-            await svc.UpdateAsync(connector, ct);
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            var existing = await svc.GetByIdAsync(id, ct);
+            if (existing is null)
+                return Results.NotFound();
+            await svc.UpdateAsync(req.Apply(existing), ct);
             return Results.Ok(new { Message = "Receive connector updated" });
         });
 
         ep.MapDelete("/{id:int}", async (int id, IReceiveConnectorService svc, CancellationToken ct) =>
         {
+            if (await svc.GetByIdAsync(id, ct) is null)
+                return Results.NotFound();
             await svc.DeleteAsync(id, ct);
             return Results.Ok(new { Message = "Receive connector deleted" });
         });
@@ -634,15 +711,21 @@ public static class AdminEndpoints
 
         ep.MapPost("/", async (CreateAcceptedDomainRequest req, IAcceptedDomainService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
-            if (await svc.ExistsAsync(req.Domain, ct))
-                return Results.Conflict(new { Error = $"Domain '{req.Domain}' already exists" });
-            var created = await svc.CreateAsync(req.Domain, ct);
+            if (AdminRequestValidation.HostName(req.Domain, "Domain") is { } error)
+                return Results.BadRequest(new { Error = error });
+            var domain = req.Domain.Trim().TrimEnd('.').ToLowerInvariant();
+            if (await svc.ExistsAsync(domain, ct))
+                return Results.Conflict(new { Error = $"Domain '{domain}' already exists" });
+            var created = await svc.CreateAsync(domain, ct);
             cache.Invalidate();
             return Results.Created($"/api/domains/accepted/{created.Id}", created);
         });
 
-        ep.MapDelete("/{id:int}", async (int id, IAcceptedDomainService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        ep.MapDelete("/{id:int}", async (int id, IAcceptedDomainService svc, IRuntimeConfigCache cache, RelayDbContext db, CancellationToken ct) =>
         {
+            // The tenant query filter hides other tenants' rows, so this doubles as authorization.
+            if (!await db.AcceptedDomains.AsNoTracking().AnyAsync(d => d.Id == id, ct))
+                return Results.NotFound();
             await svc.DeleteAsync(id, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "Accepted domain deleted" });
@@ -658,15 +741,20 @@ public static class AdminEndpoints
 
         ep.MapPost("/", async (CreateAcceptedSenderDomainRequest req, IAcceptedSenderDomainService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
-            if (await svc.ExistsAsync(req.Domain, ct))
-                return Results.Conflict(new { Error = $"Domain '{req.Domain}' already exists" });
-            var created = await svc.CreateAsync(req.Domain, ct);
+            if (AdminRequestValidation.HostName(req.Domain, "Domain") is { } error)
+                return Results.BadRequest(new { Error = error });
+            var domain = req.Domain.Trim().TrimEnd('.').ToLowerInvariant();
+            if (await svc.ExistsAsync(domain, ct))
+                return Results.Conflict(new { Error = $"Domain '{domain}' already exists" });
+            var created = await svc.CreateAsync(domain, ct);
             cache.Invalidate();
             return Results.Created($"/api/domains/accepted-sender/{created.Id}", created);
         });
 
-        ep.MapDelete("/{id:int}", async (int id, IAcceptedSenderDomainService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        ep.MapDelete("/{id:int}", async (int id, IAcceptedSenderDomainService svc, IRuntimeConfigCache cache, RelayDbContext db, CancellationToken ct) =>
         {
+            if (!await db.AcceptedSenderDomains.AsNoTracking().AnyAsync(d => d.Id == id, ct))
+                return Results.NotFound();
             await svc.DeleteAsync(id, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "Accepted sender domain deleted" });
@@ -680,23 +768,32 @@ public static class AdminEndpoints
         ep.MapGet("/", async (IIpAccessRuleService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAllAsync(ct)));
 
-        ep.MapPost("/", async (IpAccessRule rule, IIpAccessRuleService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        ep.MapPost("/", async (IpAccessRuleRequest req, IIpAccessRuleService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
-            var created = await svc.CreateAsync(rule, ct);
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            var created = await svc.CreateAsync(req.ToEntity(), ct);
             cache.Invalidate();
             return Results.Created($"/api/ip-rules/{created.Id}", created);
         });
 
-        ep.MapPut("/{id:int}", async (int id, IpAccessRule rule, IIpAccessRuleService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        ep.MapPut("/{id:int}", async (int id, IpAccessRuleRequest req, IIpAccessRuleService svc, IRuntimeConfigCache cache, RelayDbContext db, CancellationToken ct) =>
         {
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            if (!await db.IpAccessRules.AsNoTracking().AnyAsync(r => r.Id == id, ct))
+                return Results.NotFound();
+            var rule = req.ToEntity();
             rule.Id = id;
             await svc.UpdateAsync(rule, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "IP access rule updated" });
         });
 
-        ep.MapDelete("/{id:int}", async (int id, IIpAccessRuleService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        ep.MapDelete("/{id:int}", async (int id, IIpAccessRuleService svc, IRuntimeConfigCache cache, RelayDbContext db, CancellationToken ct) =>
         {
+            if (!await db.IpAccessRules.AsNoTracking().AnyAsync(r => r.Id == id, ct))
+                return Results.NotFound();
             await svc.DeleteAsync(id, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "IP access rule deleted" });
@@ -710,15 +807,26 @@ public static class AdminEndpoints
         ep.MapGet("/", async (ISendConnectorService svc, CancellationToken ct) =>
             Results.Ok((await svc.GetAllAsync(ct)).Select(SendConnectorSummary.From)));
 
-        ep.MapPost("/", async (SendConnector connector, ISendConnectorService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        ep.MapPost("/", async (SendConnectorRequest req, ISendConnectorService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            var connector = req.ToEntity();
+            if (string.IsNullOrEmpty(connector.EncryptedPassword))
+                connector.EncryptedPassword = null;
             var created = await svc.CreateAsync(connector, ct);
             cache.Invalidate();
             return Results.Created($"/api/connectors/send/{created.Id}", SendConnectorSummary.From(created));
         });
 
-        ep.MapPut("/{id:int}", async (int id, SendConnector connector, ISendConnectorService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        // Password: omitted/null keeps the stored one, "" clears it (SendConnectorService.UpdateAsync contract).
+        ep.MapPut("/{id:int}", async (int id, SendConnectorRequest req, ISendConnectorService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            if (await svc.GetByIdAsync(id, ct) is null)
+                return Results.NotFound();
+            var connector = req.ToEntity();
             connector.Id = id;
             await svc.UpdateAsync(connector, ct);
             cache.Invalidate();
@@ -727,6 +835,8 @@ public static class AdminEndpoints
 
         ep.MapDelete("/{id:int}", async (int id, ISendConnectorService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
+            if (await svc.GetByIdAsync(id, ct) is null)
+                return Results.NotFound();
             await svc.DeleteAsync(id, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "Send connector deleted" });
@@ -740,23 +850,39 @@ public static class AdminEndpoints
         ep.MapGet("/", async (IDomainRouteService svc, CancellationToken ct) =>
             Results.Ok((await svc.GetAllAsync(ct)).Select(DomainRouteSummary.From)));
 
-        ep.MapPost("/", async (DomainRoute route, IDomainRouteService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        ep.MapPost("/", async (DomainRouteRequest req, IDomainRouteService svc, ISendConnectorService connectors,
+            IRuntimeConfigCache cache, CancellationToken ct) =>
         {
-            var created = await svc.CreateAsync(route, ct);
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            // The connector must be visible in the caller's scope (tenant filter) — never route to another tenant's.
+            if (await connectors.GetByIdAsync(req.SendConnectorId, ct) is null)
+                return Results.BadRequest(new { Error = $"Send connector {req.SendConnectorId} does not exist." });
+            var created = await svc.CreateAsync(req.ToEntity(), ct);
             cache.Invalidate();
             return Results.Created($"/api/routes/{created.Id}", DomainRouteSummary.From(created));
         });
 
-        ep.MapPut("/{id:int}", async (int id, DomainRoute route, IDomainRouteService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        ep.MapPut("/{id:int}", async (int id, DomainRouteRequest req, IDomainRouteService svc, ISendConnectorService connectors,
+            IRuntimeConfigCache cache, RelayDbContext db, CancellationToken ct) =>
         {
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            if (!await db.DomainRoutes.AsNoTracking().AnyAsync(r => r.Id == id, ct))
+                return Results.NotFound();
+            if (await connectors.GetByIdAsync(req.SendConnectorId, ct) is null)
+                return Results.BadRequest(new { Error = $"Send connector {req.SendConnectorId} does not exist." });
+            var route = req.ToEntity();
             route.Id = id;
             await svc.UpdateAsync(route, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "Domain route updated" });
         });
 
-        ep.MapDelete("/{id:int}", async (int id, IDomainRouteService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        ep.MapDelete("/{id:int}", async (int id, IDomainRouteService svc, IRuntimeConfigCache cache, RelayDbContext db, CancellationToken ct) =>
         {
+            if (!await db.DomainRoutes.AsNoTracking().AnyAsync(r => r.Id == id, ct))
+                return Results.NotFound();
             await svc.DeleteAsync(id, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "Domain route deleted" });
@@ -770,32 +896,55 @@ public static class AdminEndpoints
         var ep = group.MapGroup("/dkim/domains").RequireAuthorization(AuthorizationPolicies.HostAdmin)
             .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config), new TenantWriteMetadata());
 
-        // The list never returns key material (PrivateKeyPem / PrivateKeyPath): the private key is the only
-        // DKIM secret and must not leak over the wire. Project to a summary DTO that exposes only whether a
-        // key is configured (HasPrivateKey).
+        // Never returns key material (PrivateKeyPem / PrivateKeyPath) — not in the list, not after a create.
         ep.MapGet("/", async (IDkimDomainService svc, CancellationToken ct) =>
         {
             var domains = await svc.GetAllAsync(ct);
             return Results.Ok(domains.Select(DkimDomainSummary.From));
         });
 
-        ep.MapPost("/", async (DkimDomain dkim, IDkimDomainService svc, CancellationToken ct) =>
+        ep.MapPost("/", async (DkimDomainRequest req, IDkimDomainService svc, CancellationToken ct) =>
         {
-            if (await svc.GetByDomainAsync(dkim.Domain, ct) is not null)
-                return Results.Conflict(new { Error = $"DKIM config for '{dkim.Domain}' already exists" });
-            var created = await svc.CreateAsync(dkim, ct);
-            return Results.Created($"/api/dkim/domains/{created.Id}", created);
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            var domain = req.Domain.Trim().TrimEnd('.').ToLowerInvariant();
+            if (await svc.GetByDomainAsync(domain, ct) is not null)
+                return Results.Conflict(new { Error = $"DKIM config for '{domain}' already exists" });
+            var created = await svc.CreateAsync(new DkimDomain
+            {
+                Domain = domain,
+                Selector = req.Selector.Trim(),
+                PrivateKeyPem = string.IsNullOrEmpty(req.PrivateKeyPem) ? null : req.PrivateKeyPem,
+                PrivateKeyPath = string.IsNullOrWhiteSpace(req.PrivateKeyPath) ? null : req.PrivateKeyPath.Trim(),
+                IsEnabled = req.IsEnabled,
+            }, ct);
+            return Results.Created($"/api/dkim/domains/{created.Id}", DkimDomainSummary.From(created));
         });
 
-        ep.MapPut("/{id:int}", async (int id, DkimDomain dkim, IDkimDomainService svc, CancellationToken ct) =>
+        // A null key field keeps the stored value, "" clears it.
+        ep.MapPut("/{id:int}", async (int id, DkimDomainRequest req, IDkimDomainService svc, RelayDbContext db, CancellationToken ct) =>
         {
-            dkim.Id = id;
-            await svc.UpdateAsync(dkim, ct);
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            var existing = await db.DkimDomains.AsNoTracking().FirstOrDefaultAsync(d => d.Id == id, ct);
+            if (existing is null)
+                return Results.NotFound();
+            await svc.UpdateAsync(new DkimDomain
+            {
+                Id = id,
+                Domain = req.Domain.Trim().TrimEnd('.').ToLowerInvariant(),
+                Selector = req.Selector.Trim(),
+                PrivateKeyPem = req.PrivateKeyPem is null ? existing.PrivateKeyPem : (req.PrivateKeyPem.Length == 0 ? null : req.PrivateKeyPem),
+                PrivateKeyPath = req.PrivateKeyPath is null ? existing.PrivateKeyPath : (req.PrivateKeyPath.Trim().Length == 0 ? null : req.PrivateKeyPath.Trim()),
+                IsEnabled = req.IsEnabled,
+            }, ct);
             return Results.Ok(new { Message = "DKIM domain updated" });
         });
 
-        ep.MapDelete("/{id:int}", async (int id, IDkimDomainService svc, CancellationToken ct) =>
+        ep.MapDelete("/{id:int}", async (int id, IDkimDomainService svc, RelayDbContext db, CancellationToken ct) =>
         {
+            if (!await db.DkimDomains.AsNoTracking().AnyAsync(d => d.Id == id, ct))
+                return Results.NotFound();
             await svc.DeleteAsync(id, ct);
             return Results.Ok(new { Message = "DKIM domain deleted" });
         });
@@ -852,14 +1001,19 @@ public static class AdminEndpoints
 
     private static void MapRateLimitEndpoints(RouteGroupBuilder group)
     {
-        var ep = group.MapGroup("/rate-limits").WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
+        // The SMTP rate limits are ONE host-global row that applies to every tenant — host admins only, like the
+        // UI page (H12). A tenant admin must not be able to weaken abuse protection for everyone.
+        var ep = group.MapGroup("/rate-limits").RequireAuthorization(AuthorizationPolicies.HostAdmin)
+            .WithMetadata(new ApiScopeMetadata(ApiKeyScopes.Config));
 
         ep.MapGet("/", async (IRateLimitSettingsService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetAsync(ct)));
 
-        ep.MapPut("/", async (RateLimitSettings settings, IRateLimitSettingsService svc, CancellationToken ct) =>
+        ep.MapPut("/", async (RateLimitSettingsRequest req, IRateLimitSettingsService svc, CancellationToken ct) =>
         {
-            await svc.UpdateAsync(settings, ct);
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            await svc.UpdateAsync(req.ToEntity(), ct);
             return Results.Ok(new { Message = "Rate limit settings updated" });
         });
     }
@@ -871,23 +1025,33 @@ public static class AdminEndpoints
         headers.MapGet("/", async (IMessageFilterService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetHeaderRulesAsync(ct)));
 
-        headers.MapPost("/", async (HeaderRewriteEntry rule, IMessageFilterService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        headers.MapPost("/", async (HeaderRewriteRuleRequest req, IMessageFilterService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
-            var created = await svc.CreateHeaderRuleAsync(rule, ct);
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            var created = await svc.CreateHeaderRuleAsync(req.ToEntity(), ct);
             cache.Invalidate();
             return Results.Created($"/api/filters/headers/{created.Id}", created);
         });
 
-        headers.MapPut("/{id:int}", async (int id, HeaderRewriteEntry rule, IMessageFilterService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        headers.MapPut("/{id:int}", async (int id, HeaderRewriteRuleRequest req, IMessageFilterService svc, IRuntimeConfigCache cache,
+            RelayDbContext db, CancellationToken ct) =>
         {
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            if (!await db.HeaderRewriteEntries.AsNoTracking().AnyAsync(r => r.Id == id, ct))
+                return Results.NotFound();
+            var rule = req.ToEntity();
             rule.Id = id;
             await svc.UpdateHeaderRuleAsync(rule, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "Header rewrite rule updated" });
         });
 
-        headers.MapDelete("/{id:int}", async (int id, IMessageFilterService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        headers.MapDelete("/{id:int}", async (int id, IMessageFilterService svc, IRuntimeConfigCache cache, RelayDbContext db, CancellationToken ct) =>
         {
+            if (!await db.HeaderRewriteEntries.AsNoTracking().AnyAsync(r => r.Id == id, ct))
+                return Results.NotFound();
             await svc.DeleteHeaderRuleAsync(id, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "Header rewrite rule deleted" });
@@ -898,28 +1062,43 @@ public static class AdminEndpoints
         senders.MapGet("/", async (IMessageFilterService svc, CancellationToken ct) =>
             Results.Ok(await svc.GetSenderRulesAsync(ct)));
 
-        senders.MapPost("/", async (SenderRewriteEntry rule, IMessageFilterService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        senders.MapPost("/", async (SenderRewriteRuleRequest req, IMessageFilterService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
         {
-            var created = await svc.CreateSenderRuleAsync(rule, ct);
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            var created = await svc.CreateSenderRuleAsync(req.ToEntity(), ct);
             cache.Invalidate();
             return Results.Created($"/api/filters/senders/{created.Id}", created);
         });
 
-        senders.MapPut("/{id:int}", async (int id, SenderRewriteEntry rule, IMessageFilterService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        senders.MapPut("/{id:int}", async (int id, SenderRewriteRuleRequest req, IMessageFilterService svc, IRuntimeConfigCache cache,
+            RelayDbContext db, CancellationToken ct) =>
         {
+            if (req.Validate() is { } error)
+                return Results.BadRequest(new { Error = error });
+            if (!await db.SenderRewriteEntries.AsNoTracking().AnyAsync(r => r.Id == id, ct))
+                return Results.NotFound();
+            var rule = req.ToEntity();
             rule.Id = id;
             await svc.UpdateSenderRuleAsync(rule, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "Sender rewrite rule updated" });
         });
 
-        senders.MapDelete("/{id:int}", async (int id, IMessageFilterService svc, IRuntimeConfigCache cache, CancellationToken ct) =>
+        senders.MapDelete("/{id:int}", async (int id, IMessageFilterService svc, IRuntimeConfigCache cache, RelayDbContext db, CancellationToken ct) =>
         {
+            if (!await db.SenderRewriteEntries.AsNoTracking().AnyAsync(r => r.Id == id, ct))
+                return Results.NotFound();
             await svc.DeleteSenderRuleAsync(id, ct);
             cache.Invalidate();
             return Results.Ok(new { Message = "Sender rewrite rule deleted" });
         });
     }
+
+    /// <summary>Largest page any list endpoint returns.</summary>
+    public const int MaxPageSize = 500;
+
+    private static readonly int[] DkimKeySizes = [2048, 3072, 4096];
 
     /// <summary>Returns an error message when the requested scope string contains an unknown token, or
     /// null when it is acceptable (null/empty = read-only is always acceptable).</summary>

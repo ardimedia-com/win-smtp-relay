@@ -2,6 +2,7 @@
 @layout AccountLayout
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
+@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(WinSmtpRelay.AdminApi.Auth.RelayRateLimitPolicies.SignIn)]
 @inject SignInManager<AdminUser> SignInManager
 @inject WinSmtpRelay.Core.Interfaces.IAdminAuditService Audit
 @inject NavigationManager Nav
@@ -23,7 +24,7 @@
         <ValidationMessage For="() => Input.Code" />
     </div>
     <label class="account-checkbox">
-        <InputCheckbox @bind-Value="Input.RememberMachine" /> Don't ask again on this device for 30 days
+        <InputCheckbox @bind-Value="Input.RememberMachine" /> Don't ask again on this device for @((int)WinSmtpRelay.AdminApi.Auth.RelayAuthExtensions.TwoFactorRememberLifetime.TotalDays) days
     </label>
     <button type="submit" class="account-button">Verify</button>
 </EditForm>
@@ -67,7 +68,7 @@
 
         if (result.IsLockedOut)
         {
-            errorMessage = "Account locked due to too many failed attempts. Try again later.";
+            errorMessage = "Too many failed attempts — the account is locked for a few minutes. Try again later.";
             await Audit.WriteAsync(AdminAuditActions.SignInFailed, user.Id, user.Email, targetUserId: user.Id, detail: "2FA locked out");
             return;
         }

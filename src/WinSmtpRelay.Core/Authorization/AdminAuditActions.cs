@@ -8,6 +8,8 @@ public static class AdminAuditActions
     public const string AdminEnabled = "admin.enabled";
     public const string AdminDeleted = "admin.deleted";
     public const string AdminPasswordReset = "admin.password_reset";
+    /// <summary>An administrator cleared a brute-force lockout (the account was not disabled).</summary>
+    public const string AdminUnlocked = "admin.unlocked";
 
     public const string MembershipGranted = "membership.granted";
     public const string MembershipRevoked = "membership.revoked";
@@ -105,6 +107,10 @@ public static class AdminAuditActions
     // Admin queue operations on individual messages (delete is destructive; requeue re-triggers delivery).
     public const string QueueMessageDeleted = "queue.message_deleted";
     public const string QueueMessageRequeued = "queue.message_requeued";
+
+    /// <summary>A message body (customer mail content) was read or reused — API download, UI resend.
+    /// Written for every read, so access to mail content is always traceable to a person or key.</summary>
+    public const string MessageBodyRead = "message.body_read";
 
     // Suppression-list changes alter who the relay will deliver to. Added rows may come from the
     // automatic sources (hard bounce / complaint) and then carry the honest null actor.

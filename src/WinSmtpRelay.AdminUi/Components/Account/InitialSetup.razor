@@ -2,12 +2,9 @@
 @layout AccountLayout
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
-@using Microsoft.EntityFrameworkCore
-@using WinSmtpRelay.Core.Interfaces
-@using WinSmtpRelay.Core.Models
+@attribute [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(WinSmtpRelay.AdminApi.Auth.RelayRateLimitPolicies.SignIn)]
 @inject SignInManager<AdminUser> SignInManager
-@inject IAdminMembershipService Memberships
-@inject IAdminAuditService Audit
+@inject IInitialAdminSetup Setup
 @inject NavigationManager Nav
 @inject ILogger<InitialSetup> Logger
 
@@ -24,6 +21,11 @@ else
         This relay has no administrator yet. Create the first one — it becomes the host administrator with
         full access to manage tenants, listeners, certificates and settings.
     </p>
+    <p class="account-subtitle">
+        To prove you administer this server, enter the one-time setup token. It is in the file
+        <code>@(tokenFile ?? InitialSetupToken.FileName)</code> on the server, readable by Administrators only
+        (the Windows Event Log names the file too). It is replaced on every service start until an administrator exists.
+    </p>
 
     @if (errorMessage is not null)
     {
@@ -32,6 +34,11 @@ else
 
     <EditForm Model="Input" method="post" OnValidSubmit="SubmitAsync" FormName="initial-setup">
         <DataAnnotationsValidator />
+        <div class="account-field">
+            <label for="token">Setup token</label>
+            <InputText id="token" @bind-Value="Input.SetupToken" autocomplete="off" class="account-input" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" />
+            <ValidationMessage For="() => Input.SetupToken" />
+        </div>
         <div class="account-field">
             <label for="name">Name</label>
             <InputText id="name" @bind-Value="Input.DisplayName" class="account-input" placeholder="Administrator" />
@@ -67,64 +74,59 @@ else
     private InputModel Input { get; set; } = new();
 
     private string? errorMessage;
+    private string? tokenFile;
     private bool alreadyConfigured;
 
     protected override async Task OnInitializedAsync()
     {
         // First-run only: once any administrator exists, this page must not create another — redirect to
         // sign in. (Login redirects here while no account exists, so the two cannot loop.)
-        if (await SignInManager.UserManager.Users.AnyAsync())
+        if (!await Setup.IsRequiredAsync())
         {
             alreadyConfigured = true;
             Nav.NavigateTo("/account/login");
+            return;
+        }
+
+        // Normally issued at service start (AdminSeeder); issued here if all administrators were removed since.
+        try
+        {
+            tokenFile = await Setup.EnsureTokenIssuedAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Could not write the first-run setup token");
+            errorMessage = "The setup token could not be written to the data folder. Check the service's Event Log.";
         }
     }
 
     private async Task SubmitAsync()
     {
-        // Re-check live: refuse to create a second "first" admin if one was created between page load and
-        // submit (e.g. a concurrent request). Closes the only window in which this anonymous page could
-        // create an extra account.
-        if (await SignInManager.UserManager.Users.AnyAsync())
+        // Token check, the "no administrator yet" re-check and the creation run as one serialised, transactional
+        // step (IInitialAdminSetup), so neither a visitor without the token nor a concurrent request can create one.
+        var result = await Setup.CreateFirstAdminAsync(Input.SetupToken, Input.Email.Trim(), Input.DisplayName, Input.Password);
+        if (result.AlreadyConfigured)
         {
             alreadyConfigured = true;
             return;
         }
-
-        var user = new AdminUser
+        if (!result.Succeeded || result.User is null)
         {
-            UserName = Input.Email,
-            Email = Input.Email,
-            EmailConfirmed = true,
-            DisplayName = string.IsNullOrWhiteSpace(Input.DisplayName) ? "Administrator" : Input.DisplayName.Trim(),
-            MustChangePassword = false,
-            CreatedUtc = DateTimeOffset.UtcNow
-        };
-
-        var result = await SignInManager.UserManager.CreateAsync(user, Input.Password);
-        if (!result.Succeeded)
-        {
-            errorMessage = string.Join(" ", result.Errors.Select(e => e.Description));
+            errorMessage = result.Error;
             return;
         }
 
-        // The first administrator gets a host membership (full host administration) AND a tenant-admin
-        // membership for the default tenant — the bootstrap exception, so the initial tenant has an admin
-        // without another admin having to grant it. (Everywhere else, tenant access is consent-based.)
-        await Memberships.GrantAsync(user.Id, null, RelayRoles.HostAdmin, grantedByUserId: user.Id);
-        await Memberships.GrantAsync(user.Id, TenantDefaults.DefaultTenantId, RelayRoles.TenantAdmin, grantedByUserId: user.Id);
-        await Audit.WriteAsync(AdminAuditActions.AdminCreated, user.Id, user.Email, targetUserId: user.Id,
-            detail: "first-run host administrator (host + default-tenant membership)");
-
         // Session cookie (not persistent): first-run setup has no "remember me" opt-in, consistent with the
         // opt-in persistence model (Login.razor).
-        await SignInManager.SignInAsync(user, isPersistent: false);
-        Logger.LogWarning("First-run setup created the initial host administrator {Email}", Input.Email);
+        await SignInManager.SignInAsync(result.User, isPersistent: false);
         Nav.NavigateTo("/");
     }
 
     private sealed class InputModel
     {
+        [Required(ErrorMessage = "Enter the setup token from the server.")]
+        public string SetupToken { get; set; } = "";
+
         [StringLength(200)]
         public string DisplayName { get; set; } = "";
 

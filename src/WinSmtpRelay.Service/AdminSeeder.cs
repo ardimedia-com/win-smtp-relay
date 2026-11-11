@@ -16,7 +16,9 @@ namespace WinSmtpRelay.Service;
 ///   <item>retires the legacy seeded <c>admin@local</c> account when it is the only account, so a real
 ///   administrator must be defined; and</item>
 ///   <item>honours the installer's break-glass "reset administrator access" flag by removing all admin
-///   accounts (lost-access recovery), again forcing first-run setup.</item>
+///   accounts (lost-access recovery), again forcing first-run setup; and</item>
+///   <item>while no administrator exists, writes the one-time setup token that first-run setup requires (see
+///   <see cref="InitialSetupToken"/>) to the data folder, readable by Administrators only.</item>
 /// </list>
 /// </summary>
 public class AdminSeeder(IServiceScopeFactory scopeFactory, ILogger<AdminSeeder> logger) : IHostedService
@@ -59,10 +61,20 @@ public class AdminSeeder(IServiceScopeFactory scopeFactory, ILogger<AdminSeeder>
             await AdminAccountMaintenance.DeleteLoneLegacyAdminAsync(
                 userManager, AdminBootstrap.InitialAdminEmail, logger, cancellationToken);
 
+        // No administrator (fresh install, or after the reset above): issue the one-time setup token now, so the
+        // Event Log names its file before anyone opens the setup page. Without the token nobody who merely reaches
+        // the admin port can claim the relay.
         if (!await userManager.Users.AnyAsync(cancellationToken))
-            logger.LogWarning(
-                "No administrator account exists yet. Open the admin UI — first-run setup at " +
-                "/account/initial-setup will prompt you to create the first administrator.");
+        {
+            try
+            {
+                await sp.GetRequiredService<IInitialAdminSetup>().EnsureTokenIssuedAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Could not write the first-run setup token; first-run setup stays closed until it can be written.");
+            }
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

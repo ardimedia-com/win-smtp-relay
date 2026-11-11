@@ -41,6 +41,11 @@ public class SendConnectorService(
         return connector;
     }
 
+    /// <summary>
+    /// Updates the connector. Password contract: <c>EncryptedPassword == null</c> KEEPS the stored smart-host
+    /// password (so a form or API client that never received it cannot wipe it by omission); an empty string
+    /// clears it; any other value replaces it.
+    /// </summary>
     public async Task UpdateAsync(SendConnector connector, CancellationToken ct = default)
     {
         var existing = await db.SendConnectors.FirstOrDefaultAsync(c => c.Id == connector.Id, ct);
@@ -50,7 +55,8 @@ public class SendConnectorService(
         existing.SmartHost = connector.SmartHost;
         existing.SmartHostPort = connector.SmartHostPort;
         existing.Username = connector.Username;
-        existing.EncryptedPassword = connector.EncryptedPassword;
+        if (connector.EncryptedPassword is not null)
+            existing.EncryptedPassword = connector.EncryptedPassword.Length == 0 ? null : connector.EncryptedPassword;
         existing.OpportunisticTls = connector.OpportunisticTls;
         existing.RequireTls = connector.RequireTls;
         existing.IsDefault = connector.IsDefault;
@@ -59,6 +65,7 @@ public class SendConnectorService(
         existing.RetryIntervalsMinutes = connector.RetryIntervalsMinutes;
         existing.ConnectTimeoutSeconds = connector.ConnectTimeoutSeconds;
         existing.IsEnabled = connector.IsEnabled;
+        existing.EhloDomain = connector.EhloDomain;
 
         await db.SaveChangesAsync(ct);
         cache.Invalidate();
