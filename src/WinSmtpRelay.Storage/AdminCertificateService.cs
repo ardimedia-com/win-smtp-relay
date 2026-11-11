@@ -25,7 +25,7 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
         if (row is null || string.IsNullOrEmpty(row.PfxBase64))
             return null;
 
-        var pfx = Convert.FromBase64String(row.PfxBase64);
+        var pfx = Convert.FromBase64String(SecretProtector.RequireUsable(row.PfxBase64, "imported admin certificate")!);
         return PfxKeyLoader.Load(pfx, null);
     }
 
@@ -80,7 +80,8 @@ public class AdminCertificateService(RelayDbContext db) : IAdminCertificateServi
         if (row is null || !row.FollowStoreRenewals || string.IsNullOrEmpty(row.PfxBase64))
             return null;
 
-        using var current = PfxKeyLoader.Load(Convert.FromBase64String(row.PfxBase64), null);
+        using var current = PfxKeyLoader.Load(
+            Convert.FromBase64String(SecretProtector.RequireUsable(row.PfxBase64, "imported admin certificate")!), null);
         var names = DnsNames(current);
         if (names.Count == 0)
             return null;

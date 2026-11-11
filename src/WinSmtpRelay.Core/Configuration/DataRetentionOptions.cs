@@ -13,6 +13,6 @@ public class DataRetentionOptions
     public bool StripBodyOnDelivery { get; set; } = true;
     public int MessageHistoryDays { get; set; } = 30;
     public int DeliveryLogDays { get; set; } = 90;
-    public int SuppressionDays { get; set; }
+    public int SuppressionDays { get; set; } = WinSmtpRelay.Core.Models.DataRetentionSettings.DefaultSuppressionDays;
     public int ResendRetentionDays { get; set; } = 7;
 }

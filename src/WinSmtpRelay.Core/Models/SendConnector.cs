@@ -11,6 +11,14 @@ public class SendConnector : ITenantOwned
     public string? EncryptedPassword { get; set; }
     public bool OpportunisticTls { get; set; } = true;
     public bool RequireTls { get; set; }
+
+    /// <summary>
+    /// Allow sending the smart-host credentials (AUTH) over a connection that is not encrypted. Off by default:
+    /// without TLS the password crosses the network in clear text, so delivery is refused (a temporary failure
+    /// with a clear log line) when the smart host does not offer STARTTLS. Turn on only for a host on a trusted
+    /// network that cannot do TLS.
+    /// </summary>
+    public bool AllowPlaintextAuth { get; set; }
     public bool IsDefault { get; set; }
     public int MaxConcurrentDeliveries { get; set; } = 4;
     public int MaxRetryHours { get; set; } = 48;

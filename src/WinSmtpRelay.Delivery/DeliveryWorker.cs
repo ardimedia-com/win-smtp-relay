@@ -1,8 +1,9 @@
-using MailKit.Net.Smtp;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using WinSmtpRelay.Core;
 using WinSmtpRelay.Core.Configuration;
 using WinSmtpRelay.Core.Interfaces;
 using WinSmtpRelay.Core.Models;
@@ -10,6 +11,13 @@ using WinSmtpRelay.Storage;
 
 namespace WinSmtpRelay.Delivery;
 
+/// <summary>
+/// Picks due messages fairly (tenants in turn, a cap per destination domain), claims each with a lease, delivers
+/// it, and records the outcome per recipient. The outcome — delivered recipients, permanently failed recipients,
+/// status and retry time — is written in one statement right after the send, with retries and without the
+/// shutdown token, so mail that left is never sent again because the bookkeeping was lost (H1/H2). A periodic
+/// sweep returns messages whose lease expired (a delivery that died between send and bookkeeping) to the queue.
+/// </summary>
 public class DeliveryWorker(
     IServiceScopeFactory scopeFactory,
     IActivityNotifier activityNotifier,
@@ -19,11 +27,31 @@ public class DeliveryWorker(
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
 
+    /// <summary>Re-check sooner when due mail exists but every candidate waits for a busy destination domain.</summary>
+    private static readonly TimeSpan BusyPollInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>How long a claim on a message holds. In-flight messages of this process are never swept, so this
+    /// only bounds the recovery of a delivery whose bookkeeping failed.</summary>
+    internal static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(15);
+
+    private static readonly TimeSpan LeaseSweepInterval = TimeSpan.FromMinutes(1);
+
+    /// <summary>How long a stopping service waits for in-flight deliveries before it cancels them.</summary>
+    private static readonly TimeSpan ShutdownGrace = TimeSpan.FromSeconds(20);
+
+    /// <summary>Due candidates looked at per tenant and pick.</summary>
+    private const int CandidatesPerTenant = 50;
+
+    private static readonly TimeSpan[] PersistRetryDelays = [TimeSpan.FromMilliseconds(200), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3)];
+
+    private readonly DeliveryScheduler _scheduler = new(options.Value.MaxConcurrentDeliveriesPerDomain);
+    private readonly ConcurrentDictionary<long, Task> _running = new();
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var config = options.Value;
-        logger.LogInformation("Delivery worker starting with {MaxConcurrent} concurrent deliveries",
-            config.MaxConcurrentDeliveries);
+        logger.LogInformation("Delivery worker starting with {MaxConcurrent} concurrent deliveries, at most {PerDomain} per destination domain",
+            config.MaxConcurrentDeliveries, _scheduler.PerDomainCap);
 
         // Recover any messages stranded in Delivering by a previous crash/kill (the poll loop only
         // selects Queued, so otherwise they would never be retried).
@@ -35,58 +63,43 @@ public class DeliveryWorker(
             if (requeued > 0)
                 logger.LogWarning("Re-queued {Count} message(s) left in Delivering by a previous shutdown", requeued);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
             logger.LogWarning(ex, "Could not requeue stale Delivering messages at startup");
         }
 
-        using var semaphore = new SemaphoreSlim(config.MaxConcurrentDeliveries);
+        // Deliveries run on their own token: a stopping service lets them finish (up to ShutdownGrace) instead of
+        // cutting an SMTP transaction in the middle of DATA.
+        using var deliveryCts = new CancellationTokenSource();
+        // Not disposed: a delivery that outlives the grace period still releases its slot.
+        var slots = new SemaphoreSlim(Math.Max(1, config.MaxConcurrentDeliveries));
+        var lastSweep = DateTimeOffset.MinValue;
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var started = false;
+            var dueButBusy = false;
             try
             {
-                // Wait for a free delivery slot before fetching work
-                await semaphore.WaitAsync(stoppingToken);
-
-                IReadOnlyList<QueuedMessage> pending;
+                await slots.WaitAsync(stoppingToken);
                 try
                 {
-                    using var scope = scopeFactory.CreateScope();
-                    var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
-                    pending = await queue.GetPendingAsync(1, stoppingToken);
-
-                    if (pending.Count == 0)
+                    if (DateTimeOffset.UtcNow - lastSweep >= LeaseSweepInterval)
                     {
-                        semaphore.Release();
-                        await Task.Delay(PollInterval, stoppingToken);
-                        continue;
+                        lastSweep = DateTimeOffset.UtcNow;
+                        await SweepExpiredLeasesAsync(stoppingToken);
                     }
 
-                    // Mark as Delivering BEFORE Task.Run to prevent the next loop
-                    // iteration from picking up the same message again
-                    await queue.UpdateStatusAsync(pending[0].Id, MessageStatus.Delivering, cancellationToken: stoppingToken);
-                    _ = activityNotifier.NotifyQueueChangedAsync();
+                    (started, dueButBusy) = await TryStartNextAsync(slots, deliveryCts.Token, stoppingToken);
                 }
-                catch
+                finally
                 {
-                    semaphore.Release();
-                    throw;
+                    if (!started)
+                        slots.Release();
                 }
 
-                // Fire and forget — semaphore is released when processing completes
-                var message = pending[0];
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await ProcessMessageAsync(message, stoppingToken);
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                }, stoppingToken);
+                if (!started)
+                    await Task.Delay(dueButBusy ? BusyPollInterval : PollInterval, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -95,43 +108,126 @@ public class DeliveryWorker(
             catch (Exception ex)
             {
                 logger.LogError(ex, "Delivery worker error");
-                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                try { await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken); }
+                catch (OperationCanceledException) { break; }
             }
         }
 
-        logger.LogInformation("Delivery worker shutting down");
+        await DrainAsync(deliveryCts);
+        logger.LogInformation("Delivery worker shut down");
+    }
+
+    /// <summary>Picks the next message (tenants in turn, domain cap), claims it, and starts its delivery.</summary>
+    private async Task<(bool Started, bool DueButBusy)> TryStartNextAsync(SemaphoreSlim slots, CancellationToken deliveryToken, CancellationToken ct)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
+        var now = DateTimeOffset.UtcNow;
+
+        var tenants = await queue.GetDueTenantsAsync(now, ct);
+        foreach (var tenantId in _scheduler.TenantOrder(tenants))
+        {
+            var candidates = await queue.GetDueCandidatesAsync(tenantId, now, CandidatesPerTenant, ct);
+            foreach (var candidate in candidates)
+            {
+                if (!_scheduler.CanStart(candidate))
+                    continue;
+
+                var message = await queue.TryClaimAsync(candidate.Id, DateTimeOffset.UtcNow + LeaseDuration, ct);
+                if (message is null)
+                    continue; // deleted or claimed meanwhile
+
+                _scheduler.Started(message.Id, message.TenantId, message.Recipients);
+                _ = activityNotifier.NotifyQueueChangedAsync();
+                _running[message.Id] = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await ProcessMessageAsync(message, deliveryToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Unhandled error delivering message {QueueId}; the lease sweep will return it to the queue", message.Id);
+                    }
+                    finally
+                    {
+                        _scheduler.Finished(message.Id);
+                        _running.TryRemove(message.Id, out _);
+                        slots.Release();
+                    }
+                }, CancellationToken.None);
+                return (true, false);
+            }
+        }
+
+        return (false, tenants.Count > 0);
+    }
+
+    private async Task SweepExpiredLeasesAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
+            var requeued = await queue.RequeueExpiredLeasesAsync(DateTimeOffset.UtcNow, _scheduler.InFlightIds, ct);
+            if (requeued > 0)
+            {
+                logger.LogWarning("Returned {Count} message(s) with an expired delivery lease to the queue", requeued);
+                _ = activityNotifier.NotifyQueueChangedAsync();
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Delivery lease sweep failed");
+        }
+    }
+
+    /// <summary>Waits for in-flight deliveries on shutdown, then cancels the ones still running.</summary>
+    private async Task DrainAsync(CancellationTokenSource deliveryCts)
+    {
+        var running = _running.Values.ToArray();
+        if (running.Length == 0)
+            return;
+
+        logger.LogInformation("Waiting up to {Seconds}s for {Count} in-flight deliveries", ShutdownGrace.TotalSeconds, running.Length);
+        var all = Task.WhenAll(running);
+        if (await Task.WhenAny(all, Task.Delay(ShutdownGrace)) == all)
+            return;
+
+        logger.LogWarning("In-flight deliveries did not finish within {Seconds}s — cancelling them; they are re-queued", ShutdownGrace.TotalSeconds);
+        await deliveryCts.CancelAsync();
+        await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(5)));
     }
 
     internal async Task ProcessMessageAsync(QueuedMessage message, CancellationToken cancellationToken)
     {
-        var config = options.Value;
-
         using var scope = scopeFactory.CreateScope();
-        var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
-        var deliveryService = scope.ServiceProvider.GetRequiredService<IDeliveryService>();
-        var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
+        var sp = scope.ServiceProvider;
 
-        var suppression = scope.ServiceProvider.GetRequiredService<ISuppressionService>();
+        var all = RecipientList.Split(message.Recipients);
+        var delivered = new HashSet<string>(RecipientList.Split(message.DeliveredRecipients), StringComparer.OrdinalIgnoreCase);
+        var failed = new HashSet<string>(RecipientList.Split(message.FailedRecipients), StringComparer.OrdinalIgnoreCase);
+        var pending = all.Where(r => !delivered.Contains(r) && !failed.Contains(r)).ToList();
+
+        // System mail (reports, alerts) is exempt from the suppression list: a bounce of the report recipient must
+        // never silence the reports themselves.
+        var exempt = message.Origin == MessageOrigin.System;
+
+        var deliverable = new List<string>();
+        var suppressedNow = new List<string>();
+        var results = new List<DeliveryResult>();
+        string? filterRejection = null;
 
         try
         {
             // Suppression: never deliver to addresses on the tenant's suppression list (prior hard bounce
-            // or complaint). Skipped recipients are logged; if every recipient is suppressed the message
-            // is terminal (Suppressed) and not retried. Re-evaluated each attempt against the original
-            // recipient list, so it stays correct across retries.
-            var allRecipients = message.Recipients.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var deliverable = new List<string>();
-            foreach (var r in allRecipients)
+            // or complaint). Re-evaluated each attempt for the recipients still pending.
+            var suppression = sp.GetRequiredService<ISuppressionService>();
+            foreach (var r in pending)
             {
-                if (await suppression.IsSuppressedAsync(r, message.TenantId, cancellationToken))
+                if (!exempt && await suppression.IsSuppressedAsync(r, message.TenantId, cancellationToken))
                 {
-                    // Record the skip once (first attempt only) so the reporting digest doesn't re-count
-                    // the same suppressed recipient on every retry of a mixed message.
-                    if (message.RetryCount == 0)
-                    {
-                        await LogDeliveryAsync(db, message.Id, message.Sender, r, "550", "Suppressed: address previously hard-bounced or complained", null, message.TenantId);
-                        _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, r, "550", null, message.TenantId);
-                    }
+                    suppressedNow.Add(r);
                     logger.LogInformation("Message {MessageId}: recipient {Recipient} skipped (suppressed)", message.MessageId, r);
                 }
                 else
@@ -139,172 +235,166 @@ public class DeliveryWorker(
                     deliverable.Add(r);
                 }
             }
-            if (deliverable.Count == 0)
-            {
-                await queue.UpdateStatusAsync(message.Id, MessageStatus.Suppressed, "All recipients suppressed", cancellationToken);
-                _ = activityNotifier.NotifyQueueChangedAsync();
-                logger.LogInformation("Message {MessageId} (id={QueueId}) not sent: all recipients suppressed", message.MessageId, message.Id);
-                return;
-            }
-            // Deliver only to the non-suppressed recipients (local mutation; the persisted row keeps the
-            // original recipients, so a retry re-evaluates suppression from scratch).
-            message.Recipients = string.Join(';', deliverable);
 
-            // Run message filters before delivery
-            var filters = scope.ServiceProvider.GetServices<IMessageFilter>().OrderBy(f => f.Order);
-            var filterContext = new MessageFilterContext
+            if (deliverable.Count > 0)
             {
-                RawMessage = message.RawMessage,
-                Sender = message.Sender,
-                Recipients = message.Recipients,
-                SourceIp = message.SourceIp,
-                TenantId = message.TenantId
-            };
-
-            foreach (var filter in filters)
-            {
-                var result = await filter.FilterAsync(filterContext, cancellationToken);
-                if (!result.Accept)
+                // Run message filters before delivery
+                var filters = sp.GetServices<IMessageFilter>().OrderBy(f => f.Order);
+                var filterContext = new MessageFilterContext
                 {
-                    await queue.UpdateStatusAsync(message.Id, MessageStatus.Bounced, $"Filtered: {result.RejectReason}", cancellationToken);
-                    _ = activityNotifier.NotifyQueueChangedAsync();
-                    logger.LogInformation("Message {MessageId} rejected by filter: {Reason}",
-                        message.MessageId, result.RejectReason);
+                    RawMessage = message.RawMessage,
+                    Sender = message.Sender,
+                    Recipients = string.Join(';', deliverable),
+                    SourceIp = message.SourceIp,
+                    TenantId = message.TenantId
+                };
 
-                    // Log filter rejection for each recipient
-                    var recipients = message.Recipients.Split(';', StringSplitOptions.RemoveEmptyEntries);
-                    foreach (var recipient in recipients)
+                foreach (var filter in filters)
+                {
+                    var result = await filter.FilterAsync(filterContext, cancellationToken);
+                    if (!result.Accept)
                     {
-                        await LogDeliveryAsync(db, message.Id, message.Sender, recipient, "550", $"Filtered: {result.RejectReason}", null, message.TenantId);
-                        _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, recipient, "550", null, message.TenantId);
+                        filterRejection = $"Filtered: {result.RejectReason}";
+                        logger.LogInformation("Message {MessageId} rejected by filter: {Reason}", message.MessageId, result.RejectReason);
+                        break;
                     }
-
-                    return;
+                    if (result.ModifiedRawMessage != null)
+                    {
+                        filterContext.RawMessage = result.ModifiedRawMessage;
+                        message.RawMessage = result.ModifiedRawMessage;
+                        message.Sender = filterContext.Sender;
+                    }
                 }
-                if (result.ModifiedRawMessage != null)
+
+                if (filterRejection is not null)
                 {
-                    filterContext.RawMessage = result.ModifiedRawMessage;
-                    message.RawMessage = result.ModifiedRawMessage;
-                    message.Sender = filterContext.Sender;
+                    results.AddRange(deliverable.Select(r => new DeliveryResult { Recipient = r, StatusCode = "550", StatusMessage = filterRejection }));
                 }
-            }
-
-            var deliveryResults = await deliveryService.DeliverAsync(message, cancellationToken);
-            await queue.UpdateStatusAsync(message.Id, MessageStatus.Delivered, cancellationToken: cancellationToken);
-            _ = activityNotifier.NotifyQueueChangedAsync();
-
-            // Record the recipients that actually received the message (a full success delivered every
-            // deliverable recipient), so the undelivered ones — those skipped by the suppression list — stay
-            // identifiable for a later resend. The persisted Recipients column keeps the ORIGINAL list.
-            await queue.SetDeliveredRecipientsAsync(message.Id, string.Join(';', deliverable), cancellationToken);
-
-            // Data-retention policy: drop the message body once delivered (the metadata row stays for the
-            // queue/audit history). Two cases keep the body: archive/regulated profiles (StripBodyOnDelivery
-            // off), and the resend grace — a message with undelivered (suppressed) recipients keeps its body for
-            // ResendRetentionDays so an admin can resend it; the nightly purge drops it after that window.
-            // Best-effort: this runs after delivery already succeeded, so a settings-read hiccup must never
-            // revert the message to Queued — the nightly retention purge removes the body either way.
-            try
-            {
-                var retention = scope.ServiceProvider.GetService<IDataRetentionSettingsService>();
-                if (retention is not null)
+                else
                 {
-                    var settings = await retention.GetAsync(cancellationToken);
-                    var hasUndelivered = allRecipients.Any(r => !deliverable.Contains(r, StringComparer.OrdinalIgnoreCase));
-                    var keepForResend = settings.ResendRetentionDays > 0 && hasUndelivered;
-                    if (settings.StripBodyOnDelivery && !keepForResend)
-                        await queue.StripBodyAsync(message.Id, cancellationToken);
+                    // Deliver only to the recipients still pending and not suppressed (a copy — the persisted row
+                    // keeps the original recipient list).
+                    var attempt = CopyFor(message, deliverable);
+                    var deliveryService = sp.GetRequiredService<IDeliveryService>();
+                    try
+                    {
+                        results.AddRange(await deliveryService.DeliverAsync(attempt, cancellationToken));
+                    }
+                    catch (DeliveryException dex)
+                    {
+                        results.AddRange(dex.Results);
+                    }
                 }
             }
-            catch (Exception stripEx)
-            {
-                logger.LogWarning(stripEx, "Could not strip body for delivered message {QueueId}", message.Id);
-            }
-
-            // Log per-recipient delivery results and broadcast via SignalR
-            foreach (var dr in deliveryResults)
-            {
-                await LogDeliveryAsync(db, message.Id, message.Sender, dr.Recipient, dr.StatusCode, dr.StatusMessage, dr.RemoteServer, message.TenantId);
-                _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, dr.Recipient, dr.StatusCode, dr.RemoteServer, message.TenantId);
-            }
-
-            logger.LogInformation("Message {MessageId} (id={QueueId}) delivered successfully",
-                message.MessageId, message.Id);
         }
-        catch (EhloNotConfiguredException ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // A configuration gap, not a delivery failure: nothing was attempted, so no delivery-log
-            // entry, no RetryCount bump, no path to a bounce. Keep the message queued and re-check in a
-            // few minutes; the error is loud (Event Log + self-check) until the operator fixes it.
-            logger.LogError("Message {MessageId} (id={QueueId}) held: {Reason}",
-                message.MessageId, message.Id, ex.Message);
-            await queue.UpdateStatusAsync(message.Id, MessageStatus.Queued, ex.Message, CancellationToken.None);
-            await queue.SetRetryAsync(message.Id, message.RetryCount, DateTimeOffset.UtcNow.AddMinutes(5), CancellationToken.None);
-            _ = activityNotifier.NotifyQueueChangedAsync();
+            // Service shutdown before or during the send: nothing more is attempted; whatever results exist are
+            // kept, the rest goes back to the queue without a retry penalty.
         }
         catch (Exception ex)
         {
-            // Service shutdown cancelled an in-flight delivery — not a real failure. Re-queue it (with a
-            // non-cancelled token so the write isn't skipped) without logging a fake attempt or bumping
-            // RetryCount, so it is retried cleanly on next start rather than stranded in Delivering.
-            if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
-            {
-                try { await queue.UpdateStatusAsync(message.Id, MessageStatus.Queued, cancellationToken: CancellationToken.None); }
-                catch (Exception requeueEx) { logger.LogWarning(requeueEx, "Failed to re-queue message {QueueId} during shutdown", message.Id); }
-                return;
-            }
-
             logger.LogWarning(ex, "Delivery failed for message {MessageId} (id={QueueId}), attempt {Attempt}",
                 message.MessageId, message.Id, message.RetryCount + 1);
+            var settled = results.Select(r => r.Recipient).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var unsettled = pending.Where(r => !suppressedNow.Contains(r) && !settled.Contains(r)).ToList();
+            results.AddRange(SmtpDeliveryService.FailureResults(unsettled, ex, remoteServer: null, viaSmartHost: false));
+        }
 
-            // Log per-recipient results if available (from DeliveryException)
-            if (ex is DeliveryException dex)
+        // Every pending recipient that is not suppressed is decided by its result; one without a result (an
+        // interruption before it was reached) stays pending.
+        var considered = pending.Where(r => !suppressedNow.Contains(r)).ToList();
+        var outcome = await DecideAsync(message, all, delivered, failed, considered, suppressedNow, results, cancellationToken.IsCancellationRequested);
+
+        // 1. The state first, in one statement, with retries and without the shutdown token: this is what keeps a
+        // retry from sending to the recipients that already have the message.
+        if (!await PersistAsync(message.Id, outcome.Attempt))
+            return; // logged; the lease sweep returns the message to the queue later
+
+        _ = activityNotifier.NotifyQueueChangedAsync();
+        if (outcome.Attempt.Status == MessageStatus.Delivered)
+            logger.LogInformation("Message {MessageId} (id={QueueId}) delivered", message.MessageId, message.Id);
+        else if (outcome.Attempt.Status is MessageStatus.Bounced or MessageStatus.Suppressed)
+            logger.LogWarning("Message {MessageId} (id={QueueId}) {Status}: {Error}", message.MessageId, message.Id, outcome.Attempt.Status, outcome.Attempt.LastError);
+
+        // 2. Everything else is best-effort: a failure here must never undo or repeat the delivery.
+        await BestEffortAsync("write the delivery log", () => LogResultsAsync(sp, message, results, suppressedNow));
+        if (!exempt)
+            await BestEffortAsync("update the suppression list", () => SuppressAsync(sp, message, results));
+
+        if (outcome.Terminal)
+        {
+            if (outcome.Attempt.Status == MessageStatus.Delivered)
+                await BestEffortAsync("strip the delivered body", () => StripBodyAsync(sp, message, hasUndelivered: outcome.Undelivered.Count > 0));
+
+            if (outcome.Undelivered.Count > 0 && message.Origin == MessageOrigin.Submitted)
+                await BestEffortAsync("queue a delivery status notification",
+                    () => sp.GetRequiredService<IDsnService>().NotifyAsync(message, outcome.Undelivered, CancellationToken.None));
+        }
+    }
+
+    /// <summary>The decided state of a message after one attempt.</summary>
+    private sealed record Outcome(DeliveryAttemptOutcome Attempt, bool Terminal, IReadOnlyList<DsnRecipient> Undelivered);
+
+    private async Task<Outcome> DecideAsync(
+        QueuedMessage message, IReadOnlyList<string> all, HashSet<string> delivered, HashSet<string> failed,
+        IReadOnlyList<string> considered, IReadOnlyList<string> suppressedNow, IReadOnlyList<DeliveryResult> results,
+        bool shuttingDown)
+    {
+        var byRecipient = new Dictionary<string, DeliveryResult>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in results)
+            byRecipient[r.Recipient] = r;
+
+        var stillPending = new List<string>();
+        var attempted = false;
+        foreach (var r in considered)
+        {
+            if (!byRecipient.TryGetValue(r, out var result) || result.NotAttempted)
             {
-                foreach (var dr in dex.Results)
-                {
-                    await LogDeliveryAsync(db, message.Id, message.Sender, dr.Recipient, dr.StatusCode, dr.StatusMessage, dr.RemoteServer, message.TenantId);
-                    _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, dr.Recipient, dr.StatusCode, dr.RemoteServer, message.TenantId);
-                }
-
-                // Record recipients that succeeded this attempt so a retry skips them (no duplicates
-                // to recipients/domains that already accepted the message).
-                var delivered = new HashSet<string>(
-                    (message.DeliveredRecipients ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                    StringComparer.OrdinalIgnoreCase);
-                var before = delivered.Count;
-                foreach (var dr in dex.Results.Where(r => r.Success))
-                    delivered.Add(dr.Recipient);
-                if (delivered.Count != before)
-                    await queue.SetDeliveredRecipientsAsync(message.Id, string.Join(';', delivered), cancellationToken);
-
-                // Auto-suppress recipients the destination explicitly rejected at RCPT TO with a permanent
-                // (5xx) code. Repeatedly mailing dead addresses is a primary cause of blocklisting; future
-                // messages to them are skipped. The RecipientRejected guard is essential: a transaction-wide
-                // 5xx (sender/DATA rejection, all-MX-exhausted) is painted onto every recipient but is NOT
-                // the recipient's fault — suppressing on it would poison valid co-recipients that merely
-                // shared an envelope with one bad address.
-                foreach (var dr in dex.Results.Where(r => r.RecipientRejected && !r.Success && r.StatusCode.StartsWith('5')))
-                    await suppression.AddAsync(dr.Recipient, SuppressionReason.HardBounce,
-                        $"{dr.StatusCode} {dr.StatusMessage}", message.TenantId, cancellationToken);
+                stillPending.Add(r);
+                continue;
             }
+            attempted = true;
+            if (result.Success)
+                delivered.Add(r);
+            else if (result.PermanentFailure)
+                failed.Add(r);
             else
-            {
-                // Generic failure — log for all recipients
-                var recipients = message.Recipients.Split(';', StringSplitOptions.RemoveEmptyEntries);
-                foreach (var recipient in recipients)
-                {
-                    await LogDeliveryAsync(db, message.Id, message.Sender, recipient, "500", ex.Message, null, message.TenantId);
-                    _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, recipient, "500", null, message.TenantId);
-                }
-            }
+                stillPending.Add(r);
+        }
 
-            message.RetryCount++;
-            message.LastError = ex.Message;
+        var failures = results.Where(r => !r.Success && !r.NotAttempted).ToList();
+        var lastError = failures.Count == 0
+            ? null
+            : $"Delivery failed for {failures.Count} recipient(s): {string.Join("; ", failures.Select(f => $"{f.Recipient}: {f.StatusCode} {f.StatusMessage}"))}";
+        var retryCount = message.RetryCount + (attempted ? 1 : 0);
+        var now = DateTimeOffset.UtcNow;
 
+        MessageStatus status;
+        var terminal = true;
+        var nextRetry = now;
+        if (stillPending.Count == 0)
+        {
+            status = failed.Count > 0 ? MessageStatus.Bounced
+                : delivered.Count > 0 ? MessageStatus.Delivered
+                : MessageStatus.Suppressed;
+            if (status == MessageStatus.Suppressed)
+                lastError = "All recipients suppressed";
+        }
+        else if (shuttingDown && !attempted)
+        {
+            // Stopped before anything was tried: back to the queue, due now, no retry penalty.
+            status = MessageStatus.Queued;
+            terminal = false;
+            retryCount = message.RetryCount;
+            lastError = message.LastError;
+        }
+        else
+        {
             // Use extended hold time for backup MX domains (read live from the runtime config cache)
-            var effectiveConfig = config;
-            var backupMx = await configCache.GetBackupMxSettingsAsync(cancellationToken);
-            if (backupMx.Enabled && IsBackupMxMessage(message, backupMx))
+            var effectiveConfig = options.Value;
+            var backupMx = await configCache.GetBackupMxSettingsAsync(CancellationToken.None);
+            if (backupMx.Enabled && IsBackupMxMessage(stillPending, backupMx))
             {
                 effectiveConfig = new DeliveryOptions
                 {
@@ -313,40 +403,172 @@ public class DeliveryWorker(
                 };
             }
 
-            var nextRetry = CalculateNextRetry(message.RetryCount, effectiveConfig);
-
-            if (nextRetry == null || IsPermanentFailure(ex))
+            var next = shuttingDown ? now : CalculateNextRetry(retryCount, effectiveConfig);
+            if (next is null)
             {
-                await queue.UpdateStatusAsync(message.Id, MessageStatus.Bounced, ex.Message, cancellationToken);
-                logger.LogWarning("Message {MessageId} (id={QueueId}) bounced: {Error}",
-                    message.MessageId, message.Id, ex.Message);
+                // Retry window exhausted: the temporary failures become final.
+                foreach (var r in stillPending)
+                    failed.Add(r);
+                status = MessageStatus.Bounced;
+                lastError = $"Retry window exhausted. {lastError}".Trim();
             }
             else
             {
-                await queue.UpdateStatusAsync(message.Id, MessageStatus.Queued, ex.Message, cancellationToken);
-                await queue.SetRetryAsync(message.Id, message.RetryCount, nextRetry.Value, cancellationToken);
+                status = MessageStatus.Queued;
+                terminal = false;
+                nextRetry = next.Value;
             }
-            _ = activityNotifier.NotifyQueueChangedAsync();
+        }
+
+        var undelivered = terminal
+            ? all.Where(r => !delivered.Contains(r)).Select(r => ToDsnRecipient(r, byRecipient, suppressedNow)).ToList()
+            : [];
+
+        return new Outcome(
+            new DeliveryAttemptOutcome(status, Join(delivered, all), Join(failed, all), retryCount, nextRetry, lastError),
+            terminal,
+            undelivered);
+    }
+
+    private static DsnRecipient ToDsnRecipient(string recipient, Dictionary<string, DeliveryResult> byRecipient, IReadOnlyList<string> suppressedNow)
+    {
+        if (suppressedNow.Contains(recipient, StringComparer.OrdinalIgnoreCase))
+            return new DsnRecipient(recipient, "550", null, null, Suppressed: true);
+        return byRecipient.TryGetValue(recipient, out var r) && !r.NotAttempted
+            ? new DsnRecipient(recipient, r.StatusCode, r.StatusMessage, r.RemoteServer)
+            : new DsnRecipient(recipient, null, "Delivery failed on an earlier attempt (see the relay's journal)", null);
+    }
+
+    /// <summary>The recipients of <paramref name="set"/> in the order of the original list, ";"-joined (null when empty).</summary>
+    private static string? Join(HashSet<string> set, IReadOnlyList<string> order)
+    {
+        var ordered = order.Where(set.Contains).Concat(set.Where(s => !order.Contains(s, StringComparer.OrdinalIgnoreCase))).ToList();
+        return ordered.Count == 0 ? null : string.Join(';', ordered);
+    }
+
+    private async Task<bool> PersistAsync(long messageId, DeliveryAttemptOutcome outcome)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                // A fresh scope per try: a context that failed once is not reused.
+                using var scope = scopeFactory.CreateScope();
+                await scope.ServiceProvider.GetRequiredService<IMessageQueue>()
+                    .CompleteAttemptAsync(messageId, outcome, CancellationToken.None);
+                return true;
+            }
+            catch (Exception ex) when (attempt < PersistRetryDelays.Length)
+            {
+                logger.LogWarning(ex, "Recording the delivery outcome of message {QueueId} failed — retrying", messageId);
+                await Task.Delay(PersistRetryDelays[attempt]);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Recording the delivery outcome of message {QueueId} failed after {Attempts} attempts; it stays Delivering until its lease expires",
+                    messageId, attempt + 1);
+                return false;
+            }
         }
     }
 
-    private static async Task LogDeliveryAsync(
-        RelayDbContext db, long queuedMessageId, string sender, string recipient,
-        string statusCode, string statusMessage, string? remoteServer, int tenantId)
+    private async Task BestEffortAsync(string what, Func<Task> action)
     {
-        db.DeliveryLogs.Add(new DeliveryLog
+        try
         {
-            QueuedMessageId = queuedMessageId,
-            TenantId = tenantId,
-            Sender = sender,
-            Recipient = recipient,
-            StatusCode = statusCode,
-            StatusMessage = statusMessage,
-            RemoteServer = remoteServer,
-            TimestampUtc = DateTimeOffset.UtcNow
-        });
-        await db.SaveChangesAsync();
+            await action();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not {What} after a delivery attempt", what);
+        }
     }
+
+    private async Task LogResultsAsync(IServiceProvider sp, QueuedMessage message, IReadOnlyList<DeliveryResult> results, IReadOnlyList<string> suppressedNow)
+    {
+        var db = sp.GetRequiredService<RelayDbContext>();
+        var now = DateTimeOffset.UtcNow;
+
+        // Record a suppression skip once (first attempt only) so the reporting digest doesn't re-count the same
+        // suppressed recipient on every retry of a mixed message.
+        if (message.RetryCount == 0)
+        {
+            foreach (var r in suppressedNow)
+                db.DeliveryLogs.Add(NewLog(message, r, "550", "Suppressed: address previously hard-bounced or complained", null, now));
+        }
+        foreach (var r in results.Where(r => !r.NotAttempted))
+            db.DeliveryLogs.Add(NewLog(message, r.Recipient, r.StatusCode, r.StatusMessage, r.RemoteServer, now));
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        if (message.RetryCount == 0)
+            foreach (var r in suppressedNow)
+                _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, r, "550", null, message.TenantId);
+        foreach (var r in results.Where(r => !r.NotAttempted))
+            _ = activityNotifier.NotifyDeliveryAttemptAsync(message.MessageId, r.Recipient, r.StatusCode, r.RemoteServer, message.TenantId);
+    }
+
+    private static DeliveryLog NewLog(QueuedMessage message, string recipient, string code, string text, string? remote, DateTimeOffset now) => new()
+    {
+        QueuedMessageId = message.Id,
+        TenantId = message.TenantId,
+        Sender = message.Sender,
+        Recipient = recipient,
+        StatusCode = code,
+        StatusMessage = text,
+        RemoteServer = remote,
+        TimestampUtc = now
+    };
+
+    /// <summary>
+    /// Auto-suppresses recipients whose rejection says the address does not exist (T1075, see
+    /// <see cref="SuppressionPolicy"/>): never a policy block, never a smart host's verdict, never a
+    /// transaction-wide failure painted onto co-recipients.
+    /// </summary>
+    private static async Task SuppressAsync(IServiceProvider sp, QueuedMessage message, IReadOnlyList<DeliveryResult> results)
+    {
+        var suppression = sp.GetRequiredService<ISuppressionService>();
+        foreach (var r in results.Where(SuppressionPolicy.ShouldSuppress))
+            await suppression.AddAsync(r.Recipient, SuppressionReason.HardBounce, $"{r.StatusCode} {r.StatusMessage}", message.TenantId, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Data-retention policy: drop the message body once delivered (the metadata row stays for the queue/audit
+    /// history). Two cases keep the body: archive/regulated profiles (StripBodyOnDelivery off), and the resend
+    /// grace — a message with undelivered recipients keeps its body for ResendRetentionDays so an admin can resend
+    /// it; the nightly purge drops it after that window.
+    /// </summary>
+    private static async Task StripBodyAsync(IServiceProvider sp, QueuedMessage message, bool hasUndelivered)
+    {
+        var retention = sp.GetService<IDataRetentionSettingsService>();
+        if (retention is null)
+            return;
+        var settings = await retention.GetAsync(CancellationToken.None);
+        var keepForResend = settings.ResendRetentionDays > 0 && hasUndelivered;
+        if (settings.StripBodyOnDelivery && !keepForResend)
+            await sp.GetRequiredService<IMessageQueue>().StripBodyAsync(message.Id, CancellationToken.None);
+    }
+
+    private static QueuedMessage CopyFor(QueuedMessage message, IReadOnlyList<string> recipients) => new()
+    {
+        Id = message.Id,
+        TenantId = message.TenantId,
+        MessageId = message.MessageId,
+        Sender = message.Sender,
+        Recipients = string.Join(';', recipients),
+        RawMessage = message.RawMessage,
+        SizeBytes = message.SizeBytes,
+        Status = message.Status,
+        RetryCount = message.RetryCount,
+        LastError = message.LastError,
+        CreatedUtc = message.CreatedUtc,
+        NextRetryUtc = message.NextRetryUtc,
+        SourceIp = message.SourceIp,
+        AuthenticatedUser = message.AuthenticatedUser,
+        DeliveredRecipients = message.DeliveredRecipients,
+        FailedRecipients = message.FailedRecipients,
+        Origin = message.Origin,
+    };
 
     internal static DateTimeOffset? CalculateNextRetry(int retryCount, DeliveryOptions config)
     {
@@ -373,27 +595,8 @@ public class DeliveryWorker(
         return DateTimeOffset.UtcNow.AddMinutes(delayMinutes);
     }
 
-    private static bool IsBackupMxMessage(QueuedMessage message, BackupMxSettings backupMx)
-    {
-        var recipientDomains = message.Recipients
-            .Split(';', StringSplitOptions.RemoveEmptyEntries)
-            .Select(r => r.Split('@').Last());
-
-        return recipientDomains.Any(domain =>
-            backupMx.DomainList.Any(d => string.Equals(d, domain, StringComparison.OrdinalIgnoreCase)));
-    }
-
-    private static bool IsPermanentFailure(Exception ex)
-    {
-        // Classify on structured status, not free-text substring matching. A DeliveryException carries
-        // per-recipient results — it is permanent only if EVERY failing recipient got a 5xx (a single
-        // 4xx/transient among them must retry). Raw exceptions (smart-host/route path) are permanent
-        // only for an actual 5xx SMTP command rejection; connection/timeout/protocol failures retry.
-        if (ex is DeliveryException dex)
-        {
-            var failures = dex.Results.Where(r => !r.Success).ToList();
-            return failures.Count > 0 && failures.All(r => r.StatusCode.StartsWith('5'));
-        }
-        return ex is SmtpCommandException sce && (int)sce.StatusCode >= 500;
-    }
+    private static bool IsBackupMxMessage(IEnumerable<string> recipients, BackupMxSettings backupMx) =>
+        recipients
+            .Select(r => r[(r.LastIndexOf('@') + 1)..])
+            .Any(domain => backupMx.DomainList.Any(d => string.Equals(d, domain, StringComparison.OrdinalIgnoreCase)));
 }

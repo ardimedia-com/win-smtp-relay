@@ -61,7 +61,10 @@ public static class SystemEmail
             RawMessage = raw,
             SizeBytes = raw.Length,
             TenantId = tenantId,
-            NextRetryUtc = DateTimeOffset.UtcNow
+            NextRetryUtc = DateTimeOffset.UtcNow,
+            // Exempt from the suppression list and never answered with a DSN: a bounce of the report
+            // recipient must not silence the reports.
+            Origin = MessageOrigin.System
         }, ct);
     }
 

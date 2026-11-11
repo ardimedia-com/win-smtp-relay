@@ -87,7 +87,9 @@ public class ReportingService(
         var now = DateTime.UtcNow;
         if (schedule.IsDigestDue(settings, now))
         {
-            var today = schedule.LocalDate(now);
+            // The schedule day the digest belongs to — the previous day when a digest scheduled shortly before
+            // midnight is caught up after it.
+            var today = schedule.DueReportDate(now);
             // Capture the "since last report" cutoff from the CURRENT settings (still the previous send
             // moment) before MarkDigestSentAsync advances it.
             var content = await BuildDigestAsync(sp, schedule, SuppressionReportCutoff(settings), ct);

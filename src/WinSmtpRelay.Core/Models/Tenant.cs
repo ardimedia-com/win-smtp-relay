@@ -24,6 +24,13 @@ public class Tenant
     /// </summary>
     public string? EgressIpAddress { get; set; }
 
+    /// <summary>
+    /// Send a delivery status notification (RFC 3464 bounce) to the envelope sender when a message of this tenant
+    /// finally fails or is suppressed. Only ever sent to a sender address in one of the tenant's own domains, so it
+    /// cannot become backscatter to forged senders. Default on.
+    /// </summary>
+    public bool DsnEnabled { get; set; } = true;
+
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 

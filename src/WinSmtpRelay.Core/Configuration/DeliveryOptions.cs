@@ -5,6 +5,12 @@ public class DeliveryOptions
     public const string SectionName = "Delivery";
 
     public int MaxConcurrentDeliveries { get; set; } = 4;
+
+    /// <summary>
+    /// How many messages to one destination domain may be in delivery at the same time. Keeps one tenant's backlog
+    /// to a slow domain from occupying every delivery slot. Values below 1 are treated as 1.
+    /// </summary>
+    public int MaxConcurrentDeliveriesPerDomain { get; set; } = 2;
     public int MaxRetryHours { get; set; } = 48;
     /// <summary>The retry schedule used when <see cref="RetryIntervalsMinutes"/> is not configured.</summary>
     public static readonly int[] DefaultRetryIntervalsMinutes = [1, 5, 30, 120, 480, 1440];
@@ -30,7 +36,19 @@ public class DeliveryOptions
     /// When true, delivery via the global smart host requires TLS (mandatory STARTTLS) and fails if the
     /// server will not negotiate it. Does not apply to direct-MX delivery, which stays opportunistic.
     public bool RequireTls { get; set; } = false;
+
+    /// When true, the global smart-host credentials may be sent over an unencrypted connection. Off by default:
+    /// delivery is refused (temporary failure) when the smart host does not offer STARTTLS.
+    public bool SmartHostAllowPlaintextAuth { get; set; } = false;
     public int ConnectTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Allow direct-MX delivery to MX hosts that resolve to loopback, private (RFC 1918 / unique-local), link-local
+    /// or this machine's own addresses. Off by default: such an MX is a misconfiguration or a loop, and the message
+    /// fails permanently (5.4.4 / 5.4.6). Deliver to an internal server through a domain route (send connector)
+    /// instead; this switch is the escape hatch when that is not possible.
+    /// </summary>
+    public bool AllowPrivateMxTargets { get; set; } = false;
 
     /// Per-domain routing: domain pattern to upstream relay config.
     /// Checked before global SmartHost. Supports wildcard prefix (e.g. "*.example.com").

@@ -96,6 +96,42 @@ public class RetentionServiceTests
 
     [TestMethod]
     [TestCategory("Unit")]
+    public async Task RunPurge_ExpiresOnlyHardBounceSuppressions()
+    {
+        // T1075: entries from bounces age out; complaints and manual entries are deliberate and stay.
+        var now = DateTimeOffset.UtcNow;
+        await AddSuppressionAsync("bounce@example.com", now.AddDays(-40));
+        await AddSuppressionAsync("complaint@example.com", now.AddDays(-40), SuppressionReason.Complaint);
+        await AddSuppressionAsync("manual@example.com", now.AddDays(-40), SuppressionReason.Manual);
+
+        await SaveSettings(messageHistoryDays: 30, deliveryLogDays: 90, suppressionDays: 30);
+        var result = await _retention.RunPurgeAsync();
+
+        Assert.AreEqual(1, result.Suppressions);
+        _db.ChangeTracker.Clear();
+        CollectionAssert.AreEquivalent(new[] { "complaint@example.com", "manual@example.com" },
+            await _db.SuppressionEntries.Select(e => e.Address).ToListAsync());
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void SuppressionRetention_DefaultsTo30Days()
+    {
+        Assert.AreEqual(30, new DataRetentionSettings().SuppressionDays);
+        Assert.AreEqual(30, new WinSmtpRelay.Core.Configuration.DataRetentionOptions().SuppressionDays);
+        Assert.IsTrue(RetentionProfiles.All.All(p => p.SuppressionDays == 30));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public async Task Compact_SkipsWhenThereIsLittleToGain()
+    {
+        // An in-memory database has no meaningful free space: the check runs, no VACUUM.
+        Assert.IsFalse(await _retention.CompactIfFragmentedAsync());
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
     public async Task UpdateSettings_FloorsDeliveryLogRetention()
     {
         await _settings.UpdateAsync(new DataRetentionSettings
@@ -232,12 +268,12 @@ public class RetentionServiceTests
         await _db.SaveChangesAsync();
     }
 
-    private async Task AddSuppressionAsync(string address, DateTimeOffset createdUtc)
+    private async Task AddSuppressionAsync(string address, DateTimeOffset createdUtc, SuppressionReason reason = SuppressionReason.HardBounce)
     {
         _db.SuppressionEntries.Add(new SuppressionEntry
         {
             Address = address,
-            Reason = SuppressionReason.HardBounce,
+            Reason = reason,
             CreatedUtc = createdUtc
         });
         await _db.SaveChangesAsync();

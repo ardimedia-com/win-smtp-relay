@@ -28,8 +28,15 @@ public class DkimDomainService(
     public async Task<DkimDomain?> GetForSigningAsync(int tenantId, string domain, CancellationToken ct = default)
     {
         // Explicit tenant filter so the delivery signer never picks up another tenant's key.
-        return await db.DkimDomains.AsNoTracking()
+        var dkim = await db.DkimDomains.AsNoTracking()
             .FirstOrDefaultAsync(d => d.TenantId == tenantId && d.Domain == domain && d.IsEnabled, ct);
+
+        // Fail closed when the key exists but cannot be decrypted on this machine (a database restored from
+        // another host): signing with garbage — or silently not signing — would break DMARC without anyone
+        // noticing. The delivery turns this into a temporary failure; the self-check reports it.
+        if (dkim is not null)
+            SecretProtector.RequireUsable(dkim.PrivateKeyPem, $"DKIM private key for {dkim.Domain}");
+        return dkim;
     }
 
     public async Task<DkimDomain> CreateAsync(DkimDomain dkim, CancellationToken ct = default)

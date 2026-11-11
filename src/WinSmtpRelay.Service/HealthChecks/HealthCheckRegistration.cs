@@ -23,6 +23,7 @@ public static class HealthCheckRegistration
         services.AddScoped<IHealthCheck, ApiKeyHealthCheck>();
         services.AddScoped<IHealthCheck, RuntimeHealthCheck>();
         services.AddScoped<IHealthCheck, RejectedSubmissionsHealthCheck>();
+        services.AddScoped<IHealthCheck, SecretsHealthCheck>();
 
         services.AddSingleton<IHealthCheckRunner, HealthCheckRunner>();
         return services;

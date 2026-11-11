@@ -99,6 +99,8 @@ public static class SmartHostProbe
     public static async Task ConnectOnceAsync(string host, int port, bool opportunisticTls, bool requireTls,
         string? username, string? password, TimeSpan timeout, CancellationToken ct)
     {
+        // An undecryptable stored password (database restored from another machine) is never sent as the password.
+        password = WinSmtpRelay.Storage.SecretProtector.RequireUsable(password, $"password of smart host {host}");
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(timeout);
         using var client = new ProbeSmtpClient { Timeout = (int)timeout.TotalMilliseconds };

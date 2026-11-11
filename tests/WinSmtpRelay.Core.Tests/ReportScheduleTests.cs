@@ -98,6 +98,31 @@ public class ReportScheduleTests
 
     [TestMethod]
     [TestCategory("Unit")]
+    public void IsDigestDue_LateEveningDigest_IsCaughtUpAfterMidnight()
+    {
+        // 23:55 local; the 10-minute poll comes at 00:03 the next day. The digest used to be skipped for good.
+        var settings = new ReportingSettings
+        {
+            DailyTimeLocal = "23:55",
+            TimeZoneId = "Europe/Zurich",
+            LastDigestSentUtc = new DateTimeOffset(Utc(2026, 11, 9, 22, 56)),
+            LastDigestSentDate = new DateOnly(2026, 11, 9),
+        };
+        var schedule = ReportSchedule.From(settings);
+        var at0003 = Utc(2026, 11, 10, 23, 3); // 00:03 on 11 Nov local (UTC+1)
+
+        Assert.IsTrue(schedule.IsDigestDue(settings, at0003));
+        Assert.AreEqual(new DateOnly(2026, 11, 10), schedule.DueReportDate(at0003), "the digest belongs to the day it was scheduled for");
+
+        // Sent at 00:03 for the 10th: the 11th's digest still goes out at 23:55 on the 11th.
+        settings.LastDigestSentUtc = new DateTimeOffset(at0003);
+        settings.LastDigestSentDate = new DateOnly(2026, 11, 10);
+        Assert.IsFalse(schedule.IsDigestDue(settings, Utc(2026, 11, 11, 12, 0)));
+        Assert.IsTrue(schedule.IsDigestDue(settings, Utc(2026, 11, 11, 22, 56)));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
     public void IsDigestDue_AfterUpgrade_DoesNotResendTodaysDigest()
     {
         // Build78 sent today's digest at 04:00 UTC; the upgrade must not send it again.

@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IMxResolver, MxResolver>();
         services.AddScoped<IDeliveryService, SmtpDeliveryService>();
+        services.AddScoped<IDsnService, WinSmtpRelay.Delivery.Dsn.DsnService>();
         services.AddHostedService<DeliveryWorker>();
 
         // Message filters (chain of responsibility)
