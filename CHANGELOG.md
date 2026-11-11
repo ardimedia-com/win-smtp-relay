@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta1-build82] - 2026-11-11
+
 ### Fixed
 - «Install on this server» never installed anything since build80: the SYSTEM updater could not read the downloaded
   package («Type mismatch», `update.log`), because PowerShell hands a path built with `Join-Path` to Windows Installer

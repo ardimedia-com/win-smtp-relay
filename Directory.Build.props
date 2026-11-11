@@ -15,7 +15,7 @@
       Increment BuildNumber (and the suffix) here when preparing the next release.
     -->
     <Version>1.0.0</Version>
-    <BuildNumber Condition="'$(BuildNumber)' == ''">81</BuildNumber>
+    <BuildNumber Condition="'$(BuildNumber)' == ''">82</BuildNumber>
     <VersionSuffix Condition="'$(VersionSuffix)' == ''">beta1-build$(BuildNumber)</VersionSuffix>
 
     <!-- Windows Installer version: major.minor.BuildNumber (each field <= 65535; MSI compares only the
