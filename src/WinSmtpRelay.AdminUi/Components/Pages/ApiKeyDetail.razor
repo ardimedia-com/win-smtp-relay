@@ -7,6 +7,7 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject ICurrentTenant CurrentTenant
 @inject NavigationManager Nav
+@inject ILogger<ApiKeyDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -53,9 +54,9 @@ else if (createdSecret is not null)
                             <LucideIcon Name="copy" /> Copy
                         </BbButton>
                     </div>
-                    @if (copied)
+                    @if (copied is { } secretCopied)
                     {
-                        <span class="text-muted" style="font-size:0.8125rem;">Copied to clipboard</span>
+                        <span class="@(secretCopied ? "text-muted" : "form-error")" style="font-size:0.8125rem;" role="status">@(secretCopied ? "Copied to clipboard" : UiMessages.CopyFailed)</span>
                     }
                 </div>
                 <div class="form-group" style="margin-top:0.75rem;">
@@ -71,13 +72,13 @@ else if (createdSecret is not null)
                     </p>
                     <div style="display:flex;gap:0.5rem;align-items:flex-start;">
                         <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.5rem 0.7rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.8rem;">@McpAddCommandShown</code></pre>
-                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopyMcpCommandAsync">
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" AriaLabel="Copy the MCP command for this project" @onclick="CopyMcpCommandAsync">
                             <LucideIcon Name="copy" />
                         </BbButton>
                     </div>
-                    @if (mcpCommandCopied)
+                    @if (mcpCommandCopied is { } projectCopied)
                     {
-                        <span class="text-muted" style="font-size:0.8125rem;">Copied to clipboard</span>
+                        <span class="@(projectCopied ? "text-muted" : "form-error")" style="font-size:0.8125rem;" role="status">@(projectCopied ? "Copied to clipboard" : UiMessages.CopyFailed)</span>
                     }
 
                     <p class="text-muted" style="font-size:0.78rem;margin:0.6rem 0 0.2rem;">
@@ -86,13 +87,13 @@ else if (createdSecret is not null)
                     </p>
                     <div style="display:flex;gap:0.5rem;align-items:flex-start;">
                         <pre style="flex:1;overflow-x:auto;background:var(--muted);padding:0.5rem 0.7rem;border-radius:var(--radius);margin:0;"><code class="mono" style="font-size:0.8rem;">@McpAddCommandUserScopeShown</code></pre>
-                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" @onclick="CopyMcpCommandUserScopeAsync">
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" title="Copy" AriaLabel="Copy the MCP command for all projects" @onclick="CopyMcpCommandUserScopeAsync">
                             <LucideIcon Name="copy" />
                         </BbButton>
                     </div>
-                    @if (mcpCommandUserScopeCopied)
+                    @if (mcpCommandUserScopeCopied is { } userCopied)
                     {
-                        <span class="text-muted" style="font-size:0.8125rem;">Copied to clipboard</span>
+                        <span class="@(userCopied ? "text-muted" : "form-error")" style="font-size:0.8125rem;" role="status">@(userCopied ? "Copied to clipboard" : UiMessages.CopyFailed)</span>
                     }
                     <p class="text-muted" style="font-size:0.78rem;margin:0.35rem 0 0;">
                         See the <a href="/mcp-setup">MCP page</a> for what an assistant can do and the recommended scopes.
@@ -271,7 +272,7 @@ else if (key is not null)
                     <BbButton Variant="ButtonVariant.Default" @onclick="SaveScopesAsync" Disabled="@savingScopes">
                         <LucideIcon Name="save" /> Save scopes
                     </BbButton>
-                    <BbButton Variant="ButtonVariant.Destructive" @onclick="() => showRevoke = true">
+                    <BbButton Variant="ButtonVariant.Destructive" @onclick="() => showRevoke = true" Disabled="@revoking">
                         <LucideIcon Name="trash-2" /> Revoke
                     </BbButton>
                     <BbButton Variant="ButtonVariant.Outline" @onclick="GoBack">Back</BbButton>
@@ -296,7 +297,7 @@ else if (key is not null)
                 <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
             </BbAlertDialogCancel>
             <BbAlertDialogAction>
-                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmRevokeAsync">Revoke</BbButton>
+                <BbButton Variant="ButtonVariant.Destructive" Disabled="@revoking" @onclick="ConfirmRevokeAsync">Revoke</BbButton>
             </BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
@@ -358,7 +359,7 @@ else if (key is not null)
                     <div style="width:11rem;flex-shrink:0;">
                         @* Native <select> (not BbNativeSelect) so a preset — which sets areaAccess from code —
                            is reflected in the control; a wrapped select only updates on user interaction. *@
-                        <select class="form-select" value="@areaAccess[area]"
+                        <select class="form-select" value="@areaAccess[area]" aria-label="@($"Access to {row.Label}")"
                                 @onchange="@(e => areaAccess[area] = e.Value?.ToString() ?? "none")">
                             <option value="none">No access</option>
                             <option value="read">Read</option>
@@ -493,9 +494,11 @@ else if (key is not null)
 
     // One-time secret shown after creation; null until a key is created.
     private string? createdSecret;
-    private bool copied;
-    private bool mcpCommandCopied;
-    private bool mcpCommandUserScopeCopied;
+    // null = not copied yet, true = copied, false = the browser refused (shown as a hint to copy manually).
+    private bool? copied;
+    private bool? mcpCommandCopied;
+    private bool? mcpCommandUserScopeCopied;
+    private bool revoking;
 
     private string McpUrl => $"{Nav.BaseUri}mcp";
     private string McpAddCommand => BuildMcpAddCommand(userScope: false, createdSecret);
@@ -575,6 +578,11 @@ else if (key is not null)
             // Show the secret on this page; do NOT navigate away before the user can copy it.
             createdSecret = plaintext;
         }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Creating API key {Name} failed", newName);
+            statusMessage = UiMessages.Unexpected;
+        }
         finally
         {
             creating = false;
@@ -592,6 +600,11 @@ else if (key is not null)
             await svc.UpdateScopesAsync(key.Id, BuildScopes());
             statusMessage = "Scopes saved. Active immediately for new requests.";
         }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving the scopes of API key {KeyId} failed", key.Id);
+            statusMessage = UiMessages.Unexpected;
+        }
         finally
         {
             savingScopes = false;
@@ -602,36 +615,47 @@ else if (key is not null)
     {
         if (createdSecret is null)
             return;
-        await JS.InvokeVoidAsync("navigator.clipboard.writeText", createdSecret);
-        copied = true;
+        copied = await JS.CopyToClipboardAsync(createdSecret);
     }
 
     private async Task CopyMcpCommandAsync()
     {
         if (createdSecret is null)
             return;
-        await JS.InvokeVoidAsync("navigator.clipboard.writeText", McpAddCommand);
-        mcpCommandCopied = true;
+        mcpCommandCopied = await JS.CopyToClipboardAsync(McpAddCommand);
     }
 
     private async Task CopyMcpCommandUserScopeAsync()
     {
         if (createdSecret is null)
             return;
-        await JS.InvokeVoidAsync("navigator.clipboard.writeText", McpAddCommandUserScope);
-        mcpCommandUserScopeCopied = true;
+        mcpCommandUserScopeCopied = await JS.CopyToClipboardAsync(McpAddCommandUserScope);
     }
 
     private async Task ConfirmRevokeAsync()
     {
+        if (revoking) return;                                // double-submit guard (before the first await)
         showRevoke = false;
         if (key is null)
             return;
-        // Only revoke keys in the current tenant scope (key was loaded scoped to ScopeTenantId).
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
-        await svc.DeleteAsync(key.Id);
-        GoBack();
+        revoking = true;
+        try
+        {
+            // Only revoke keys in the current tenant scope (key was loaded scoped to ScopeTenantId).
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IApiKeyService>();
+            await svc.DeleteAsync(key.Id);
+            GoBack();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Revoking API key {KeyId} failed", key.Id);
+            statusMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            revoking = false;
+        }
     }
 
     private void GoBack() => Nav.NavigateTo("/apikeys");

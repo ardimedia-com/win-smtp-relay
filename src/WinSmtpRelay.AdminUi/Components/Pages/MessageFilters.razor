@@ -4,6 +4,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject ILogger<MessageFilters> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -26,6 +27,11 @@
         <LucideIcon Name="info" /> About Filters
     </BbButton>
 </div>
+
+@if (!string.IsNullOrEmpty(actionError))
+{
+    <p class="form-error mb-1" role="alert">@actionError</p>
+}
 
 <BbTabs DefaultValue="headers" @bind-Value="activeTab">
     <BbTabsList>
@@ -61,7 +67,7 @@
                 }
                 @foreach (var r in headerRules)
                 {
-                    <BbTableRow Item="@r" class="list-row-clickable" @onclick="() => EditHeader(r.Id)">
+                    <BbTableRow Item="@r" class="list-row-clickable" tabindex="0" role="link" @onclick="() => EditHeader(r.Id)" @onkeydown="args => OnRowKey(args, () => EditHeader(r.Id))">
                         <BbTableCell>@r.SortOrder</BbTableCell>
                         <BbTableCell><code>@r.HeaderName</code></BbTableCell>
                         <BbTableCell>@r.Action</BbTableCell>
@@ -69,11 +75,11 @@
                         <BbTableCell>@(r.NewValue ?? "—")</BbTableCell>
                         <BbTableCell><span class="badge-status @(r.IsEnabled ? "badge-success" : "badge-muted")">@(r.IsEnabled ? "Yes" : "No")</span></BbTableCell>
                         <BbTableCell>
-                            <div class="list-row-actions" @onclick:stopPropagation="true">
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => EditHeader(r.Id)">
+                            <div class="list-row-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" aria-label="Edit" @onclick="() => EditHeader(r.Id)">
                                     <LucideIcon Name="pencil" />
                                 </BbButton>
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete" aria-label="Delete"
                                         @onclick="() => { deleteHeaderId = r.Id; showDeleteHeader = true; }">
                                     <LucideIcon Name="trash-2" />
                                 </BbButton>
@@ -111,17 +117,17 @@
                 }
                 @foreach (var r in senderRules)
                 {
-                    <BbTableRow Item="@r" class="list-row-clickable" @onclick="() => EditSender(r.Id)">
+                    <BbTableRow Item="@r" class="list-row-clickable" tabindex="0" role="link" @onclick="() => EditSender(r.Id)" @onkeydown="args => OnRowKey(args, () => EditSender(r.Id))">
                         <BbTableCell>@r.SortOrder</BbTableCell>
                         <BbTableCell><code>@r.FromPattern</code></BbTableCell>
                         <BbTableCell>@r.ToAddress</BbTableCell>
                         <BbTableCell><span class="badge-status @(r.IsEnabled ? "badge-success" : "badge-muted")">@(r.IsEnabled ? "Yes" : "No")</span></BbTableCell>
                         <BbTableCell>
-                            <div class="list-row-actions" @onclick:stopPropagation="true">
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => EditSender(r.Id)">
+                            <div class="list-row-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" aria-label="Edit" @onclick="() => EditSender(r.Id)">
                                     <LucideIcon Name="pencil" />
                                 </BbButton>
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete" aria-label="Delete"
                                         @onclick="() => { deleteSenderId = r.Id; showDeleteSender = true; }">
                                     <LucideIcon Name="trash-2" />
                                 </BbButton>
@@ -145,7 +151,7 @@
                 <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
             </BbAlertDialogCancel>
             <BbAlertDialogAction>
-                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteHeaderAsync">Delete</BbButton>
+                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteHeaderAsync" Disabled="@busy">Delete</BbButton>
             </BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
@@ -162,7 +168,7 @@
                 <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
             </BbAlertDialogCancel>
             <BbAlertDialogAction>
-                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteSenderAsync">Delete</BbButton>
+                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteSenderAsync" Disabled="@busy">Delete</BbButton>
             </BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
@@ -194,6 +200,16 @@
 </BbDialog>
 
 @code {
+    private bool busy;
+    private string? actionError;
+
+    // Opens the row's detail with the keyboard (rows are focusable: tabindex="0").
+    private static void OnRowKey(KeyboardEventArgs e, Action open)
+    {
+        if (e.Key is "Enter" or " ")
+            open();
+    }
+
     [SupplyParameterFromQuery(Name = "tab")] public string? Tab { get; set; }
 
     private IReadOnlyList<HeaderRewriteEntry> headerRules = [];
@@ -225,19 +241,49 @@
 
     private async Task ConfirmDeleteHeaderAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
-        await svc.DeleteHeaderRuleAsync(deleteHeaderId);
-        showDeleteHeader = false;
-        await RefreshAsync();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        busy = true;
+        actionError = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
+            await svc.DeleteHeaderRuleAsync(deleteHeaderId);
+            showDeleteHeader = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{Action} on the {Page} page failed", "ConfirmDeleteHeaderAsync", "MessageFilters");
+            actionError = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task ConfirmDeleteSenderAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
-        await svc.DeleteSenderRuleAsync(deleteSenderId);
-        showDeleteSender = false;
-        await RefreshAsync();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        busy = true;
+        actionError = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
+            await svc.DeleteSenderRuleAsync(deleteSenderId);
+            showDeleteSender = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{Action} on the {Page} page failed", "ConfirmDeleteSenderAsync", "MessageFilters");
+            actionError = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 }

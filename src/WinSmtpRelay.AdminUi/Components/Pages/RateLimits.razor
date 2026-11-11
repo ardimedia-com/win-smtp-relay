@@ -3,6 +3,7 @@
 @using WinSmtpRelay.Core.Models
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject ITenantScopeFactory ScopeFactory
+@inject ILogger<RateLimits> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -59,14 +60,19 @@ else
                     <BbInput Id="failed-auth-ban-duration" Type="InputType.Number" @bind-Value="banMinutes" />
                 </div>
             </div>
+            <p class="hint">A connection or message limit of 0 switches that limit off.</p>
+            @if (validationError is not null)
+            {
+                <p class="form-error" role="alert">@validationError</p>
+            }
         </BbCardContent>
         <BbCardFooter>
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync">
-                <LucideIcon Name="save" /> Save
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@saving">
+                <LucideIcon Name="save" /> @(saving ? "Saving…" : "Save")
             </BbButton>
             @if (!string.IsNullOrEmpty(statusMessage))
             {
-                <span class="text-muted" style="margin-left:1rem">@statusMessage</span>
+                <span class="status-note" role="status">@statusMessage</span>
             }
         </BbCardFooter>
     </BbCard>
@@ -99,6 +105,8 @@ else
     private bool isLoading = true;
     private bool showHelp;
     private string? statusMessage;
+    private string? validationError;
+    private bool saving;
 
     private string maxConnPerIp = "30";
     private string maxMsgPerMin = "20";
@@ -122,19 +130,43 @@ else
 
     private async Task SaveAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IRateLimitSettingsService>();
+        if (saving) return;                                  // double-submit guard (before the first await)
+        statusMessage = null;
 
-        await svc.UpdateAsync(new RateLimitSettings
+        // No silent fallback: an unparsable or negative value is reported, nothing is saved.
+        if (!InputValidation.TryParseInt(maxConnPerIp, "Max connections per IP per minute", 0, 100_000, out var connPerIp, out validationError)
+            || !InputValidation.TryParseInt(maxMsgPerMin, "Max messages per sender per minute", 0, 100_000, out var msgPerMin, out validationError)
+            || !InputValidation.TryParseInt(maxMsgPerDay, "Max messages per sender per day", 0, 10_000_000, out var msgPerDay, out validationError)
+            || !InputValidation.TryParseInt(banThreshold, "Failed auth ban threshold", 1, 1_000, out var threshold, out validationError)
+            || !InputValidation.TryParseInt(banMinutes, "Failed auth ban duration", 1, 525_600, out var minutes, out validationError))
+            return;
+
+        saving = true;
+        try
         {
-            Id = 1,
-            MaxConnectionsPerIpPerMinute = int.TryParse(maxConnPerIp, out var v1) ? v1 : 30,
-            MaxMessagesPerSenderPerMinute = int.TryParse(maxMsgPerMin, out var v2) ? v2 : 20,
-            MaxMessagesPerSenderPerDay = int.TryParse(maxMsgPerDay, out var v3) ? v3 : 1000,
-            FailedAuthBanThreshold = int.TryParse(banThreshold, out var v4) ? v4 : 5,
-            FailedAuthBanMinutes = int.TryParse(banMinutes, out var v5) ? v5 : 30
-        });
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IRateLimitSettingsService>();
 
-        statusMessage = "Settings saved";
+            await svc.UpdateAsync(new RateLimitSettings
+            {
+                Id = 1,
+                MaxConnectionsPerIpPerMinute = connPerIp,
+                MaxMessagesPerSenderPerMinute = msgPerMin,
+                MaxMessagesPerSenderPerDay = msgPerDay,
+                FailedAuthBanThreshold = threshold,
+                FailedAuthBanMinutes = minutes
+            });
+
+            statusMessage = "Settings saved";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving the rate limit settings failed");
+            statusMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            saving = false;
+        }
     }
 }

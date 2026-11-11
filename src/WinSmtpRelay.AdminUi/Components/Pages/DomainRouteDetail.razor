@@ -5,6 +5,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject ILogger<DomainRouteDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -43,6 +44,7 @@ else
                 <div class="form-group">
                     <BbLabel For="domain-pattern">Domain Pattern</BbLabel>
                     <BbInput Id="domain-pattern" @bind-Value="domainPattern" Placeholder="*.example.com" />
+                    <p class="hint">A domain (example.com) or a wildcard for it and all its subdomains (*.example.com).</p>
                 </div>
                 <div class="form-group">
                     <BbLabel For="send-connector">Send Connector</BbLabel>
@@ -58,10 +60,14 @@ else
                     <BbInput Id="sort-order" Type="InputType.Number" @bind-Value="sortOrder" />
                 </div>
             </div>
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <p class="form-error" role="alert">@errorMessage</p>
+            }
         </BbCardContent>
         <BbCardFooter>
             <div class="flex gap-1 items-center">
-                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(domainPattern)">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(domainPattern))">
                     <LucideIcon Name="save" /> Save
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
@@ -76,6 +82,8 @@ else
 
     private bool isLoading = true;
     private bool notFound;
+    private bool busy;
+    private string? errorMessage;
 
     private IReadOnlyList<SendConnector> connectors = [];
     private string domainPattern = "";
@@ -110,20 +118,61 @@ else
 
     private async Task SaveAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IDomainRouteService>();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        errorMessage = null;
 
-        var route = new DomainRoute
+        // "*.example.com" matches the domain and every subdomain; validate the part after the wildcard.
+        var text = domainPattern.Trim();
+        var wildcard = text.StartsWith("*.", StringComparison.Ordinal);
+        if (!InputValidation.TryNormalizeDomain(wildcard ? text[2..] : text, out var domain, out var domainError))
         {
-            Id = Id ?? 0,
-            DomainPattern = domainPattern.Trim(),
-            SendConnectorId = int.TryParse(connectorId, out var cid) ? cid : 0,
-            SortOrder = int.TryParse(sortOrder, out var s) ? s : 0
-        };
+            errorMessage = domainError;
+            return;
+        }
+        if (!int.TryParse(connectorId, out var cid) || connectors.All(c => c.Id != cid))
+        {
+            errorMessage = "Select a send connector.";
+            return;
+        }
+        if (!InputValidation.TryParseInt(sortOrder, "Sort order", 0, int.MaxValue, out var order, out var orderError))
+        {
+            errorMessage = orderError;
+            return;
+        }
 
-        if (IsNew) await svc.CreateAsync(route);
-        else await svc.UpdateAsync(route);
-        Nav.NavigateTo("/connectors/send?tab=routes");
+        busy = true;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IDomainRouteService>();
+
+            var route = new DomainRoute
+            {
+                Id = Id ?? 0,
+                DomainPattern = wildcard ? "*." + domain : domain,
+                SendConnectorId = cid,
+                SortOrder = order
+            };
+
+            if (IsNew) await svc.CreateAsync(route);
+            else await svc.UpdateAsync(route);
+            Nav.NavigateTo("/connectors/send?tab=routes");
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The service refuses a connector outside the current scope with a message meant for the user.
+            Logger.LogWarning(ex, "Saving domain route {Pattern} was refused", domainPattern);
+            errorMessage = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving domain route {Pattern} failed", domainPattern);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private void Cancel() => Nav.NavigateTo("/connectors/send?tab=routes");

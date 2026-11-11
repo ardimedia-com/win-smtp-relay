@@ -7,6 +7,7 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject IAuthorizationService AuthorizationService
+@inject ILogger<Setup> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -292,6 +293,10 @@ else
                             </BbButton>
                         </div>
                     </div>
+                }
+                @if (copyStatus is not null)
+                {
+                    <p class="hint" role="status">@copyStatus</p>
                 }
                 <div style="margin-top:0.75rem;">
                     <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="@(() => Nav.NavigateTo("/deliverability"))">
@@ -676,11 +681,12 @@ else
                      ?? recommendedItems.FirstOrDefault(i => i.NeedsAttention);
     }
 
+    private string? copyStatus;
+
     private async Task CopyAsync(string value)
     {
-        // clipboard API throws on non-secure origins or when permission is denied.
-        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); }
-        catch { /* best-effort copy */ }
+        // The helper never throws: it falls back on plain HTTP and reports a refusal as false.
+        copyStatus = await JS.CopyToClipboardAsync(value) ? "Copied." : UiMessages.CopyFailed;
     }
 
     // ----- Test message -----
@@ -697,33 +703,31 @@ else
 
     private async Task VerifyAuthAsync()
     {
+        if (authChecking || testSending) return;              // double-submit guard (before the first await)
         authError = null;
         authCheck = null;
         var from = testFrom.Trim();
         if (ValidateEmail(from, "From") is { } err) { authError = err; return; }
         if (readiness?.TenantId is not { } tenantId) { authError = "No tenant in scope."; return; }
 
-        // Mirror the server-side policy check used by the send action — the AuthorizeView only hides UI.
-        if (AuthState is not null)
+        authChecking = true;
+        try
         {
-            var user = (await AuthState).User;
-            if (!(await AuthorizationService.AuthorizeAsync(user, AuthorizationPolicies.AdminFull)).Succeeded)
+            // Mirror the server-side policy check used by the send action — the AuthorizeView only hides UI.
+            if (!await AuthorizationService.IsAllowedAsync(AuthState, AuthorizationPolicies.AdminFull))
             {
                 authError = "You don't have permission to run this check.";
                 return;
             }
-        }
 
-        authChecking = true;
-        try
-        {
             using var scope = ScopeFactory.CreateScope();
             var svc = scope.ServiceProvider.GetRequiredService<IOutboundAuthCheckService>();
             authCheck = await svc.CheckAsync(tenantId, from);
         }
         catch (Exception ex)
         {
-            authError = $"Could not run the check: {ex.Message}";
+            Logger.LogError(ex, "Outbound authentication self-check for tenant {TenantId} failed", tenantId);
+            authError = UiMessages.Unexpected;
         }
         finally
         {
@@ -764,6 +768,7 @@ else
 
     private async Task SendTestAsync()
     {
+        if (testSending || authChecking) return;              // double-submit guard (before the first await)
         testResult = null;
         testError = null;
         var from = testFrom.Trim();
@@ -772,21 +777,18 @@ else
         if (ValidateEmail(to, "recipient") is { } toErr) { testError = toErr; return; }
         if (readiness?.TenantId is not { } tenantId) { testError = "No tenant in scope."; return; }
 
-        // The AuthorizeView around the button only hides UI — the circuit handler must re-check the
-        // policy server-side, otherwise a read-only viewer could invoke it over the circuit.
-        if (AuthState is not null)
+        // Set before the first await (the policy check below awaits), so a second click returns above.
+        testSending = true;
+        try
         {
-            var user = (await AuthState).User;
-            if (!(await AuthorizationService.AuthorizeAsync(user, AuthorizationPolicies.AdminFull)).Succeeded)
+            // The AuthorizeView around the button only hides UI — the circuit handler must re-check the
+            // policy server-side, otherwise a read-only viewer could invoke it over the circuit.
+            if (!await AuthorizationService.IsAllowedAsync(AuthState, AuthorizationPolicies.AdminFull))
             {
                 testError = "You don't have permission to send test messages.";
                 return;
             }
-        }
 
-        testSending = true;
-        try
-        {
             using var scope = ScopeFactory.CreateScope();
 
             // Direct queue injection bypasses the SMTP ingress checks (RelayMailboxFilter), so enforce
@@ -820,7 +822,8 @@ else
         }
         catch (Exception ex)
         {
-            testError = $"Could not queue the test message: {ex.Message}";
+            Logger.LogError(ex, "Queueing the Setup test message for tenant {TenantId} failed", tenantId);
+            testError = "Could not queue the test message. " + UiMessages.Unexpected;
         }
         finally
         {

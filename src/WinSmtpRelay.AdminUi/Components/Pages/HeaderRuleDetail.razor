@@ -5,6 +5,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject ILogger<HeaderRuleDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -67,10 +68,14 @@ else
                     </BbNativeSelect>
                 </div>
             </div>
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <p class="form-error" role="alert">@errorMessage</p>
+            }
         </BbCardContent>
         <BbCardFooter>
             <div class="flex gap-1 items-center">
-                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(headerName)">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(headerName))">
                     <LucideIcon Name="save" /> Save
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
@@ -85,6 +90,8 @@ else
 
     private bool isLoading = true;
     private bool notFound;
+    private bool busy;
+    private string? errorMessage;
 
     private string headerName = "";
     private string action = "Set";
@@ -120,23 +127,52 @@ else
 
     private async Task SaveAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        errorMessage = null;
 
-        var entry = new HeaderRewriteEntry
+        // RFC 5322 field name: printable ASCII except the colon, no spaces.
+        var name = headerName.Trim();
+        if (name.Length == 0 || name.Any(ch => ch < 33 || ch > 126 || ch == ':'))
         {
-            Id = Id ?? 0,
-            HeaderName = headerName.Trim(),
-            Action = action,
-            MatchValue = string.IsNullOrWhiteSpace(matchValue) ? null : matchValue.Trim(),
-            NewValue = string.IsNullOrWhiteSpace(newValue) ? null : newValue.Trim(),
-            SortOrder = int.TryParse(sortOrder, out var s) ? s : 0,
-            IsEnabled = enabled == "true"
-        };
+            errorMessage = "Header name: use letters, digits and dashes only (no spaces or colon), e.g. X-Custom-Header.";
+            return;
+        }
+        if (!InputValidation.TryParseInt(sortOrder, "Sort order", 0, int.MaxValue, out var order, out var orderError))
+        {
+            errorMessage = orderError;
+            return;
+        }
 
-        if (IsNew) await svc.CreateHeaderRuleAsync(entry);
-        else await svc.UpdateHeaderRuleAsync(entry);
-        Nav.NavigateTo("/filters?tab=headers");
+        busy = true;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
+
+            var entry = new HeaderRewriteEntry
+            {
+                Id = Id ?? 0,
+                HeaderName = name,
+                Action = action,
+                MatchValue = string.IsNullOrWhiteSpace(matchValue) ? null : matchValue.Trim(),
+                NewValue = string.IsNullOrWhiteSpace(newValue) ? null : newValue.Trim(),
+                SortOrder = order,
+                IsEnabled = enabled == "true"
+            };
+
+            if (IsNew) await svc.CreateHeaderRuleAsync(entry);
+            else await svc.UpdateHeaderRuleAsync(entry);
+            Nav.NavigateTo("/filters?tab=headers");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving header rule {HeaderName} failed", name);
+            errorMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private void Cancel() => Nav.NavigateTo("/filters?tab=headers");

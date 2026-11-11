@@ -5,6 +5,7 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject ICurrentTenant CurrentTenant
 @inject NavigationManager Nav
+@inject ILogger<SuppressionDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -31,7 +32,7 @@
     </BbCardContent>
     <BbCardFooter>
         <div class="flex gap-1 items-center">
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@(!IsValid)">
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@(busy || !IsValid)">
                 <LucideIcon Name="save" /> Add
             </BbButton>
             <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
@@ -44,6 +45,7 @@
 @code {
     private string address = "";
     private string? statusMessage;
+    private bool busy;
 
     // Minimal sanity check — a single "@" with non-empty local/domain parts.
     private bool IsValid
@@ -58,16 +60,32 @@
 
     private async Task SaveAsync()
     {
-        if (!IsValid)
+        if (busy) return;                                   // double-submit guard (before the first await)
+        statusMessage = null;
+        if (!IsValid || !InputValidation.IsPlausibleEmail(address))
         {
             statusMessage = "Enter a valid email address.";
             return;
         }
-        var tenantId = CurrentTenant.TenantId ?? TenantDefaults.DefaultTenantId;
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ISuppressionService>();
-        await svc.AddAsync(address.Trim(), SuppressionReason.Manual, "Added manually", tenantId);
-        Nav.NavigateTo("/suppressions");
+
+        busy = true;
+        try
+        {
+            var tenantId = CurrentTenant.TenantId ?? TenantDefaults.DefaultTenantId;
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<ISuppressionService>();
+            await svc.AddAsync(address.Trim(), SuppressionReason.Manual, "Added manually", tenantId);
+            Nav.NavigateTo("/suppressions");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Adding suppressed address {Address} failed", address.Trim());
+            statusMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private void Cancel() => Nav.NavigateTo("/suppressions");

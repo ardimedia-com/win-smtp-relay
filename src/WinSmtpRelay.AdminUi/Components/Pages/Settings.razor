@@ -5,6 +5,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.HostAdmin)]
 @inject IServiceScopeFactory ScopeFactory
 @inject WinSmtpRelay.AdminUi.Services.PublicIpDetector IpDetector
+@inject ILogger<Settings> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -103,12 +104,12 @@ else
                 </p>
             </div>
 
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveEmailAuthAsync" Class="mt-1">
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveEmailAuthAsync" Class="mt-1" Disabled="@saving">
                 <LucideIcon Name="save" /> Save
             </BbButton>
             @if (!string.IsNullOrEmpty(emailAuthStatus))
             {
-                <p class="text-muted" style="margin-top:0.5rem;">@emailAuthStatus</p>
+                <p class="@StatusCss(emailAuthStatus)" style="margin-top:0.5rem;" role="status">@emailAuthStatus</p>
             }
         </BbCardContent>
     </BbCard>
@@ -146,12 +147,12 @@ else
                 </div>
             </div>
 
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveBackupMxAsync" Class="mt-1">
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveBackupMxAsync" Class="mt-1" Disabled="@saving">
                 <LucideIcon Name="save" /> Save
             </BbButton>
             @if (!string.IsNullOrEmpty(backupMxStatus))
             {
-                <p class="text-muted" style="margin-top:0.5rem;">@backupMxStatus</p>
+                <p class="@StatusCss(backupMxStatus)" style="margin-top:0.5rem;" role="status">@backupMxStatus</p>
             }
         </BbCardContent>
     </BbCard>
@@ -255,12 +256,12 @@ else
                 </div>
             }
 
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveDataRetentionAsync" Class="mt-1">
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveDataRetentionAsync" Class="mt-1" Disabled="@saving">
                 <LucideIcon Name="save" /> Save
             </BbButton>
             @if (!string.IsNullOrEmpty(statisticsStatus))
             {
-                <p class="text-muted" style="margin-top:0.5rem;">@statisticsStatus</p>
+                <p class="@StatusCss(statisticsStatus)" style="margin-top:0.5rem;" role="status">@statisticsStatus</p>
             }
         </BbCardContent>
     </BbCard>
@@ -343,12 +344,12 @@ else
                     <BbInput Id="dmarc-percentage" Type="InputType.Number" @bind-Value="dnsDmarcPct" />
                 </div>
             </div>
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveDnsAsync" Class="mt-1">
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveDnsAsync" Class="mt-1" Disabled="@saving">
                 <LucideIcon Name="save" /> Save
             </BbButton>
             @if (!string.IsNullOrEmpty(dnsStatus))
             {
-                <p class="text-muted" style="margin-top:0.5rem;">@dnsStatus</p>
+                <p class="@StatusCss(dnsStatus)" style="margin-top:0.5rem;" role="status">@dnsStatus</p>
             }
         </BbCardContent>
     </BbCard>
@@ -420,12 +421,12 @@ else
                     }
                 </p>
             </div>
-            <BbButton Variant="ButtonVariant.Default" @onclick="SaveReportingAsync" Class="mt-1">
+            <BbButton Variant="ButtonVariant.Default" @onclick="SaveReportingAsync" Class="mt-1" Disabled="@saving">
                 <LucideIcon Name="save" /> Save
             </BbButton>
             @if (!string.IsNullOrEmpty(reportingStatus))
             {
-                <p class="text-muted" style="margin-top:0.5rem;">@reportingStatus</p>
+                <p class="@StatusCss(reportingStatus)" style="margin-top:0.5rem;" role="status">@reportingStatus</p>
             }
         </BbCardContent>
     </BbCard>
@@ -488,6 +489,41 @@ else
     private string? scheduleSummary;
     private string reportBounceThreshold = "10";
     private string? reportingStatus;
+
+    // One flag for the whole page: every Save is guarded against a double submit (set before the first await).
+    private bool saving;
+
+    // Validation and failure messages are collected here so the status line can render them as an error.
+    private readonly HashSet<string> errorStatuses = [];
+
+    private string StatusCss(string? status) =>
+        status is not null && errorStatuses.Contains(status) ? "form-error" : "text-muted";
+
+    private string Fail(string message)
+    {
+        errorStatuses.Add(message);
+        return message;
+    }
+
+    /// <summary>Runs one save with the double-submit guard; an unexpected exception is logged and shown generically.</summary>
+    private async Task SaveGuardedAsync(string section, Func<Task> save, Action<string> setStatus)
+    {
+        if (saving) return;
+        saving = true;
+        try
+        {
+            await save();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving the {Section} settings failed", section);
+            setStatus(Fail(UiMessages.Unexpected));
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
 
     private bool detectingIp;
     private List<string> detectedIps = [];
@@ -557,6 +593,7 @@ else
 
     private async Task DetectIpAsync()
     {
+        if (detectingIp) return;
         detectingIp = true;
         detectedNone = false;
         StateHasChanged();
@@ -592,27 +629,51 @@ else
         dnsSendingIps = string.Join("; ", parts);
     }
 
-    private async Task SaveEmailAuthAsync()
+    private Task SaveEmailAuthAsync() => SaveGuardedAsync("email authentication", async () =>
     {
         using var scope = ScopeFactory.CreateScope();
         await scope.ServiceProvider.GetRequiredService<IEmailAuthSettingsService>()
             .UpdateAsync(spfEnabled, dmarcEnabled, enforcement, requireSenderVerification, requireRecipientVerification,
                 bindTenantToAllowIpRule, rejectUnresolvedTenant);
         emailAuthStatus = $"Email authentication saved (SPF {(spfEnabled ? "on" : "off")}, DMARC {(dmarcEnabled ? "on" : "off")}, enforcement {enforcement}).";
-    }
+    }, s => emailAuthStatus = s);
 
-    private async Task SaveBackupMxAsync()
+    private Task SaveBackupMxAsync()
     {
-        var retry = int.TryParse(bmRetryInterval, out var r) ? Math.Max(1, r) : 15;
-        var hold = int.TryParse(bmMaxHold, out var h) ? Math.Max(1, h) : 168;
-        using var scope = ScopeFactory.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IBackupMxSettingsService>()
-            .UpdateAsync(bmEnabled, bmDomains, retry, hold);
-        bmRetryInterval = retry.ToString();
-        bmMaxHold = hold.ToString();
-        backupMxStatus = bmEnabled
-            ? $"Backup MX enabled for: {(string.IsNullOrWhiteSpace(bmDomains) ? "(no domains set)" : bmDomains)}."
-            : "Backup MX disabled.";
+        // No silent fallback to defaults: an unparsable or out-of-range value is reported and nothing is saved.
+        if (!InputValidation.TryParseInt(bmRetryInterval, "Retry interval", 1, 1440, out var retry, out var error)
+            || !InputValidation.TryParseInt(bmMaxHold, "Max hold time", 1, 8760, out var hold, out error))
+        {
+            backupMxStatus = Fail(error!);
+            return Task.CompletedTask;
+        }
+
+        // Each backup-MX domain is validated and stored as ASCII (IDN → punycode), lower-case.
+        var domains = new List<string>();
+        foreach (var raw in (bmDomains ?? "").Split([';', ',', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!InputValidation.TryNormalizeDomain(raw, out var domain, out error))
+            {
+                backupMxStatus = Fail(error!);
+                return Task.CompletedTask;
+            }
+            if (!domains.Contains(domain))
+                domains.Add(domain);
+        }
+        var domainList = string.Join("; ", domains);
+
+        return SaveGuardedAsync("backup MX", async () =>
+        {
+            using var scope = ScopeFactory.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<IBackupMxSettingsService>()
+                .UpdateAsync(bmEnabled, domainList, retry, hold);
+            bmDomains = domainList;
+            bmRetryInterval = retry.ToString();
+            bmMaxHold = hold.ToString();
+            backupMxStatus = bmEnabled
+                ? $"Backup MX enabled for: {(domains.Count == 0 ? "(no domains set)" : domainList)}."
+                : "Backup MX disabled.";
+        }, s => backupMxStatus = s);
     }
 
     // Data-retention profile reconciliation: the dropdown reflects whichever template the current field
@@ -673,15 +734,32 @@ else
         }
     }
 
-    private async Task SaveDataRetentionAsync()
+    private Task SaveDataRetentionAsync()
     {
-        var statDays = int.TryParse(statRetentionDays, out var sd) ? Math.Max(1, sd) : 365;
-        var time = TimeOnly.TryParse(statAggTime, out var t) ? t.ToString("HH:mm") : "00:00";
-        var msgDays = int.TryParse(drMessageDays, out var md) ? Math.Max(1, md) : 30;
-        var logDays = int.TryParse(drLogDays, out var ld) ? Math.Max(DataRetentionSettings.DeliveryLogFloorDays, ld) : 90;
-        var supDays = int.TryParse(drSuppressionDays, out var sup) ? Math.Max(0, sup) : 0;
-        var resendDays = int.TryParse(drResendDays, out var rd) ? Math.Max(0, rd) : 7;
+        // No silent fallback to defaults: every field must parse and be in range, otherwise nothing is saved.
+        const int MaxDays = 36_500;
+        if (!InputValidation.TryParseInt(statRetentionDays, "Statistics retention", 1, MaxDays, out var statDays, out var error)
+            || !InputValidation.TryParseInt(drMessageDays, "Message history", 1, MaxDays, out var msgDays, out error)
+            || !InputValidation.TryParseInt(drLogDays, "Delivery audit log", DataRetentionSettings.DeliveryLogFloorDays, MaxDays, out var logDays, out error)
+            || !InputValidation.TryParseInt(drSuppressionDays, "Suppression expiry", 0, MaxDays, out var supDays, out error)
+            || !InputValidation.TryParseInt(drResendDays, "Resend retention", 0, MaxDays, out var resendDays, out error))
+        {
+            statisticsStatus = Fail(error!);
+            return Task.CompletedTask;
+        }
+        if (!WinSmtpRelay.Core.DailySchedule.TryParseTime(statAggTime, out var t))
+        {
+            statisticsStatus = Fail($"Maintenance time: '{statAggTime}' is not a valid time (HH:mm).");
+            return Task.CompletedTask;
+        }
+        var time = t.ToString("HH:mm");
 
+        return SaveGuardedAsync("data retention", () => SaveDataRetentionCoreAsync(statDays, time, msgDays, logDays, supDays, resendDays),
+            s => statisticsStatus = s);
+    }
+
+    private async Task SaveDataRetentionCoreAsync(int statDays, string time, int msgDays, int logDays, int supDays, int resendDays)
+    {
         // Reflect normalised values before reconciling the profile so the saved Profile matches what's stored.
         statRetentionDays = statDays.ToString();
         statAggTime = time;
@@ -711,54 +789,113 @@ else
                          + $"statistics {statDays}d, suppression {(supDays == 0 ? "kept" : supDays + "d")}. Maintenance at {time} UTC.";
     }
 
-    private async Task SaveDnsAsync()
+    private Task SaveDnsAsync()
     {
-        var pct = int.TryParse(dnsDmarcPct, out var p) ? Math.Clamp(p, 1, 100) : 100;
-        using var scope = ScopeFactory.CreateScope();
-        try
+        if (!InputValidation.TryParseInt(dnsDmarcPct, "DMARC percentage", 1, 100, out var pct, out var error))
         {
-            await scope.ServiceProvider.GetRequiredService<IDnsSettingsService>().UpdateAsync(new WinSmtpRelay.Core.Models.DnsSettings
+            dnsStatus = Fail(error!);
+            return Task.CompletedTask;
+        }
+
+        string? hostname = null;
+        if (!string.IsNullOrWhiteSpace(dnsPublicHostname))
+        {
+            if (!InputValidation.TryNormalizeDomain(dnsPublicHostname, out var h, out error))
             {
-                PublicHostname = dnsPublicHostname,
-                SendingIpAddresses = dnsSendingIps ?? "",
-                SpfIncludes = dnsSpfIncludes ?? "",
-                SpfAllQualifier = dnsSpfAll,
-                DmarcReportEmail = dnsDmarcEmail,
-                DmarcPolicy = dnsDmarcPolicy,
-                DmarcPercentage = pct
-            });
+                dnsStatus = Fail($"Public hostname: {error}");
+                return Task.CompletedTask;
+            }
+            hostname = h;
         }
-        catch (InvalidOperationException ex)
+
+        foreach (var ip in SplitIps(dnsSendingIps))
         {
-            dnsStatus = ex.Message;
-            return;
+            if (!InputValidation.TryNormalizeNetwork(ip, out _, out error))
+            {
+                dnsStatus = Fail($"Public sending IP addresses: {error}");
+                return Task.CompletedTask;
+            }
         }
-        dnsDmarcPct = pct.ToString();
-        dnsStatus = "DNS recommendation settings saved. The Deliverability page reflects them on its next check.";
+
+        var dmarcEmail = dnsDmarcEmail?.Trim();
+        if (!string.IsNullOrEmpty(dmarcEmail) && !InputValidation.IsPlausibleEmail(dmarcEmail))
+        {
+            dnsStatus = Fail($"DMARC report address: '{dmarcEmail}' is not a valid email address.");
+            return Task.CompletedTask;
+        }
+
+        return SaveGuardedAsync("DNS", async () =>
+        {
+            using var scope = ScopeFactory.CreateScope();
+            try
+            {
+                await scope.ServiceProvider.GetRequiredService<IDnsSettingsService>().UpdateAsync(new WinSmtpRelay.Core.Models.DnsSettings
+                {
+                    PublicHostname = hostname,
+                    SendingIpAddresses = dnsSendingIps ?? "",
+                    SpfIncludes = dnsSpfIncludes ?? "",
+                    SpfAllQualifier = dnsSpfAll,
+                    DmarcReportEmail = string.IsNullOrEmpty(dmarcEmail) ? null : dmarcEmail,
+                    DmarcPolicy = dnsDmarcPolicy,
+                    DmarcPercentage = pct
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                // DnsSettingsService refuses invalid sending IPs with a message written for the operator.
+                dnsStatus = Fail(ex.Message);
+                return;
+            }
+            dnsPublicHostname = hostname;
+            dnsDmarcPct = pct.ToString();
+            dnsStatus = "DNS recommendation settings saved. The Deliverability page reflects them on its next check.";
+        }, s => dnsStatus = s);
     }
 
-    private async Task SaveReportingAsync()
+    private Task SaveReportingAsync()
     {
-        var threshold = int.TryParse(reportBounceThreshold, out var t) ? Math.Clamp(t, 0, 100) : 10;
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IReportingSettingsService>();
-        try
+        if (!InputValidation.TryParseInt(reportBounceThreshold, "Bounce-rate alert threshold", 0, 100, out var threshold, out var error))
         {
-            await svc.UpdateAsync(reportEnabled, reportRecipient, reportFrom, reportDailyTime, reportSelfCheckTime,
-                reportTimeZone, threshold);
+            reportingStatus = Fail(error!);
+            return Task.CompletedTask;
         }
-        catch (ArgumentException ex)
+        var recipient = reportRecipient?.Trim();
+        if (!string.IsNullOrEmpty(recipient) && !InputValidation.IsPlausibleEmail(recipient))
         {
-            reportingStatus = ex.Message.Split(" (Parameter", 2)[0];
-            return;
+            reportingStatus = Fail($"Report recipient: '{recipient}' is not a valid email address.");
+            return Task.CompletedTask;
         }
-        reportBounceThreshold = threshold.ToString();
-        LoadSchedule(await svc.GetAsync());
-        reportingStatus = reportEnabled
-            ? (string.IsNullOrWhiteSpace(reportRecipient)
-                ? "Saved, but reporting needs a recipient address to send anything."
-                : $"Reporting enabled — sending to {reportRecipient!.Trim()}.")
-            : "Reporting disabled.";
+        var from = reportFrom?.Trim();
+        if (!string.IsNullOrEmpty(from) && !InputValidation.IsPlausibleEmail(from))
+        {
+            reportingStatus = Fail($"From-address: '{from}' is not a valid email address.");
+            return Task.CompletedTask;
+        }
+
+        return SaveGuardedAsync("reporting", async () =>
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IReportingSettingsService>();
+            try
+            {
+                await svc.UpdateAsync(reportEnabled, recipient, from, reportDailyTime, reportSelfCheckTime,
+                    reportTimeZone, threshold);
+            }
+            catch (ArgumentException ex)
+            {
+                // ReportingSettingsService validates the times and the time zone with messages written for the
+                // operator; strip the framework's " (Parameter 'x')" suffix.
+                reportingStatus = Fail(ex.Message.Split(" (Parameter", 2)[0]);
+                return;
+            }
+            reportBounceThreshold = threshold.ToString();
+            LoadSchedule(await svc.GetAsync());
+            reportingStatus = reportEnabled
+                ? (string.IsNullOrEmpty(recipient)
+                    ? "Saved, but reporting needs a recipient address to send anything."
+                    : $"Reporting enabled — sending to {recipient}.")
+                : "Reporting disabled.";
+        }, s => reportingStatus = s);
     }
 
     // The schedule as stored: local times + zone, and the next runs it produces (shown in the zone, with UTC).

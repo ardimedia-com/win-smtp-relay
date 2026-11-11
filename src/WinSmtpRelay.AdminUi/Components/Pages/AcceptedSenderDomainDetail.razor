@@ -7,6 +7,7 @@
 @inject IDnsSetupService DnsSetup
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ILogger<AcceptedSenderDomainDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -39,11 +40,15 @@ else if (IsNew)
             <div class="form-group">
                 <BbLabel For="domain">Domain</BbLabel>
                 <BbInput Id="domain" @bind-Value="newDomain" Placeholder="example.com" />
+                @if (!string.IsNullOrEmpty(validationError))
+                {
+                    <p class="form-error" role="alert">@validationError</p>
+                }
             </div>
         </BbCardContent>
         <BbCardFooter>
             <div class="flex gap-1 items-center">
-                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@string.IsNullOrWhiteSpace(newDomain)">
+                <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(newDomain))">
                     <LucideIcon Name="save" /> Save
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
@@ -69,7 +74,7 @@ else
                 <div class="form-group">
                     <BbLabel>Ownership</BbLabel>
                     <div>
-                        <span class="badge-status badge-success" title="@VerifiedTitle">Verified @verifiedUtc.Value.ToString("yyyy-MM-dd")</span>
+                        <span class="badge-status badge-success">Verified <LocalTime Utc="@verifiedUtc" Format="yyyy-MM-dd" /></span>
                     </div>
                 </div>
             }
@@ -81,7 +86,7 @@ else
                 </div>
                 <div class="form-group">
                     <BbLabel>DNS TXT record to publish</BbLabel>
-                    <div class="text-muted" style="font-size:0.8rem;margin-bottom:0.5rem;">
+                    <div class="hint mb-1">
                         Add this TXT record at your DNS provider, then click Verify. DNS can take time to propagate.
                     </div>
                     <div class="dns-record-row">
@@ -102,7 +107,7 @@ else
             <div class="flex gap-1 items-center">
                 @if (verifiedUtc is null)
                 {
-                    <BbButton Variant="ButtonVariant.Default" @onclick="VerifyAsync" Disabled="@isVerifying">
+                    <BbButton Variant="ButtonVariant.Default" @onclick="VerifyAsync" Disabled="@busy">
                         <LucideIcon Name="shield-check" /> Verify
                     </BbButton>
                 }
@@ -122,7 +127,8 @@ else
 
     private bool isLoading = true;
     private bool notFound;
-    private bool isVerifying;
+    private bool busy;
+    private string? validationError;
     private string? statusMessage;
 
     // New-domain form.
@@ -133,8 +139,6 @@ else
     private string verificationToken = "";
     private string ownershipRecord = "";
     private DateTimeOffset? verifiedUtc;
-
-    private string VerifiedTitle => $"Verified {verifiedUtc:yyyy-MM-dd}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -168,56 +172,87 @@ else
 
     private async Task SaveAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
-
-        if (await svc.ExistsAsync(newDomain))
+        if (busy) return;                                   // double-submit guard (before the first await)
+        validationError = null;
+        statusMessage = null;
+        if (!InputValidation.TryNormalizeDomain(newDomain, out var normalized, out var error))
         {
-            statusMessage = $"Domain '{newDomain}' is already in use";
+            validationError = error;
             return;
         }
 
-        AcceptedSenderDomain created;
+        busy = true;
         try
         {
-            created = await svc.CreateAsync(newDomain);
-        }
-        catch (InvalidOperationException ex)
-        {
-            statusMessage = ex.Message;
-            return;
-        }
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
 
-        // Return to the list after a successful save.
-        Nav.NavigateTo("/domains/sender");
+            if (await svc.ExistsAsync(normalized))
+            {
+                statusMessage = $"Domain '{normalized}' is already in use";
+                return;
+            }
+
+            try
+            {
+                await svc.CreateAsync(normalized);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Deliberate refusal from the service (duplicate domain) — meant for the user.
+                statusMessage = ex.Message;
+                return;
+            }
+
+            // Return to the list after a successful save.
+            Nav.NavigateTo("/domains/sender");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Adding accepted sender domain {Domain} failed", normalized);
+            statusMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task VerifyAsync()
     {
-        isVerifying = true;
+        if (busy) return;
+        busy = true;
         statusMessage = $"Checking DNS for {domain}…";
-        StateHasChanged();
-
-        var verified = await DnsSetup.CheckOwnershipAsync(domain, verificationToken);
-        if (verified)
+        try
         {
-            using var scope = ScopeFactory.CreateScope();
-            await scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>().MarkVerifiedAsync(Id!.Value);
-            await LoadAsync();
-            statusMessage = $"Ownership of {domain} verified";
+            var verified = await DnsSetup.CheckOwnershipAsync(domain, verificationToken);
+            if (verified)
+            {
+                using var scope = ScopeFactory.CreateScope();
+                await scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>().MarkVerifiedAsync(Id!.Value);
+                await LoadAsync();
+                statusMessage = $"Ownership of {domain} verified";
+            }
+            else
+            {
+                statusMessage = $"Verification TXT record for {domain} not found yet (DNS can take time to propagate)";
+            }
         }
-        else
+        catch (Exception ex)
         {
-            statusMessage = $"Verification TXT record for {domain} not found yet (DNS can take time to propagate)";
+            Logger.LogError(ex, "Verifying ownership of sender domain {Domain} failed", domain);
+            statusMessage = UiMessages.Unexpected;
         }
-
-        isVerifying = false;
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task CopyAsync(string value)
     {
-        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); }
-        catch { /* best-effort copy */ }
+        if (!await JS.CopyToClipboardAsync(value))
+            statusMessage = UiMessages.CopyFailed;
     }
 
     private void Cancel() => Nav.NavigateTo("/domains/sender");

@@ -5,6 +5,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject ILogger<SenderRuleDetail> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -59,13 +60,13 @@ else
         <BbCardFooter>
             <div class="flex gap-1 items-center">
                 <BbButton Variant="ButtonVariant.Default" @onclick="SaveAsync"
-                        Disabled="@(string.IsNullOrWhiteSpace(fromPattern) || string.IsNullOrWhiteSpace(toAddress))">
+                        Disabled="@(busy || string.IsNullOrWhiteSpace(fromPattern) || string.IsNullOrWhiteSpace(toAddress))">
                     <LucideIcon Name="save" /> Save
                 </BbButton>
                 <BbButton Variant="ButtonVariant.Outline" @onclick="Cancel">Cancel</BbButton>
                 @if (!string.IsNullOrEmpty(statusMessage))
                 {
-                    <span class="text-danger" style="margin-left:0.5rem">@statusMessage</span>
+                    <span class="text-danger ml-1" role="alert">@statusMessage</span>
                 }
             </div>
         </BbCardFooter>
@@ -84,6 +85,7 @@ else
     private string sortOrder = "0";
     private string enabled = "true";
     private string? statusMessage;
+    private bool busy;
 
     protected override async Task OnInitializedAsync()
     {
@@ -110,6 +112,9 @@ else
 
     private async Task SaveAsync()
     {
+        if (busy) return;                                   // double-submit guard (before the first await)
+        statusMessage = null;
+
         // From Pattern is applied as a regex at delivery time (SenderRewriteFilter). Validate it here so
         // an invalid pattern is rejected at save instead of silently throwing during delivery and
         // breaking this tenant's mail flow with no feedback.
@@ -124,21 +129,46 @@ else
             return;
         }
 
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
-
-        var entry = new SenderRewriteEntry
+        var rewriteTo = toAddress.Trim();
+        if (!InputValidation.IsPlausibleEmail(rewriteTo))
         {
-            Id = Id ?? 0,
-            FromPattern = pattern,
-            ToAddress = toAddress.Trim(),
-            SortOrder = int.TryParse(sortOrder, out var s) ? s : 0,
-            IsEnabled = enabled == "true"
-        };
+            statusMessage = $"Rewrite To: '{rewriteTo}' is not a valid e-mail address.";
+            return;
+        }
+        if (!InputValidation.TryParseInt(sortOrder, "Sort order", 0, int.MaxValue, out var order, out var orderError))
+        {
+            statusMessage = orderError;
+            return;
+        }
 
-        if (IsNew) await svc.CreateSenderRuleAsync(entry);
-        else await svc.UpdateSenderRuleAsync(entry);
-        Nav.NavigateTo("/filters?tab=senders");
+        busy = true;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IMessageFilterService>();
+
+            var entry = new SenderRewriteEntry
+            {
+                Id = Id ?? 0,
+                FromPattern = pattern,
+                ToAddress = rewriteTo,
+                SortOrder = order,
+                IsEnabled = enabled == "true"
+            };
+
+            if (IsNew) await svc.CreateSenderRuleAsync(entry);
+            else await svc.UpdateSenderRuleAsync(entry);
+            Nav.NavigateTo("/filters?tab=senders");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving sender rewrite rule {Pattern} failed", pattern);
+            statusMessage = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private void Cancel() => Nav.NavigateTo("/filters?tab=senders");

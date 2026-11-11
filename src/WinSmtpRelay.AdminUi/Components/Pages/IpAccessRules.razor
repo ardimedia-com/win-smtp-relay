@@ -4,6 +4,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject ILogger<IpAccessRules> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -32,6 +33,11 @@
     </div>
 </div>
 
+@if (!string.IsNullOrEmpty(actionError))
+{
+    <p class="form-error mb-1" role="alert">@actionError</p>
+}
+
 @if (isLoading)
 {
     <BbSkeleton Class="h-[300px] w-full" />
@@ -57,7 +63,7 @@ else
             }
             @foreach (var rule in rules)
             {
-                <BbTableRow Item="@rule" class="list-row-clickable" @onclick="() => Edit(rule.Id)">
+                <BbTableRow Item="@rule" class="list-row-clickable" tabindex="0" role="link" @onclick="() => Edit(rule.Id)" @onkeydown="args => OnRowKey(args, () => Edit(rule.Id))">
                     <BbTableCell>@rule.SortOrder</BbTableCell>
                     <BbTableCell><code>@rule.Network</code></BbTableCell>
                     <BbTableCell>
@@ -67,11 +73,11 @@ else
                     </BbTableCell>
                     <BbTableCell>@(rule.Description ?? "—")</BbTableCell>
                     <BbTableCell>
-                        <div class="list-row-actions" @onclick:stopPropagation="true">
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => Edit(rule.Id)">
+                        <div class="list-row-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" aria-label="Edit" @onclick="() => Edit(rule.Id)">
                                 <LucideIcon Name="pencil" />
                             </BbButton>
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete" aria-label="Delete"
                                     @onclick="() => { deleteTargetId = rule.Id; showDeleteConfirm = true; }">
                                 <LucideIcon Name="trash-2" />
                             </BbButton>
@@ -94,7 +100,7 @@ else
                 <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
             </BbAlertDialogCancel>
             <BbAlertDialogAction>
-                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteAsync">Delete</BbButton>
+                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteAsync" Disabled="@busy">Delete</BbButton>
             </BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
@@ -120,6 +126,16 @@ else
 </BbDialog>
 
 @code {
+    private bool busy;
+    private string? actionError;
+
+    // Opens the row's detail with the keyboard (rows are focusable: tabindex="0").
+    private static void OnRowKey(KeyboardEventArgs e, Action open)
+    {
+        if (e.Key is "Enter" or " ")
+            open();
+    }
+
     private IReadOnlyList<IpAccessRule> rules = [];
     private bool isLoading = true;
     private bool showHelp;
@@ -141,10 +157,25 @@ else
 
     private async Task ConfirmDeleteAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IIpAccessRuleService>();
-        await svc.DeleteAsync(deleteTargetId);
-        showDeleteConfirm = false;
-        await RefreshAsync();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        busy = true;
+        actionError = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IIpAccessRuleService>();
+            await svc.DeleteAsync(deleteTargetId);
+            showDeleteConfirm = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{Action} on the {Page} page failed", "ConfirmDeleteAsync", "IpAccessRules");
+            actionError = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 }

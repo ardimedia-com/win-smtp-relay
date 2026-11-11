@@ -5,6 +5,8 @@
 @inject ITenantScopeFactory ScopeFactory
 @inject IDnsSetupService DnsSetup
 @inject NavigationManager Nav
+@inject BrowserTimeService Time
+@inject ILogger<AcceptedSenderDomains> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -33,6 +35,11 @@
     </div>
 </div>
 
+@if (!string.IsNullOrEmpty(actionError))
+{
+    <p class="form-error mb-1" role="alert">@actionError</p>
+}
+
 @if (isLoading)
 {
     <BbSkeleton Class="h-[200px] w-full" />
@@ -57,7 +64,7 @@ else
             }
             @foreach (var d in domains)
             {
-                <BbTableRow Item="@d" class="list-row-clickable" @onclick="() => Edit(d.Id)">
+                <BbTableRow Item="@d" class="list-row-clickable" tabindex="0" role="link" @onclick="() => Edit(d.Id)" @onkeydown="args => OnRowKey(args, () => Edit(d.Id))">
                     <BbTableCell>@d.Domain</BbTableCell>
                     <BbTableCell><LocalTime Utc="@d.CreatedUtc" Format="yyyy-MM-dd" /></BbTableCell>
                     <BbTableCell>
@@ -71,11 +78,11 @@ else
                         }
                     </BbTableCell>
                     <BbTableCell>
-                        <div class="list-row-actions" @onclick:stopPropagation="true">
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => Edit(d.Id)">
+                        <div class="list-row-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" aria-label="Edit" @onclick="() => Edit(d.Id)">
                                 <LucideIcon Name="pencil" />
                             </BbButton>
-                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                            <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete" aria-label="Delete"
                                     @onclick="() => { deleteTargetId = d.Id; showDeleteConfirm = true; }">
                                 <LucideIcon Name="trash-2" />
                             </BbButton>
@@ -98,7 +105,7 @@ else
                 <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
             </BbAlertDialogCancel>
             <BbAlertDialogAction>
-                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteAsync">Delete</BbButton>
+                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteAsync" Disabled="@busy">Delete</BbButton>
             </BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
@@ -124,6 +131,16 @@ else
 </BbDialog>
 
 @code {
+    private bool busy;
+    private string? actionError;
+
+    // Opens the row's detail with the keyboard (rows are focusable: tabindex="0").
+    private static void OnRowKey(KeyboardEventArgs e, Action open)
+    {
+        if (e.Key is "Enter" or " ")
+            open();
+    }
+
     private IReadOnlyList<AcceptedSenderDomain> domains = [];
     private bool isLoading = true;
     private bool showHelp;
@@ -143,14 +160,31 @@ else
 
     private void Edit(int id) => Nav.NavigateTo($"/domains/sender/{id}");
 
-    private static string VerifiedTitle(AcceptedSenderDomain d) => $"Verified {d.VerifiedUtc:yyyy-MM-dd}";
+    // Shown in the viewer's local time (stored UTC).
+    private string VerifiedTitle(AcceptedSenderDomain d) =>
+        d.VerifiedUtc is { } v ? $"Verified {Time.Format(v, "yyyy-MM-dd")}" : "";
 
     private async Task ConfirmDeleteAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
-        await svc.DeleteAsync(deleteTargetId);
-        showDeleteConfirm = false;
-        await RefreshAsync();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        busy = true;
+        actionError = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IAcceptedSenderDomainService>();
+            await svc.DeleteAsync(deleteTargetId);
+            showDeleteConfirm = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{Action} on the {Page} page failed", "ConfirmDeleteAsync", "AcceptedSenderDomains");
+            actionError = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 }

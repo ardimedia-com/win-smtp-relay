@@ -4,6 +4,7 @@
 @attribute [Authorize(Policy = AuthorizationPolicies.AdminFull)]
 @inject ITenantScopeFactory ScopeFactory
 @inject NavigationManager Nav
+@inject ILogger<SendConnectors> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -32,6 +33,15 @@
     </div>
 </div>
 
+@if (!string.IsNullOrEmpty(actionError))
+{
+    <p class="form-error mb-1" role="alert">@actionError</p>
+}
+else if (!string.IsNullOrEmpty(statusMessage))
+{
+    <p class="text-muted mb-1" role="status">@statusMessage</p>
+}
+
 <BbTabs DefaultValue="connectors" @bind-Value="activeTab">
     <BbTabsList>
         <BbTabsTrigger Value="connectors">Send Connectors</BbTabsTrigger>
@@ -39,7 +49,7 @@
     </BbTabsList>
 
     <BbTabsContent Value="connectors">
-        <div style="margin-bottom:1rem;">
+        <div class="mb-1">
             <BrevoConnectorInfo />
         </div>
         @if (isLoading)
@@ -69,7 +79,7 @@
                     }
                     @foreach (var c in connectors)
                     {
-                        <BbTableRow Item="@c" class="list-row-clickable" @onclick="() => Edit(c.Id)">
+                        <BbTableRow Item="@c" class="list-row-clickable" tabindex="0" role="link" @onclick="() => Edit(c.Id)" @onkeydown="args => OnRowKey(args, () => Edit(c.Id))">
                             <BbTableCell>@c.Name</BbTableCell>
                             <BbTableCell>@(string.IsNullOrEmpty(c.SmartHost) ? "Direct MX" : $"{c.SmartHost}:{c.SmartHostPort}")</BbTableCell>
                             <BbTableCell>
@@ -81,11 +91,11 @@
                             <BbTableCell>@c.MaxConcurrentDeliveries</BbTableCell>
                             <BbTableCell><span class="badge-status @(c.IsEnabled ? "badge-success" : "badge-muted")">@(c.IsEnabled ? "Yes" : "No")</span></BbTableCell>
                             <BbTableCell>
-                                <div class="list-row-actions" @onclick:stopPropagation="true">
-                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => Edit(c.Id)">
+                                <div class="list-row-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" aria-label="Edit" @onclick="() => Edit(c.Id)">
                                         <LucideIcon Name="pencil" />
                                     </BbButton>
-                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                    <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete" aria-label="Delete"
                                             @onclick="() => { deleteTargetId = c.Id; showDeleteConfirm = true; }">
                                         <LucideIcon Name="trash-2" />
                                     </BbButton>
@@ -123,16 +133,16 @@
                 }
                 @foreach (var r in routes)
                 {
-                    <BbTableRow Item="@r" class="list-row-clickable" @onclick="() => EditRoute(r.Id)">
+                    <BbTableRow Item="@r" class="list-row-clickable" tabindex="0" role="link" @onclick="() => EditRoute(r.Id)" @onkeydown="args => OnRowKey(args, () => EditRoute(r.Id))">
                         <BbTableCell>@r.SortOrder</BbTableCell>
                         <BbTableCell><code>@r.DomainPattern</code></BbTableCell>
                         <BbTableCell>@(r.SendConnector?.Name ?? $"ID {r.SendConnectorId}")</BbTableCell>
                         <BbTableCell>
-                            <div class="list-row-actions" @onclick:stopPropagation="true">
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" @onclick="() => EditRoute(r.Id)">
+                            <div class="list-row-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Edit" aria-label="Edit" @onclick="() => EditRoute(r.Id)">
                                     <LucideIcon Name="pencil" />
                                 </BbButton>
-                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete"
+                                <BbButton Size="ButtonSize.Small" Variant="ButtonVariant.Ghost" title="Delete" aria-label="Delete"
                                         @onclick="() => { deleteRouteId = r.Id; showDeleteRouteConfirm = true; }">
                                     <LucideIcon Name="trash-2" />
                                 </BbButton>
@@ -156,7 +166,7 @@
                 <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
             </BbAlertDialogCancel>
             <BbAlertDialogAction>
-                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteAsync">Delete</BbButton>
+                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteAsync" Disabled="@busy">Delete</BbButton>
             </BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
@@ -173,7 +183,7 @@
                 <BbButton Variant="ButtonVariant.Outline">Cancel</BbButton>
             </BbAlertDialogCancel>
             <BbAlertDialogAction>
-                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteRouteAsync">Delete</BbButton>
+                <BbButton Variant="ButtonVariant.Destructive" @onclick="ConfirmDeleteRouteAsync" Disabled="@busy">Delete</BbButton>
             </BbAlertDialogAction>
         </BbAlertDialogFooter>
     </BbAlertDialogContent>
@@ -204,6 +214,16 @@
 </BbDialog>
 
 @code {
+    private bool busy;
+    private string? actionError;
+
+    // Opens the row's detail with the keyboard (rows are focusable: tabindex="0").
+    private static void OnRowKey(KeyboardEventArgs e, Action open)
+    {
+        if (e.Key is "Enter" or " ")
+            open();
+    }
+
     private IReadOnlyList<SendConnector> connectors = [];
     private IReadOnlyList<DomainRoute> routes = [];
     private bool isLoading = true;
@@ -239,21 +259,53 @@
 
     private async Task ConfirmDeleteAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<ISendConnectorService>();
-        await svc.DeleteAsync(deleteTargetId);
-        statusMessage = "Connector deleted";
-        showDeleteConfirm = false;
-        await RefreshAsync();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        busy = true;
+        actionError = null;
+        statusMessage = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<ISendConnectorService>();
+            await svc.DeleteAsync(deleteTargetId);
+            statusMessage = "Connector deleted";
+            showDeleteConfirm = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{Action} on the {Page} page failed", "ConfirmDeleteAsync", "SendConnectors");
+            actionError = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task ConfirmDeleteRouteAsync()
     {
-        using var scope = ScopeFactory.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<IDomainRouteService>();
-        await svc.DeleteAsync(deleteRouteId);
-        statusMessage = "Route deleted";
-        showDeleteRouteConfirm = false;
-        await RefreshAsync();
+        if (busy) return;                                   // double-submit guard (before the first await)
+        busy = true;
+        actionError = null;
+        statusMessage = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var svc = scope.ServiceProvider.GetRequiredService<IDomainRouteService>();
+            await svc.DeleteAsync(deleteRouteId);
+            statusMessage = "Route deleted";
+            showDeleteRouteConfirm = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{Action} on the {Page} page failed", "ConfirmDeleteRouteAsync", "SendConnectors");
+            actionError = UiMessages.Unexpected;
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 }

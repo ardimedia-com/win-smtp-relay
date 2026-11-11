@@ -9,6 +9,7 @@
 @inject IUpdateService Updater
 @inject IAdminAuditService Audit
 @inject NavigationManager Nav
+@inject ILogger<Update> Logger
 
 <BbBreadcrumb>
     <BbBreadcrumbList>
@@ -93,7 +94,7 @@ else if (errorMessage is not null)
     <BbCard>
         <BbCardContent Class="pt-6">
             <BbAlert>@errorMessage</BbAlert>
-            <BbButton Variant="ButtonVariant.Outline" @onclick="CheckForUpdates" Class="mt-1">
+            <BbButton Variant="ButtonVariant.Outline" @onclick="CheckForUpdates" Class="mt-1" Disabled="@isChecking">
                 <LucideIcon Name="refresh-cw" />
                 Retry
             </BbButton>
@@ -158,7 +159,7 @@ else
 {
     <BbCard Class="mt-1">
         <BbCardContent Class="pt-6">
-            <BbButton Variant="ButtonVariant.Default" @onclick="CheckForUpdates">
+            <BbButton Variant="ButtonVariant.Default" @onclick="CheckForUpdates" Disabled="@isChecking">
                 <LucideIcon Name="download" />
                 Check for Updates
             </BbButton>
@@ -326,6 +327,7 @@ else
 
     private async Task CheckForUpdates()
     {
+        if (isChecking) return;
         isChecking = true;
         errorMessage = null;
         latestStable = null;
@@ -371,7 +373,8 @@ else
         }
         catch (Exception ex)
         {
-            errorMessage = $"Failed to check: {ex.Message}";
+            Logger.LogWarning(ex, "Checking GitHub for WIN-SMTP-RELAY releases failed");
+            errorMessage = "Could not check for updates — GitHub could not be reached or answered unexpectedly. The details were written to the server log.";
         }
         finally
         {
@@ -413,7 +416,8 @@ else
         }
         catch (Exception ex)
         {
-            installMessage = $"Update could not be started: {ex.Message}";
+            Logger.LogError(ex, "Starting the update to {Version} failed", installVersion);
+            installMessage = "Update could not be started. " + UiMessages.Unexpected;
             installLaunched = false;
         }
         finally
