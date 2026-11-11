@@ -73,11 +73,25 @@ else
                     <BbLabel For="password">Password</BbLabel>
                     @* The stored password is never sent to the browser: the field starts empty and a blank value
                        keeps the stored one (SendConnectorService.UpdateAsync treats null as «keep»). *@
-                    <BbInput Id="password" Type="InputType.Password" @bind-Value="password"
-                             Placeholder="@(hasStoredPassword ? "•••••••• (stored)" : "")" autocomplete="new-password" />
-                    @if (hasStoredPassword)
+                    <BbInput Id="password" Type="InputType.Password" @bind-Value="password" Disabled="@removePassword"
+                             Placeholder="@(hasStoredPassword && !removePassword ? "•••••••• (stored)" : "")" autocomplete="new-password" />
+                    @if (hasStoredPassword && removePassword)
                     {
-                        <p class="hint">A password is stored. Leave blank to keep the current password; type a new one to replace it.</p>
+                        <p class="hint">
+                            The stored password will be removed when you save.
+                        </p>
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="() => removePassword = false">
+                            <LucideIcon Name="undo-2" /> Keep the stored password
+                        </BbButton>
+                    }
+                    else if (hasStoredPassword)
+                    {
+                        <p class="hint">
+                            A password is stored. Leave blank to keep the current password; type a new one to replace it.
+                        </p>
+                        <BbButton Variant="ButtonVariant.Outline" Size="ButtonSize.Small" @onclick="MarkPasswordForRemoval">
+                            <LucideIcon Name="trash-2" /> Remove stored password
+                        </BbButton>
                     }
                 </div>
                 <div class="form-group">
@@ -93,6 +107,25 @@ else
                         <option value="false">No</option>
                         <option value="true">Yes</option>
                     </BbNativeSelect>
+                </div>
+                <div class="form-group col-span-full">
+                    <div style="display:flex;gap:0.75rem;align-items:center;">
+                        <input type="checkbox" id="allow-plaintext-auth" checked="@allowPlaintextAuth"
+                               @onchange="@(e => allowPlaintextAuth = e.Value is true)" style="width:1.1rem;height:1.1rem;flex-shrink:0;" />
+                        <label for="allow-plaintext-auth">Allow sign-in without TLS</label>
+                    </div>
+                    @if (allowPlaintextAuth)
+                    {
+                        <div class="badge-status badge-warning" role="note" style="display:block;padding:0.6rem 0.75rem;line-height:1.45;margin-top:0.5rem;">
+                            <strong>The password would travel unencrypted.</strong> When the smart host offers no TLS, the
+                            relay still sends the username and password, readable by anyone on the network path. Only for a
+                            smart host on a trusted local network.
+                        </div>
+                    }
+                    else
+                    {
+                        <span class="hint">Off: the relay never sends the password over a connection without TLS.</span>
+                    }
                 </div>
                 <div class="form-group">
                     <BbLabel For="default">Default</BbLabel>
@@ -165,6 +198,14 @@ else
     private string? errorMessage;
     private bool busy;
     private bool hasStoredPassword;
+    // Explicit «remove stored password»: saves "" (clear). A blank field alone saves null (keep).
+    private bool removePassword;
+
+    private void MarkPasswordForRemoval()
+    {
+        removePassword = true;
+        password = "";
+    }
 
     private string name = "";
     private string smartHost = "";
@@ -173,6 +214,8 @@ else
     private string password = "";
     private string opportunisticTls = "true";
     private string requireTls = "false";
+    private bool allowPlaintextAuth;
+    private int connectTimeoutSeconds = 30;
     private string isDefault = "false";
     private string concurrency = "4";
     private string maxRetry = "48";
@@ -218,6 +261,8 @@ else
         password = "";
         opportunisticTls = c.OpportunisticTls.ToString().ToLowerInvariant();
         requireTls = c.RequireTls.ToString().ToLowerInvariant();
+        allowPlaintextAuth = c.AllowPlaintextAuth;
+        connectTimeoutSeconds = c.ConnectTimeoutSeconds;
         isDefault = c.IsDefault.ToString().ToLowerInvariant();
         concurrency = c.MaxConcurrentDeliveries.ToString();
         maxRetry = c.MaxRetryHours.ToString();
@@ -279,15 +324,18 @@ else
                 SmartHost = host,
                 SmartHostPort = portValue,
                 Username = string.IsNullOrWhiteSpace(username) ? null : username.Trim(),
-                // Blank = keep the stored password (null); the stored value never left the server.
-                EncryptedPassword = string.IsNullOrEmpty(password) ? null : password,
+                // Blank = keep the stored password (null); "" = the explicit «remove stored password» (clear);
+                // anything else replaces it. The stored value never left the server.
+                EncryptedPassword = removePassword ? "" : string.IsNullOrEmpty(password) ? null : password,
                 OpportunisticTls = opportunisticTls == "true",
                 RequireTls = requireTls == "true",
+                AllowPlaintextAuth = allowPlaintextAuth,
                 IsDefault = isDefault == "true",
                 MaxConcurrentDeliveries = concValue,
                 MaxRetryHours = maxRetryValue,
                 RetryIntervalsMinutes = intervals,
-                ConnectTimeoutSeconds = 30,
+                // Not editable here: keep what is stored (30 s for a new connector).
+                ConnectTimeoutSeconds = connectTimeoutSeconds,
                 IsEnabled = enabled == "true",
                 EhloDomain = ehlo
             };

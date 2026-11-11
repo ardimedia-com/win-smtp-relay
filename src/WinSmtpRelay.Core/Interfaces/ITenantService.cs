@@ -18,6 +18,12 @@ public interface ITenantService
     /// <summary>Sets the tenant's outbound source IP (null/empty clears it). Throws if the value is not a valid IP.</summary>
     Task SetEgressIpAsync(int id, string? egressIp, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Turns delivery status notifications (bounces to the tenant's own senders, <see cref="Tenant.DsnEnabled"/>) on or
+    /// off. Audited when the value changes.
+    /// </summary>
+    Task SetDsnEnabledAsync(int id, bool enabled, CancellationToken cancellationToken = default);
+
     /// <summary>Deletes a tenant. The default tenant cannot be deleted; deletion fails if the tenant still owns data.</summary>
     Task DeleteAsync(int id, CancellationToken cancellationToken = default);
 

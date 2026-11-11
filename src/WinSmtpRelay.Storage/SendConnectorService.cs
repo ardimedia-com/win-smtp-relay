@@ -59,6 +59,7 @@ public class SendConnectorService(
             existing.EncryptedPassword = connector.EncryptedPassword.Length == 0 ? null : connector.EncryptedPassword;
         existing.OpportunisticTls = connector.OpportunisticTls;
         existing.RequireTls = connector.RequireTls;
+        existing.AllowPlaintextAuth = connector.AllowPlaintextAuth;
         existing.IsDefault = connector.IsDefault;
         existing.MaxConcurrentDeliveries = connector.MaxConcurrentDeliveries;
         existing.MaxRetryHours = connector.MaxRetryHours;

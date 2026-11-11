@@ -64,6 +64,17 @@ else
                 @allRecipients.Count total &middot; @(allRecipients.Count - undelivered.Count) delivered &middot;
                 <strong>@undelivered.Count not delivered</strong>
             </p>
+            @if (failed.Count > 0)
+            {
+                @* Recipients a server rejected permanently (5xx): final, a retry of this message skips them. *@
+                <p class="text-muted" style="margin:0 0 0.25rem;">Failed permanently (rejected with a 5xx, not retried):</p>
+                <div class="row-flex" style="margin-bottom:0.5rem;">
+                    @foreach (var r in failed)
+                    {
+                        <span class="badge-status badge-error wrap-anywhere" title="Rejected permanently">@r (failed)</span>
+                    }
+                </div>
+            }
             @if (undelivered.Count > 0)
             {
                 <div class="row-flex">
@@ -191,6 +202,7 @@ else
     private List<DeliveryLog> logs = [];
     private IReadOnlyList<string> allRecipients = [];
     private IReadOnlyList<string> undelivered = [];
+    private IReadOnlyList<string> failed = [];
     private Dictionary<string, int> suppressedIdByAddress = new(StringComparer.OrdinalIgnoreCase);
     private bool isLoading = true;
 
@@ -240,7 +252,7 @@ else
         vm = await db.QueuedMessages.AsNoTracking()
             .Where(m => m.Id == Id)
             .Select(m => new MessageView(
-                m.Id, m.TenantId, m.MessageId, m.Sender, m.Recipients, m.DeliveredRecipients,
+                m.Id, m.TenantId, m.MessageId, m.Sender, m.Recipients, m.DeliveredRecipients, m.FailedRecipients,
                 m.Status, m.RetryCount, m.LastError, m.CreatedUtc, m.SizeBytes, m.RawMessage != emptyBody))
             .FirstOrDefaultAsync();
 
@@ -248,6 +260,7 @@ else
         {
             allRecipients = RecipientList.Split(vm.Recipients);
             undelivered = RecipientList.Undelivered(vm.Recipients, vm.DeliveredRecipients);
+            failed = string.IsNullOrWhiteSpace(vm.FailedRecipients) ? [] : RecipientList.Split(vm.FailedRecipients);
             logs = await db.DeliveryLogs.AsNoTracking()
                 .Where(l => l.QueuedMessageId == Id)
                 .OrderByDescending(l => l.Id)
@@ -373,5 +386,5 @@ else
 
     private sealed record MessageView(
         long Id, int TenantId, string MessageId, string Sender, string Recipients, string? DeliveredRecipients,
-        MessageStatus Status, int RetryCount, string? LastError, DateTimeOffset CreatedUtc, int SizeBytes, bool HasBody);
+        string? FailedRecipients, MessageStatus Status, int RetryCount, string? LastError, DateTimeOffset CreatedUtc, int SizeBytes, bool HasBody);
 }

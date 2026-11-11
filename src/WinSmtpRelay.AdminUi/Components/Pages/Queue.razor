@@ -50,22 +50,22 @@ else
 {
     <BbTable Data="@messages">
         <BbTableHeader>
-            <BbTableRow TData="QueuedMessage">
-                <BbTableHeaderCell TData="QueuedMessage">ID</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Message-ID</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Sender</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Recipients</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Size</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Status</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Retries</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Created</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Actions</BbTableHeaderCell>
+            <BbTableRow TData="QueuedMessageSummary">
+                <BbTableHeaderCell TData="QueuedMessageSummary">ID</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Message-ID</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Sender</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Recipients</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Size</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Status</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Retries</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Created</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Actions</BbTableHeaderCell>
             </BbTableRow>
         </BbTableHeader>
         <BbTableBody>
             @if (messages.Count == 0)
             {
-                <BbTableRow TData="QueuedMessage">
+                <BbTableRow TData="QueuedMessageSummary">
                     <BbTableCell colspan="9" class="text-muted" style="text-align:center;">Queue is empty</BbTableCell>
                 </BbTableRow>
             }
@@ -185,7 +185,7 @@ else
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private bool showHelp;
-    private IReadOnlyList<QueuedMessage> messages = [];
+    private IReadOnlyList<QueuedMessageSummary> messages = [];
     private int totalCount;
     private int take = PageSize;
     private string? statusMessage;
@@ -254,9 +254,8 @@ else
         {
             using var scope = ScopeFactory.CreateScope();
             var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
-            // TODO(review-2026-11 H6): switch to the delivery agent's queue summary query (no message bodies)
-            // once it exists; GetNonDeliveredAsync still loads RawMessage for every listed row.
-            messages = await queue.GetNonDeliveredAsync(take);
+            // Body-free summaries: a list never loads message content.
+            messages = await queue.GetSummariesAsync(take, nonDeliveredOnly: true);
             var db = scope.ServiceProvider.GetRequiredService<RelayDbContext>();
             totalCount = await db.QueuedMessages.CountAsync(m => m.Status != MessageStatus.Delivered);
         }

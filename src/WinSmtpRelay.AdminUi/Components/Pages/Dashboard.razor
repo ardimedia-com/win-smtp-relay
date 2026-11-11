@@ -168,18 +168,18 @@ else
 {
     <BbTable Data="@recentMessages">
         <BbTableHeader>
-            <BbTableRow TData="QueuedMessage">
-                <BbTableHeaderCell TData="QueuedMessage">ID</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Sender</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Recipients</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Status</BbTableHeaderCell>
-                <BbTableHeaderCell TData="QueuedMessage">Created</BbTableHeaderCell>
+            <BbTableRow TData="QueuedMessageSummary">
+                <BbTableHeaderCell TData="QueuedMessageSummary">ID</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Sender</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Recipients</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Status</BbTableHeaderCell>
+                <BbTableHeaderCell TData="QueuedMessageSummary">Created</BbTableHeaderCell>
             </BbTableRow>
         </BbTableHeader>
         <BbTableBody>
             @if (recentMessages.Count == 0)
             {
-                <BbTableRow TData="QueuedMessage">
+                <BbTableRow TData="QueuedMessageSummary">
                     <BbTableCell colspan="5" class="text-muted" style="text-align:center;">No messages in queue</BbTableCell>
                 </BbTableRow>
             }
@@ -238,7 +238,7 @@ else
     private int queueDepth;
     private string uptime = "";
     private string version = "";
-    private IReadOnlyList<QueuedMessage> recentMessages = [];
+    private IReadOnlyList<QueuedMessageSummary> recentMessages = [];
 
     private DateTime processStartTime;
 
@@ -263,7 +263,7 @@ else
         using (var scope = ScopeFactory.CreateScope())
         {
             var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
-            recentMessages = await queue.GetRecentAsync(10);
+            recentMessages = await queue.GetSummariesAsync(10, nonDeliveredOnly: false);
         }
 
         processStartTime = System.Diagnostics.Process.GetCurrentProcess().StartTime;
@@ -364,7 +364,7 @@ else
         {
             using var scope = ScopeFactory.CreateScope();
             var queue = scope.ServiceProvider.GetRequiredService<IMessageQueue>();
-            recentMessages = await queue.GetRecentAsync(10);
+            recentMessages = await queue.GetSummariesAsync(10, nonDeliveredOnly: false);
         }
         catch (Exception ex) { Logger.LogWarning(ex, "Loading the recent messages failed"); }
     }

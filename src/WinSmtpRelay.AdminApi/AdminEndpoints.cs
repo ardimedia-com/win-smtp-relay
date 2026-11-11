@@ -1170,13 +1170,13 @@ public record SendConnectorSummary(
     int Id, int TenantId, string Name, string? SmartHost, int SmartHostPort, string? Username,
     bool HasPassword, bool OpportunisticTls, bool RequireTls, bool IsDefault,
     int MaxConcurrentDeliveries, int MaxRetryHours, string RetryIntervalsMinutes,
-    int ConnectTimeoutSeconds, bool IsEnabled, string? EhloDomain, DateTimeOffset CreatedUtc)
+    int ConnectTimeoutSeconds, bool IsEnabled, string? EhloDomain, DateTimeOffset CreatedUtc, bool AllowPlaintextAuth)
 {
     public static SendConnectorSummary From(SendConnector c) => new(
         c.Id, c.TenantId, c.Name, c.SmartHost, c.SmartHostPort, c.Username,
         !string.IsNullOrEmpty(c.EncryptedPassword), c.OpportunisticTls, c.RequireTls, c.IsDefault,
         c.MaxConcurrentDeliveries, c.MaxRetryHours, c.RetryIntervalsMinutes,
-        c.ConnectTimeoutSeconds, c.IsEnabled, c.EhloDomain, c.CreatedUtc);
+        c.ConnectTimeoutSeconds, c.IsEnabled, c.EhloDomain, c.CreatedUtc, c.AllowPlaintextAuth);
 }
 
 /// <summary>Safe projection of a <see cref="DomainRoute"/> — embeds the password-free connector summary

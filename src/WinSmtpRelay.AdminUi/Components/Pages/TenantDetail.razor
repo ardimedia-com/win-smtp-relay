@@ -108,6 +108,16 @@ else
                         </div>
                     }
                 </div>
+                <div class="form-group col-span-full">
+                    <div class="flex gap-1 items-center">
+                        <BbSwitch Checked="dsnEnabled" CheckedChanged="(bool v) => dsnEnabled = v" id="dsn-enabled" />
+                        <BbLabel For="dsn-enabled">Send bounces (delivery status notifications) to this tenant's senders</BbLabel>
+                    </div>
+                    <p class="text-muted" style="font-size:0.78rem;margin-top:0.25rem;">
+                        When a message finally fails or a recipient is suppressed, the sender gets a bounce report. Only senders
+                        in one of this tenant's own domains are ever answered, so forged senders never receive one.
+                    </p>
+                </div>
                 <div class="form-group">
                     <BbLabel>Created</BbLabel>
                     <div><LocalTime Utc="@createdUtc" Format="yyyy-MM-dd HH:mm" /></div>
@@ -173,6 +183,7 @@ else
     private string slug = "";
     private string enabled = "true";
     private string egress = "";
+    private bool dsnEnabled = true;
     private bool wasEnabled;
     private DateTimeOffset createdUtc;
 
@@ -226,6 +237,7 @@ else
         enabled = t.IsEnabled.ToString().ToLowerInvariant();
         wasEnabled = t.IsEnabled;
         egress = t.EgressIpAddress ?? "";
+        dsnEnabled = t.DsnEnabled;
         createdUtc = t.CreatedUtc;
 
         if (AuthState is not null)
@@ -296,6 +308,7 @@ else
             }
 
             await svc.SetEgressIpAsync(Id!.Value, string.IsNullOrWhiteSpace(egress) ? null : egress.Trim());
+            await svc.SetDsnEnabledAsync(Id!.Value, dsnEnabled);
             Nav.NavigateTo("/tenants");
         }
     }

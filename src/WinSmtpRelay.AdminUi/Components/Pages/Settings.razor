@@ -228,7 +228,7 @@ else
             <div class="settings-group">
                 <div class="settings-group-title">Suppression list</div>
                 <div class="form-group">
-                    <BbLabel For="suppression-days">Keep suppression entries (days — 0 = keep forever)</BbLabel>
+                    <BbLabel For="suppression-days">Keep suppression entries (days — hard-bounce entries; 0 = keep forever)</BbLabel>
                     <BbInput Id="suppression-days" Type="InputType.Number" @bind-Value="drSuppressionDays" />
                 </div>
             </div>
@@ -466,7 +466,7 @@ else
     private bool drStripBody = true;
     private string drMessageDays = "30";
     private string drLogDays = "90";
-    private string drSuppressionDays = "0";
+    private string drSuppressionDays = DataRetentionSettings.DefaultSuppressionDays.ToString();
     private string drResendDays = "7";
 
     private string? dnsPublicHostname;
@@ -725,8 +725,8 @@ else
                        + "This relay is not an encrypted or tamper-proof (WORM) archive; ensure access controls and a lawful basis for the retention period.");
             if (int.TryParse(drLogDays, out var log) && log < 30)
                 list.Add("Short delivery-audit-log retention: dispute and abuse evidence will be lost quickly.");
-            if (int.TryParse(drSuppressionDays, out var sup) && sup > 0)
-                list.Add("Expiring suppression entries re-enables sending to addresses that previously hard-bounced or complained.");
+            if (int.TryParse(drSuppressionDays, out var sup) && sup > 0 && sup < DataRetentionSettings.DefaultSuppressionDays)
+                list.Add("Short suppression retention: addresses that hard-bounced are tried again soon. Complaint and manual entries never expire.");
             if (CurrentProfileKey is "Financial" or "Healthcare")
                 list.Add("Regulated template: it sets long retention durations only. True MiFID II / SEC 17a-4 / HIPAA compliance also "
                        + "requires WORM/tamper-proof storage, encryption, and legal hold — verify with your compliance or legal advisor.");

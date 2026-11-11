@@ -51,13 +51,15 @@ public sealed record IpAccessRuleRequest(string Network, IpAccessAction Action =
 
 /// <summary>
 /// Send connector. <c>Password</c> on PUT: null keeps the stored smart-host password, an empty string clears it,
-/// any other value replaces it. It is never returned (responses carry <c>HasPassword</c>).
+/// any other value replaces it. It is never returned (responses carry <c>HasPassword</c>). <c>AllowPlaintextAuth</c>
+/// lets the relay send the smart-host credentials over a connection without TLS — off by default, because the password
+/// then travels unencrypted.
 /// </summary>
 public sealed record SendConnectorRequest(
     string Name, string? SmartHost = null, int SmartHostPort = 587, string? Username = null, string? Password = null,
     bool OpportunisticTls = true, bool RequireTls = false, bool IsDefault = false, int MaxConcurrentDeliveries = 4,
     int MaxRetryHours = 48, string RetryIntervalsMinutes = "1,5,30,120,480,1440", int ConnectTimeoutSeconds = 30,
-    bool IsEnabled = true, string? EhloDomain = null)
+    bool IsEnabled = true, string? EhloDomain = null, bool AllowPlaintextAuth = false)
 {
     public string? Validate() =>
         AdminRequestValidation.Required(Name, "Name")
@@ -81,6 +83,7 @@ public sealed record SendConnectorRequest(
         EncryptedPassword = Password,
         OpportunisticTls = OpportunisticTls,
         RequireTls = RequireTls,
+        AllowPlaintextAuth = AllowPlaintextAuth,
         IsDefault = IsDefault,
         MaxConcurrentDeliveries = MaxConcurrentDeliveries,
         MaxRetryHours = MaxRetryHours,

@@ -94,6 +94,18 @@ public class TenantService(
             detail: $"{tenant.Name} egress IP={normalized ?? "(cleared)"}", ct: cancellationToken);
     }
 
+    public async Task SetDsnEnabledAsync(int id, bool enabled, CancellationToken cancellationToken = default)
+    {
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+        if (tenant is null || tenant.DsnEnabled == enabled)
+            return; // unchanged: the tenant form saves this on every save
+
+        tenant.DsnEnabled = enabled;
+        await db.SaveChangesAsync(cancellationToken);
+        await audit.WriteAsync(AdminAuditActions.TenantUpdated, actor, tenantId: tenant.Id,
+            detail: $"{tenant.Name} bounces (DSN) to own senders={(enabled ? "on" : "off")}", ct: cancellationToken);
+    }
+
     public async Task DeleteAsync(int id, CancellationToken cancellationToken = default)
     {
         if (id == TenantDefaults.DefaultTenantId)
