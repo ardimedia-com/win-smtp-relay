@@ -19,14 +19,22 @@ public class DkimSigningService
     private readonly ConcurrentDictionary<string, DkimSigner> _dbSigners = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<DkimSigningService> _logger;
 
-    private static readonly HeaderId[] HeadersToSign =
+    /// <summary>
+    /// The header fields a signature covers when the message carries them: everything a recipient reads
+    /// or a client threads by, plus the MIME structure (so a replay cannot swap the body's meaning).
+    /// </summary>
+    private static readonly string[] HeadersToSign =
     [
-        HeaderId.From,
-        HeaderId.To,
-        HeaderId.Subject,
-        HeaderId.Date,
-        HeaderId.MessageId
+        "From", "To", "Cc", "Subject", "Date", "Message-ID", "Reply-To", "In-Reply-To", "References",
+        "MIME-Version", "Content-Type", "Content-Transfer-Encoding"
     ];
+
+    /// <summary>
+    /// Fields listed once more than they occur ("oversigned"): the extra entry signs the ABSENCE of a
+    /// further instance, so a replay that prepends a second From, To or Subject breaks the signature
+    /// instead of being shown to the recipient under our valid signature (RFC 6376 §8.15).
+    /// </summary>
+    private static readonly string[] HeadersToOversign = ["From", "To", "Subject"];
 
     public DkimSigningService(IOptions<DkimOptions> options, ILogger<DkimSigningService> logger)
     {
@@ -92,13 +100,38 @@ public class DkimSigningService
 
         try
         {
-            signer.Sign(message, HeadersToSign);
+            signer.Sign(message, BuildSignedHeaderList(message));
             _logger.LogDebug("DKIM signed message from {Domain} (tenant {TenantId})", senderDomain, tenantId);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "DKIM signing failed for message from {Domain}", senderDomain);
         }
+    }
+
+    /// <summary>
+    /// The h= list for this message: each field of <see cref="HeadersToSign"/> once per instance present,
+    /// plus one extra entry for each field of <see cref="HeadersToOversign"/>. MimeKit keeps the Content-*
+    /// fields on the body entity, so they are counted there (matching how its signer reads them).
+    /// </summary>
+    internal static List<string> BuildSignedHeaderList(MimeMessage message)
+    {
+        var list = new List<string>();
+        foreach (var field in HeadersToSign)
+        {
+            var headers = field.StartsWith("Content-", StringComparison.OrdinalIgnoreCase)
+                ? message.Body?.Headers
+                : message.Headers;
+            var count = headers?.Count(h => h.Field.Equals(field, StringComparison.OrdinalIgnoreCase)) ?? 0;
+
+            if (HeadersToOversign.Contains(field, StringComparer.OrdinalIgnoreCase))
+                count++;
+
+            for (var i = 0; i < count; i++)
+                list.Add(field);
+        }
+
+        return list;
     }
 
     private DkimSigner? GetOrBuildDbSigner(DkimDomain dkim)

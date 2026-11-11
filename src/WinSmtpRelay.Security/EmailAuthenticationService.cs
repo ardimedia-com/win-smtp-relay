@@ -81,6 +81,17 @@ public class EmailAuthenticationService
         return settings.Enforcement == EnforcementMode.Reject && results.ShouldReject;
     }
 
+    /// <summary>
+    /// True when enforcement is Reject and the verdict could not be reached because of a DNS failure (see
+    /// <see cref="AuthenticationResults.ShouldDefer"/>): the message is answered with a 4xx so the sender
+    /// retries, instead of being rejected or accepted on an incomplete check.
+    /// </summary>
+    public async Task<bool> ShouldDeferAsync(AuthenticationResults results, CancellationToken cancellationToken = default)
+    {
+        var settings = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);
+        return settings.Enforcement == EnforcementMode.Reject && results.ShouldDefer;
+    }
+
     public async Task<bool> ShouldQuarantineAsync(AuthenticationResults results, CancellationToken cancellationToken = default)
     {
         var settings = await _configCache.GetEmailAuthSettingsAsync(cancellationToken);

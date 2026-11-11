@@ -8,6 +8,8 @@ using Microsoft.Extensions.Logging;
 using SmtpServer;
 using SmtpServer.IO;
 using SmtpServer.Net;
+using SmtpServer.Protocol;
+using WinSmtpRelay.Core.Models;
 
 namespace WinSmtpRelay.SmtpListener;
 
@@ -28,18 +30,29 @@ namespace WinSmtpRelay.SmtpListener;
 /// the normaliser cannot fix still fails in the parser and is recorded as a <c>CommandSyntaxError</c>
 /// rejection exactly as before. See design/lenient-address-syntax.md.
 /// </para>
+/// <para>
+/// Because this is the one place that sees every connection and every byte, it also carries the session
+/// guards the library cannot express (<see cref="SessionGuards"/>): the concurrent-connection caps, and a
+/// hard stop for a DATA body that outgrows the message size limit. The library's own strict size check
+/// throws an exception that its DATA command swallows without answering, after which the rest of the body
+/// would be parsed as commands.
+/// </para>
 /// </summary>
 public sealed class LenientEndpointListenerFactory(
     Func<IPAddress, CancellationToken, ValueTask<bool>> isTrustedSource,
-    ILogger logger) : EndpointListenerFactory
+    ILogger logger,
+    SessionGuards? guards = null) : EndpointListenerFactory
 {
+    private readonly SessionGuards _guards = guards ?? new SessionGuards();
+
     public override IEndpointListener CreateListener(IEndpointDefinition endpointDefinition) =>
-        new Listener(base.CreateListener(endpointDefinition), isTrustedSource, logger);
+        new Listener(base.CreateListener(endpointDefinition), isTrustedSource, logger, _guards);
 
     private sealed class Listener(
         IEndpointListener inner,
         Func<IPAddress, CancellationToken, ValueTask<bool>> isTrustedSource,
-        ILogger logger) : IEndpointListener
+        ILogger logger,
+        SessionGuards guards) : IEndpointListener
     {
         public async Task<ISecurableDuplexPipe> GetPipeAsync(ISessionContext context, CancellationToken cancellationToken)
         {
@@ -47,11 +60,79 @@ public sealed class LenientEndpointListenerFactory(
             if (pipe is null)
                 return pipe!; // the library treats a null pipe as "no session"; keep that contract
 
-            return new LenientDuplexPipe(pipe, context, isTrustedSource, logger);
+            var clientIp = (context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var ep)
+                ? ep as IPEndPoint
+                : null)?.Address;
+
+            Action? release = null;
+            if (guards.Connections is { } limiter)
+            {
+                if (!limiter.TryAcquire(clientIp))
+                {
+                    // Refused off the accept loop: a client that does not read its reply must not stall the
+                    // listener for everyone else.
+                    _ = RefuseAsync(pipe, context, clientIp);
+                    return null!; // no session for this connection; the library goes on accepting
+                }
+
+                release = () => limiter.Release(clientIp);
+            }
+
+            return new LenientDuplexPipe(pipe, context, isTrustedSource, logger, guards, release);
+        }
+
+        private async Task RefuseAsync(ISecurableDuplexPipe pipe, ISessionContext context, IPAddress? clientIp)
+        {
+            try
+            {
+                logger.LogWarning("Connection from {ClientIp} refused: concurrent-connection limit reached", clientIp);
+                guards.OnRejected?.Invoke(context, RejectReason.TooManyConnections, (int)SmtpReplyCode.ServiceUnavailable);
+
+                // On an implicit-TLS endpoint the handshake has not happened yet, so a plain-text reply would
+                // be garbage to the client: just close.
+                if (!context.EndpointDefinition.IsSecure)
+                {
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await pipe.Output.WriteReplyAsync(SessionGuards.TooManyConnectionsResponse, timeout.Token).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Refusing a connection over the limit failed");
+            }
+            finally
+            {
+                pipe.Dispose();
+            }
         }
 
         public void Dispose() => inner.Dispose();
     }
+}
+
+/// <summary>Session limits enforced at the pipe (see <see cref="LenientEndpointListenerFactory"/>).</summary>
+public sealed class SessionGuards
+{
+    /// <summary>421 for a connection beyond the concurrent-session caps (RFC 5321 section 4.2.3: service not available).</summary>
+    public static readonly SmtpResponse TooManyConnectionsResponse =
+        new(SmtpReplyCode.ServiceUnavailable, "4.7.0 Too many connections, try again later");
+
+    /// <summary>552 for a DATA body over the size limit; the session is closed after it.</summary>
+    public static readonly SmtpResponse MessageTooLargeResponse =
+        new(SmtpReplyCode.SizeLimitExceeded, "5.3.4 Message size exceeds fixed maximum message size");
+
+    /// <summary>Concurrent-session caps; null = unlimited.</summary>
+    public ConnectionLimiter? Connections { get; init; }
+
+    /// <summary>
+    /// The most bytes a DATA body may occupy in the receive buffer before the session is stopped; 0 = no
+    /// guard. Set slightly above the message size limit (the buffer also holds the end-of-data marker and
+    /// pipelined commands); the exact limit is checked again when the message is stored.
+    /// </summary>
+    public long MaxDataBytes { get; init; }
+
+    /// <summary>Called when a guard refuses: the session, the reason, and the reply code sent.</summary>
+    public Action<ISessionContext, RejectReason, int>? OnRejected { get; init; }
 }
 
 /// <summary>
@@ -65,31 +146,64 @@ internal sealed class LenientDuplexPipe : ISecurableDuplexPipe
     private readonly ISessionContext _context;
     private readonly Func<IPAddress, CancellationToken, ValueTask<bool>> _isTrustedSource;
     private readonly ILogger _logger;
+    private readonly SessionGuards _guards;
+    private Action? _release;
     private PipeReader? _wrappedReader;
     private LenientCommandReader? _input;
     private bool? _isTrusted;
+
+    /// <summary>Command lines still to be treated as possible AUTH continuations (see <see cref="ObserveCommandLine"/>).</summary>
+    private int _authContinuationLines;
 
     public LenientDuplexPipe(
         ISecurableDuplexPipe inner,
         ISessionContext context,
         Func<IPAddress, CancellationToken, ValueTask<bool>> isTrustedSource,
-        ILogger logger)
+        ILogger logger,
+        SessionGuards? guards = null,
+        Action? release = null)
     {
         _inner = inner;
         _context = context;
         _isTrustedSource = isTrustedSource;
         _logger = logger;
+        _guards = guards ?? new SessionGuards();
+        _release = release;
 
         // "Is a command executing?" is the line between command lines (normalise) and everything a command
         // reads itself — the DATA body, AUTH continuations — which must reach the library byte for byte.
         // A command that throws never raises CommandExecuted, but the session loop raises ResponseException
         // for it before reading the next command, so that event closes the window too.
-        context.CommandExecuting += (_, _) => CommandExecuting = true;
-        context.CommandExecuted += (_, _) => CommandExecuting = false;
-        context.ResponseException += (_, _) => CommandExecuting = false;
+        context.CommandExecuting += (_, e) =>
+        {
+            CommandExecuting = true;
+            DataExecuting = e.Command is DataCommand;
+        };
+        context.CommandExecuted += (_, e) =>
+        {
+            CommandExecuting = false;
+            DataExecuting = false;
+
+            // An AUTH that RAN read its own continuation lines; nothing after it is a credential.
+            if (e.Command is AuthCommand)
+                _authContinuationLines = 0;
+        };
+        context.ResponseException += (_, _) =>
+        {
+            CommandExecuting = false;
+            DataExecuting = false;
+        };
     }
 
     internal bool CommandExecuting { get; private set; }
+
+    /// <summary>True while the DATA command reads the message body.</summary>
+    internal bool DataExecuting { get; private set; }
+
+    /// <summary>Set once the session was stopped by a guard; every further read reports end of stream.</summary>
+    internal bool Aborted { get; private set; }
+
+    internal long MaxDataBytes => _guards.MaxDataBytes;
 
     /// <summary>The cached trust decision; <c>null</c> until the first candidate line forced it.</summary>
     internal bool? IsTrusted => _isTrusted;
@@ -118,7 +232,82 @@ internal sealed class LenientDuplexPipe : ISecurableDuplexPipe
     public Task UpgradeAsync(X509Certificate certificate, SslProtocols protocols, CancellationToken cancellationToken = default) =>
         _inner.UpgradeAsync(certificate, protocols, cancellationToken);
 
-    public void Dispose() => _inner.Dispose();
+    public void Dispose()
+    {
+        // The library disposes the pipe once per session, but a guard must never release a slot twice.
+        Interlocked.Exchange(ref _release, null)?.Invoke();
+        _inner.Dispose();
+    }
+
+    /// <summary>
+    /// Stops the session because the DATA body outgrew the size limit: answers 552 directly (the library's
+    /// DATA command would swallow the exception without a reply) and makes every further read report end of
+    /// stream, so the session ends instead of parsing the rest of the body as commands.
+    /// </summary>
+    internal async ValueTask AbortOversizeAsync(CancellationToken cancellationToken)
+    {
+        Aborted = true;
+        var ep = _context.Properties.TryGetValue(EndpointListener.RemoteEndPointKey, out var value) ? value : "unknown";
+        _logger.LogWarning("Message from {RemoteEndPoint} rejected: DATA exceeded the {Limit}-byte buffer limit; closing the session",
+            ep, _guards.MaxDataBytes);
+
+        try
+        {
+            _guards.OnRejected?.Invoke(_context, RejectReason.MessageTooLarge, (int)SmtpReplyCode.SizeLimitExceeded);
+            await _inner.Output.WriteReplyAsync(SessionGuards.MessageTooLargeResponse, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Answering an oversize DATA failed");
+        }
+    }
+
+    /// <summary>
+    /// Sees each command line as it reaches the parser. An AUTH line opens a window of two lines (AUTH LOGIN
+    /// sends user and password, AUTH PLAIN one combined line) that may be credentials if the AUTH is refused
+    /// before it runs; the window closes when an AUTH actually executes. The verdict for the current line is
+    /// published in <see cref="SessionKeys.RedactRejectedLine"/> for the rejection recorder.
+    /// </summary>
+    internal void ObserveCommandLine(ReadOnlySequence<byte> buffer)
+    {
+        var window = buffer.Length > LenientCommandReader.MaxCommandLineBytes
+            ? buffer.Slice(0, LenientCommandReader.MaxCommandLineBytes)
+            : buffer;
+        var reader = new SequenceReader<byte>(window);
+        var complete = reader.TryReadTo(out ReadOnlySequence<byte> line, "\r\n"u8, advancePastDelimiter: false);
+        if (!complete)
+        {
+            // Not the whole line yet (or a line longer than the window): decide conservatively, consume nothing.
+            if (window.Length < LenientCommandReader.MaxCommandLineBytes)
+                return;
+            line = window;
+        }
+
+        if (IsAuthCommand(line))
+        {
+            _authContinuationLines = 2;
+            _context.Properties[SessionKeys.RedactRejectedLine] = false; // the AUTH line itself is prefix-redacted
+            return;
+        }
+
+        var redact = _authContinuationLines > 0;
+        if (redact && complete)
+            _authContinuationLines--;
+        _context.Properties[SessionKeys.RedactRejectedLine] = redact;
+    }
+
+    private static bool IsAuthCommand(ReadOnlySequence<byte> line)
+    {
+        if (line.Length < 4)
+            return false;
+
+        Span<byte> head = stackalloc byte[5];
+        var n = (int)Math.Min(5, line.Length);
+        line.Slice(0, n).CopyTo(head);
+
+        return (head[0] | 0x20) == 'a' && (head[1] | 0x20) == 'u' && (head[2] | 0x20) == 't' && (head[3] | 0x20) == 'h'
+            && (n == 4 || head[4] is (byte)' ' or (byte)'\t');
+    }
 
     /// <summary>
     /// Decided lazily — only when a sloppy line actually arrives — so ordinary sessions, and the accept
@@ -179,7 +368,9 @@ internal sealed class LenientDuplexPipe : ISecurableDuplexPipe
 internal sealed class LenientCommandReader(PipeReader inner, LenientDuplexPipe owner) : PipeReader
 {
     /// <summary>Only this much of the buffer is searched for the end of the line (RFC 5321: 512 octets).</summary>
-    private const int MaxCommandLineBytes = 1024;
+    internal const int MaxCommandLineBytes = 1024;
+
+    private static readonly ReadResult EndOfStream = new(ReadOnlySequence<byte>.Empty, isCanceled: false, isCompleted: true);
 
     private static ReadOnlySpan<byte> Crlf => "\r\n"u8;
 
@@ -190,7 +381,22 @@ internal sealed class LenientCommandReader(PipeReader inner, LenientDuplexPipe o
 
     public override async ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
     {
+        if (owner.Aborted)
+            return EndOfStream;
+
         var result = await inner.ReadAsync(cancellationToken).ConfigureAwait(false);
+
+        if (owner.DataExecuting && owner.MaxDataBytes > 0 && result.Buffer.Length > owner.MaxDataBytes)
+        {
+            // Discard what was received and stop the session. The exception unwinds the library's DATA command
+            // (which swallows it); the next command read then sees end of stream and the session ends.
+            inner.AdvanceTo(result.Buffer.End);
+            await owner.AbortOversizeAsync(cancellationToken).ConfigureAwait(false);
+            throw new SmtpResponseException(SessionGuards.MessageTooLargeResponse, quit: true);
+        }
+
+        if (!owner.CommandExecuting && !result.IsCanceled && !result.Buffer.IsEmpty)
+            owner.ObserveCommandLine(result.Buffer);
 
         if (!TryFindCandidate(result, out var original, out var normalized, out var lineEnd))
             return result;
@@ -203,6 +409,12 @@ internal sealed class LenientCommandReader(PipeReader inner, LenientDuplexPipe o
 
     public override bool TryRead(out ReadResult result)
     {
+        if (owner.Aborted)
+        {
+            result = EndOfStream;
+            return true;
+        }
+
         if (!inner.TryRead(out result))
             return false;
 
