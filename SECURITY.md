@@ -37,8 +37,10 @@ near-"any" combination such as `0.0.0.0/1` + `128.0.0.0/1`), will *not* relay to
 - Send only mail your recipients have asked for. Unsolicited mail gets your IP and domain blocklisted.
 - Honor unsubscribe requests; do not strip `List-Unsubscribe` headers added by senders.
 - Stop sending to addresses that hard-bounce or complain. WIN-SMTP-RELAY maintains a per-tenant
-  suppression list (auto-populated from permanent bounces and complaints) and refuses further delivery
-  to suppressed addresses — do not work around it.
+  suppression list and refuses further delivery to suppressed addresses — do not work around it. It is
+  populated automatically only when the recipient's own server says the address does not exist (never for
+  policy or blocklist rejections, never from a smart host's answer); such entries expire after 30 days by
+  default. Senders in the tenant's own domains get an RFC 3464 bounce (DSN) when a message finally fails.
 
 ### Protect deliverability and your IP reputation
 
@@ -55,5 +57,20 @@ near-"any" combination such as `0.0.0.0/1` + `128.0.0.0/1`), will *not* relay to
 
 - Serve the admin UI over **HTTPS** with a real certificate; keep it on loopback or behind a reverse
   proxy / restricted network — never expose it unauthenticated.
-- Use strong admin passwords and change the seeded one-time password on first sign-in. Scope API keys to
-  the least privilege (tenant + role) needed.
+- Use strong admin passwords and enable two-factor sign-in. First-run setup needs the one-time token from
+  `setup-token.txt` (Administrators only). Scope API keys to the least privilege (tenant + role + scopes)
+  needed; an API key cannot create a key with more power than its own.
+- Set `AdminUi:PublicBaseUrl` when the admin UI is reached through a DNS alias or proxy: mailed sign-in and
+  reset links are built only from it, and the admin UI answers only known host names.
+- Message bodies are readable only with a tenant-admin membership (or an active break-glass membership) in
+  the message's tenant — over the UI and the API — and every read is written to the audit log.
+
+### Protect the host
+
+- Install with the MSI. The program folder is read-only for the service account (NetworkService); all data
+  lives in `C:\ProgramData\Ardimedia\WinSmtpRelay\`, which only SYSTEM, Administrators and the service can
+  write. Back that folder up — it holds the database and the Data Protection keys.
+- Releases are signed with Ardimedia's own code-signing certificate (CN=ARDIMEDIA, O=ARDIMEDIA). It is not
+  issued by a public authority: install its root on the hosts that run the relay, or Windows reports an
+  unknown publisher. The unattended self-update installs only packages that carry this signature (pinned
+  thumbprint, revocation checked), are WinSmtpRelay and are strictly newer than the installed version.

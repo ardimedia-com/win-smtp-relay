@@ -171,7 +171,15 @@ machine-readable OpenAPI document at `/openapi/v1.json` (point Scalar/Swagger or
 
 ## Configuration
 
-Configuration is split between file-based and database-stored settings:
+Configuration is split between file-based and database-stored settings.
+
+**Where the files are.** An installed relay keeps everything it writes in `C:\ProgramData\Ardimedia\WinSmtpRelay\`
+(database, Data Protection keys, `appsettings.json` / `appsettings.Local.json`, admin certificate, logs, the update
+drop folder); the program folder under Program Files holds binaries only and is read-only for the service. An
+upgrade from an older version moves the data there once — `.migrated` in that folder lists what moved. See
+`setup/WinSmtpRelay.Setup/README.md` for the folder layout, the installer properties and the upgrade behaviour.
+
+**One instance per database** — the delivery queue and the background jobs assume a single running service.
 
 ### appsettings.json (requires restart)
 
@@ -181,7 +189,18 @@ Infrastructure settings the application needs before it can start:
 - SQLite database connection string
 - Log levels
 - Admin UI enabled/disabled, port, bind address, and HTTPS (default: HTTPS on `127.0.0.1:8025`, loopback-only)
-- Windows Service settings
+- `AdminUi:PublicBaseUrl` — the address admins open (e.g. `https://relay.example.com:8025/`). Mailed sign-in, reset
+  and signup links are built from it, never from the request's Host header. Required when admins reach the UI
+  through a DNS alias or a reverse-proxy name.
+- `AllowedHosts` — when unset, the admin UI answers loopback, this machine's names and addresses and the
+  PublicBaseUrl host; anything else gets 400.
+- `AdminUi:SignInRequestsPerIpPerMinute` (default 10) — per-IP limit for the sign-in pages and passkey endpoints.
+- `SmtpListener`: `MaxConnections` (100), `MaxConnectionsPerIp` (20), `MaxRecipientsPerMessage` (100),
+  `MaxReceivedHeaders` (30 — loop protection).
+- `Delivery`: `MaxConcurrentDeliveriesPerDomain` (2), `AllowPrivateMxTargets` (false),
+  `SmartHostAllowPlaintextAuth` (false).
+- Windows Service settings; the service refuses to start without an explicit environment (the installed service
+  passes `--environment Production`)
 
 ### SQLite database (runtime-editable via Admin UI)
 
@@ -227,13 +246,13 @@ sc.exe start WinSmtpRelay
 
 The admin UI and REST API require authentication and bind to `127.0.0.1` over HTTPS by default.
 
-No administrator is created automatically. On first start, open the admin UI at `https://localhost:8025/account/login` — with no account yet, you are taken to **first-run setup** (`/account/initial-setup`) to define the first administrator (email + password). That account becomes the host administrator with full access. Once it exists, the setup page is closed and `/account/login` is shown normally.
+No administrator is created automatically. On first start, open the admin UI at `https://localhost:8025/account/login` — with no account yet, you are taken to **first-run setup** (`/account/initial-setup`) to define the first administrator (email + password). First-run setup asks for a **one-time setup token**: open `setup-token.txt` next to the database (`C:\ProgramData\Ardimedia\WinSmtpRelay\`) as an administrator — the file is readable by Administrators and SYSTEM only, a new token is written on every start until an administrator exists, and the Windows Event Log names the file. That account becomes the host administrator with full access. Once it exists, the setup page is closed and `/account/login` is shown normally.
 
 If an older install still carries the legacy seeded `admin@local` account *and it is the only account*, the service removes it on start so a new administrator must be defined through first-run setup. If you ever lose admin access, re-run the installer (Repair) and tick **Reset administrator access**: on the next start all administrator accounts are removed and first-run setup runs again. To expose the admin UI beyond loopback, use the installer's network-access option (also available later via Repair), or change `AdminUi:BindAddress` deliberately / put it behind a reverse proxy. For HTTPS, the admin UI starts with a self-signed certificate; replace it on the **HTTPS Certificate** page by uploading a PFX or picking a certificate from the Windows certificate store (applied immediately, no restart). Alternatively, `AdminUi:CertificatePath` / `AdminUi:CertificatePassword` can point to a PFX on disk.
 
 For automation, create an API key and pass it as `X-Api-Key: <key>` (or `Authorization: Bearer <key>`). Keys are scoped to a tenant and a role, and additionally carry **capability scopes** (`diag`, `messages`, `queue`, `config`, `admin` — each `:read` or `:write`, plus the dedicated `messages:body` scope for raw mail content). A key without scopes is **read-only**; write access must be granted per area, so an automation or AI-agent key can be limited to exactly what it needs. A key created in a tenant belongs to that tenant; a **host-level key** (role Host admin — needed for the self-check, the audit log, tenants and the sending identity) works across all tenants and can be created from the *Host (all tenants)* view or, by a host admin, from any tenant view. When several tenants exist, a host-level key names the tenant of a tenant change with the `X-Relay-Tenant: <id or slug>` header (REST and MCP) or the MCP tools' `tenant` argument — without it such a change is refused instead of landing in the Default tenant; with a single tenant that tenant is used. Keys get an expiry date (default one year); the self-check warns 30 days and alerts 7 days before a key stops working.
 
-For AI assistants, the same keys authenticate the built-in **MCP server** at `/mcp` (streamable HTTP): diagnostic tools (queue, delivery attempts, rejections, self-check, audit search) and routine fixes (accept a domain, remove a sender domain, allow an IP, manage suppressions, re-queue, generate and enable DKIM keys, set the public sending identity), with message bodies and all account/tenant/key administration deliberately excluded. The admin UI's **MCP** page has the client setup, including a ready `claude mcp add` command.
+For AI assistants, the same keys authenticate the built-in **MCP server** at `/mcp` (streamable HTTP): diagnostic tools (queue, delivery attempts, rejections, self-check, audit search) and routine fixes (accept a domain, remove a sender domain, allow an IP, manage suppressions, re-queue, generate and enable DKIM keys, set the public sending identity), with message bodies and all account/tenant/key administration deliberately excluded. Text that comes from mail (subjects, addresses, remote server replies) is returned inside `<untrusted-data>` markers and is data, never instructions; tools that change the relay's security posture require `confirm: true`. Prefer read-only keys (`diag:read messages:read config:read`) for diagnosis. The admin UI's **MCP** page has the client setup, including a ready `claude mcp add` command.
 
 ## Responsible operation
 

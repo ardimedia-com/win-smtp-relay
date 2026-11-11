@@ -7,13 +7,111 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+All findings of the deep code review of 2026-11-11 (decisions T1073–T1085). **Read the BREAKING lines before
+upgrading** — data moves to `%ProgramData%`, mailed links need a public address when the admin UI is reached
+through a DNS alias or proxy, and API/MCP clients see validated request bodies.
+
+### Added
+
+- **Bounces (RFC 3464 DSN)** — when a message finally fails, or a recipient is suppressed, the relay reports it to
+  the envelope sender: from MAILER-DAEMON@<sender domain>, null return path, DKIM-signed as the tenant, with the
+  original headers but not the content. Only for senders in the tenant's own accepted or sender domains (no
+  backscatter), never for null-sender mail, system mail or another DSN. Per-tenant switch, on by default.
+- **Fair delivery across tenants** and at most 2 concurrent deliveries per destination domain
+  (`Delivery:MaxConcurrentDeliveriesPerDomain`).
+- **SMTP limits:** at most 100 recipients per message (`SmtpListener:MaxRecipientsPerMessage`, extra recipients get
+  452), concurrent sessions capped in total and per IP (`MaxConnections` 100 — now enforced — and
+  `MaxConnectionsPerIp` 20), a hop limit (`MaxReceivedHeaders` 30) and a `Received:` header on every accepted message.
+- **TLS:** the listener certificate is reloaded without a restart and its expiry is logged three weeks ahead; TLS 1.3
+  is offered.
+- **First-run setup needs a one-time token** from `setup-token.txt` next to the database (readable by Administrators
+  only, re-issued on every start until an administrator exists; the Event Log names the file).
+- `AdminUi:PublicBaseUrl` and `AdminUi:SignInRequestsPerIpPerMinute`; a self-check finding for stored secrets that
+  cannot be decrypted; `REMOVEDATA=1` deletes the data on uninstall (kept by default); `appsettings.Local.json` for
+  machine-local secrets; an error bar and page error panel in the admin UI; paging for the queue and rejections; the
+  admin UI works on tablets and phones.
+
+### Changed
+
+- **BREAKING — data location:** the database, keys, configuration, certificates and logs now live in
+  `C:\ProgramData\Ardimedia\WinSmtpRelay\`; the program folder holds binaries only and is read-only for the service.
+  The upgrade moves existing data once (a `.migrated` file lists what moved), never overwrites, and rolls back on a
+  failed install.
+- **BREAKING — versioning:** the MSI version carries the build number (1.0.80 for build 80); an older build can no
+  longer be installed over a newer one.
+- **BREAKING — admin plane:** mailed sign-in, reset and signup links are built from `AdminUi:PublicBaseUrl`, never
+  from the request's Host header, and the admin UI answers only known host names (`AllowedHosts` defaults to
+  loopback, this machine's names and addresses and the PublicBaseUrl host). Set `AdminUi:PublicBaseUrl` or
+  `AllowedHosts` when admins reach the UI through a DNS alias or a reverse-proxy name.
+- **BREAKING — API/MCP:** the configuration API takes validated request bodies (400/404/409 instead of 500); send
+  connectors use `password` (omitted keeps it, `""` clears it); private keys are never returned; destructive MCP tools
+  (`add_ip_allow_rule`, `add_accepted_sender_domain`, `remove_accepted_sender_domain`, `remove_suppression`,
+  `generate_dkim_key` with `replace=true`) need `confirm: true`; mail-derived text in MCP answers is wrapped in
+  `<untrusted-data>` markers.
+- **BREAKING — SMTP:** a null sender (`MAIL FROM:<>`) is accepted only for hosted and backup-MX domains (T1085 A);
+  a RequireTls endpoint refuses MAIL before STARTTLS (530); an endpoint that can never work (AUTH required without
+  TLS, TLS without a certificate) is skipped with a critical log, and the service stops when none is left.
+- **Suppression:** automatic suppression only for rejections saying the address does not exist (5.1.x except
+  5.1.7/5.1.8, 5.2.1, Exchange Online's «5.4.1 Recipient address rejected», or plain 550/551/553 without policy
+  wording) — never for 5.7.x, blocklists or a smart host's answer. Hard-bounce entries expire after 30 days by default.
+  Existing suppressions caused by policy rejections are lifted once on upgrade, with an audit entry.
+- Sender and user rate limits count recipients instead of MAIL commands; a failed SMTP AUTH answers after about one
+  second; the inbound SPF/DMARC check runs only for unauthenticated mail to hosted domains and honours the DMARC
+  policy (p, sp, pct).
+- Direct-MX delivery accepts any certificate and records the TLS result in the delivery log; smart hosts keep strict
+  validation, and their credentials are never sent without TLS unless the connector allows it
+  (`AllowPlaintextAuth`).
+- Firewall on new installs: only port 25 on the Domain and Private profiles (`FIREWALLSUBMISSION=1`,
+  `FIREWALLSMTPS=1`, `FIREWALLPUBLIC=1` open more); the admin-UI rule is limited to the local subnet. Upgrades keep the
+  existing rules.
+- DKIM-key regeneration, admin reset/disable, certificate removal and tenant purge ask for confirmation; forms
+  validate domains (IDN stored as punycode), IP/CIDR rules, ports and limits instead of saving defaults; the Event Log
+  page shows your time zone; the service refuses to start without an explicit environment.
+
 ### Fixed
 
+- **A failure on one recipient domain no longer re-sends the message** to domains that already accepted it;
+  permanent rejections are not retried.
+- **A database error after a successful send** no longer leaves the message in «Delivering» or sends it twice —
+  deliveries hold a 15-minute lease that a sweep recovers.
+- **The tenant is resolved for every message,** not once per SMTP session.
+- **The size limit is enforced on DATA** even when the client sends no SIZE parameter.
+- **Mail with a null sender no longer drops the connection.**
+- The queue no longer reads every message body to pick the next one; null MX and non-existent domains fail at once
+  while DNS outages are retried; a missing EHLO name no longer holds mail for ever; the daily report scheduled shortly
+  before midnight is no longer skipped; a settings-read error or a dashboard timer can no longer stop the service;
+  the EHLO domain of a send connector is saved on edit; the switch-tenant and break-glass sign-ins keep «Keep me
+  signed in»; save and delete buttons cannot run twice; a 2048 MB size limit no longer overflows.
 - **Loading placeholders have their height again** — about 30 skeletons (queue, setup, logs, dashboard cards) used
   size classes that no stylesheet declared, so they collapsed to nothing while a page loaded. The sub-headings on
   the accepted-domain and DKIM detail pages are styled as well.
 - **Status colours on Diagnostics, DNS setup and Setup follow the theme** — the bars and alignment marks used fixed
   red and amber values that ignored dark mode.
+
+### Security
+
+- **View-only admins can no longer retry, delete or resend queued messages or remove suppressions;** the smart-host
+  password is never sent to the browser; a tenant admin can no longer change the host-wide rate limits.
+- **Message bodies are readable only with a tenant-admin membership (or break-glass) in the message's tenant,** also
+  over the API, and every read is audited.
+- **The service account can no longer write what SYSTEM trusts:** binaries, the updater task definition and the
+  registry values the next upgrade reads; `ADMINUIPORT` is validated. The self-update checks the signature with
+  revocation, the pinned certificate thumbprint, the product identity and a newer version.
+- **Releases sign every first-party binary and both MSIs,** verify them, and are never published unsigned (own
+  ARDIMEDIA certificate, decision T1084 D). CI builds and tests every push; actions are pinned to commit SHAs; NuGet
+  restores use lock files.
+- **Sign-in links require the second factor** when two-factor is on and are used up only on «Continue»; disabling an
+  admin or removing a membership ends their sessions within a minute; a password reset lifts a lockout and is
+  audited; sign-in attempts and wrong API keys are throttled per address; the same message for every failed sign-in;
+  API keys cannot create keys with more power than their own.
+- SendAs and sender-domain rules also bind the header From; a second From header is refused; DKIM signs and oversigns
+  the relevant headers; forged `Authentication-Results: winsmtprelay` headers are removed; AUTH failures decay per IP,
+  lock a username after repeated failures from anywhere and cost the same for unknown users; lines after a refused
+  AUTH are never stored.
+- MX hosts on loopback, private or own addresses are refused (`Delivery:AllowPrivateMxTargets` to override); a secret
+  that cannot be decrypted is never used; security headers (CSP, HSTS, nosniff, frame and referrer policy); logout
+  protected against cross-site requests; OpenAPI only for signed-in admins; live activity no longer shows client IPs
+  to other tenants.
 
 ## [1.0.0-beta1-build79] - 2026-10-19
 

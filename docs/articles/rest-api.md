@@ -18,11 +18,23 @@ Authorization: Bearer <key>
 ```
 
 Keys are scoped to a **tenant** and a **role** (host admin / tenant admin / viewer), so a key only sees and
-changes its own tenant's data.
+changes its own tenant's data. A key cannot create or re-scope a key with more power than its own. Failed key
+logins are throttled per address: after 10 failures in 5 minutes the source gets 429 before any lookup.
+
+## Requests and errors
+
+- Request bodies are validated DTOs: identifiers and timestamps in a body are ignored, invalid input answers **400**,
+  an unknown id **404**, a conflict (duplicate name, a resource still in use) **409**.
+- Send connectors take `password`: omitted or `null` keeps the stored password, `""` clears it. Responses never
+  contain a password or a DKIM private key.
+- `limit` is capped at 500; a negative `offset` answers 400.
+- `GET /api/rate-limits` and `PUT /api/rate-limits` are host-wide settings and need a host-admin key.
+- Message bodies are returned only to a tenant-admin key of the message's tenant (host keys, also with
+  `X-Relay-Tenant`, get 403); every read is written to the audit log.
 
 ## OpenAPI specification
 
-The running admin host serves a machine-readable OpenAPI document at:
+The running admin host serves a machine-readable OpenAPI document to signed-in administrators at:
 
 ```
 GET /openapi/v1.json
