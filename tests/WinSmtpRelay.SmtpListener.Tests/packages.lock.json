@@ -521,6 +521,7 @@
         "type": "Project",
         "dependencies": {
           "DnsClient": "[1.*, )",
+          "Microsoft.Extensions.Hosting.Abstractions": "[10.*, )",
           "Microsoft.Extensions.Logging.Abstractions": "[10.*, )",
           "Microsoft.Extensions.Options": "[10.*, )",
           "MimeKit": "[4.*, )",

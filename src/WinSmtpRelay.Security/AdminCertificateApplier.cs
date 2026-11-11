@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WinSmtpRelay.Core.Configuration;
@@ -18,6 +19,7 @@ public class AdminCertificateApplier(
     IAdminCertificateService store,
     IAdminCertificateProvider provider,
     IOptions<AdminUiOptions> options,
+    IHostEnvironment environment,
     ILogger<AdminCertificateApplier> logger)
 {
     /// <summary>Imports a PFX (with private key) and serves it immediately.</summary>
@@ -58,7 +60,8 @@ public class AdminCertificateApplier(
     public async Task RemoveAndRevertAsync(CancellationToken ct = default)
     {
         await store.ClearAsync(ct);
-        var fallback = AdminUiCertificate.Resolve(options.Value, AppContext.BaseDirectory, logger);
+        // The self-signed admin-cert.pfx lives in the data directory (the content root, %ProgramData%\Ardimedia        // WinSmtpRelay for an installed service) — the program folder is read-only for the service account (T1076).
+        var fallback = AdminUiCertificate.Resolve(options.Value, environment.ContentRootPath, logger);
         if (fallback is not null)
             provider.Set(fallback);
     }

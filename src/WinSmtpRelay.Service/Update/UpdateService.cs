@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Reflection;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WinSmtpRelay.Core.Configuration;
@@ -21,7 +20,6 @@ namespace WinSmtpRelay.Service.Update;
 public class UpdateService(
     IHttpClientFactory httpClientFactory,
     IOptions<UpdateOptions> options,
-    IConfiguration configuration,
     ILogger<UpdateService> logger) : IUpdateService
 {
     public bool IsSupported => OperatingSystem.IsWindows() && options.Value.Enabled;
@@ -77,7 +75,8 @@ public class UpdateService(
         // 2) Verify (pre-check — the SYSTEM updater re-verifies all of it independently before installing):
         //    Authenticode signature incl. online revocation, the pinned publisher (O=), and that the package is
         //    WinSmtpRelay's MSI (UpgradeCode + ProductName) with a version strictly greater than the installed one.
-        //    The pins are compiled in (UpdatePackageIdentity), not read from the service-writable configuration.
+        //    The organization and product pins are compiled in (UpdatePackageIdentity); Update:SignerThumbprints can only
+        //    change which certificates this pre-check accepts — the SYSTEM updater keeps its own compiled-in list.
         if (!VerifyPackage(tempPath, out var verifyError))
         {
             logger.LogWarning("Update package {Version} rejected: {Error}", targetVersion, verifyError);
@@ -162,7 +161,7 @@ public class UpdateService(
     // SYSTEM updater script carries its own compiled-in list and never reads the (service-writable) configuration.
     private IReadOnlyList<string> PinnedThumbprints()
     {
-        var configured = configuration.GetSection("Update:SignerThumbprints").Get<string[]>();
+        var configured = options.Value.SignerThumbprints;
         return configured is { Length: > 0 } ? configured : UpdatePackageIdentity.DefaultSignerThumbprints;
     }
 

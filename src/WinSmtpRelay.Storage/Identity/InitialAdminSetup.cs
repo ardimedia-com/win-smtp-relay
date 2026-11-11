@@ -241,6 +241,8 @@ public class InitialAdminSetup(
         if (!string.IsNullOrWhiteSpace(source) && !source.StartsWith(':') &&
             Path.GetDirectoryName(Path.GetFullPath(source)) is { Length: > 0 } dir)
             return dir;
-        return AppContext.BaseDirectory;
+        // In-memory database (tests): fall back to the working directory, which the service host sets to the data
+        // directory — never the program folder, which is read-only for the service account (T1076).
+        return Directory.GetCurrentDirectory();
     }
 }

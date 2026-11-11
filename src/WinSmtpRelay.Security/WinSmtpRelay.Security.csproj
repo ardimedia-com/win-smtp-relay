@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="DnsClient" Version="1.*" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.*" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.*" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.*" />
     <PackageReference Include="MimeKit" Version="4.*" />

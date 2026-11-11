@@ -21,19 +21,20 @@ public class UpdateOptions
     public string AllowedAssetUrlPrefix { get; set; } = "https://github.com/ardimedia-com/win-smtp-relay/releases/download/";
 
     /// <summary>
-    /// The downloaded MSI's signer Organization (the certificate subject's <c>O=</c> RDN) must EQUAL this
-    /// exactly (case-insensitive) — publisher pinning on the O field, not a loose subject substring. The
-    /// SYSTEM updater task applies the same pin independently. Keep in sync with the value baked into
-    /// <c>update-task.xml</c> if changed.
+    /// Thumbprints of the release signing certificates the service-side pre-check accepts (several, so a certificate
+    /// rollover can name the old and the new one). Empty ⇒ the compiled-in release certificate. This only widens or
+    /// narrows the service-side PRE-check — the SYSTEM updater script carries its own compiled-in list and never reads
+    /// the (service-writable) configuration.
     /// </summary>
-    public string ExpectedPublisher { get; set; } = "ARDIMEDIA";
+    public string[] SignerThumbprints { get; set; } = [];
 
     /// <summary>Windows service name the installer restarts after the upgrade.</summary>
     public string ServiceName { get; set; } = "WinSmtpRelay";
 
     /// <summary>
     /// Folder the verified MSI is dropped into for the SYSTEM updater task to pick up. Empty ⇒
-    /// <c>%ProgramData%\WinSmtpRelay\updates</c>. Must be writable by the service account and readable by SYSTEM.
+    /// <c>%ProgramData%\Ardimedia\WinSmtpRelay\updates</c>. Must be writable by the service account and readable by
+    /// SYSTEM. The SYSTEM updater installs only from that default folder, so any other value is logged as a warning.
     /// </summary>
     public string DropFolder { get; set; } = "";
 
