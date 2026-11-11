@@ -96,19 +96,33 @@ namespace WinSmtpRelay.Setup.CustomActions
         }
 
         /// <summary>
-        /// Immediate CA, scheduled (UI and execute sequence) only when the installer's registry key holds no saved admin
-        /// port — the first upgrade from a version that kept it elsewhere, or a pre-build45 install. Reads the existing
-        /// appsettings.Production.json (data folder first, then the legacy program folder) so the options dialog reflects
-        /// the current state and the admin port is preserved. Sets ADMINUIPORT/ADMINUIURL to the current port and
-        /// NETWORKACCESS=1 when the current bind is anything but loopback. Port/BindAddress are read from the "AdminUi"
-        /// section only — other sections may carry keys with the same names. Invalid ports are ignored.
+        /// Immediate CA, scheduled (UI and execute sequence) on an upgrade or maintenance run when the installer's
+        /// registry key records no network choice for the admin UI — the first upgrade from a version that kept it in
+        /// the service's key, a pre-build45 install, or a build80 install that lost the choice that way. Reads the
+        /// existing appsettings.Production.json (data folder first, then the legacy program folder) so the options
+        /// dialog reflects the current state and the admin port is preserved. Sets ADMINUIPORT/ADMINUIURL to the current
+        /// port and NETWORKACCESS=1 when the current bind is anything but loopback. Port/BindAddress are read from the
+        /// "AdminUi" section only — other sections may carry keys with the same names. Invalid ports are ignored.
+        /// Runs BEFORE CostInitialize: component conditions (the admin-UI firewall rule) are evaluated during costing,
+        /// so NETWORKACCESS set any later reached WriteAdminConfig but not the firewall component, and an upgrade kept
+        /// the network bind while removing its firewall rule. Directory properties are not resolved yet at that point,
+        /// so the default locations are built from the standard folder properties.
         /// </summary>
         [CustomAction]
         public static ActionResult ReadExistingConfig(Session session)
         {
             try
             {
-                string path = new[] { session["WsrDataFolder"], session["INSTALLFOLDER"] }
+                string Under(string root, string relative) =>
+                    string.IsNullOrEmpty(root) ? null : Path.Combine(root, relative);
+
+                string path = new[]
+                    {
+                        session["WsrDataFolder"],
+                        Under(session["CommonAppDataFolder"], @"Ardimedia\WinSmtpRelay"),
+                        session["INSTALLFOLDER"],
+                        Under(session["ProgramFiles64Folder"], "WinSmtpRelay"),
+                    }
                     .Where(d => !string.IsNullOrEmpty(d))
                     .Select(d => Path.Combine(d, "appsettings.Production.json"))
                     .FirstOrDefault(p => { try { return File.Exists(p); } catch { return false; } });

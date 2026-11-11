@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The upgrade to build80 kept a network-reachable admin UI bound to the network but removed its firewall rule, so
+  the admin UI could no longer be reached from other computers (the recorded choice had moved to the installer's own
+  registry key, and the fallback that reads it from the configuration ran too late to keep the firewall rule). The
+  installer now reads the existing configuration whenever no choice is recorded, early enough for the firewall rule,
+  and records the choice again. A build80 host that lost the rule gets it back with the next update.
+
 ## [1.0.0-beta1-build80] - 2026-11-11
 
 All findings of the deep code review of 2026-11-11 (decisions T1073–T1085). **Read the BREAKING lines before

@@ -203,8 +203,10 @@
                   Execute="immediate" Return="ignore" />
 
     <!-- Immediate: read the existing appsettings.Production.json (data folder, then the legacy program folder) when the
-         installer key has no saved port — the first upgrade from a version that kept it in the service's key, or a
-         pre-build45 install. Optional; invalid values are ignored. -->
+         installer key records no network choice for the admin UI — the first upgrade from a version that kept it in
+         the service's key, a pre-build45 install, or a build80 install that lost it that way. Sequenced before
+         CostInitialize so NETWORKACCESS also reaches the firewall component's condition. Optional; invalid values are
+         ignored. -->
     <CustomAction Id="ReadExistingConfig" BinaryRef="WinSmtpRelayCA" DllEntry="ReadExistingConfig"
                   Execute="immediate" Return="ignore" />
 
@@ -286,22 +288,24 @@
     <CustomAction Id="RemoveData" BinaryRef="WinSmtpRelayCA" DllEntry="RemoveData"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
+    <!-- ReadExistingConfig runs before CostInitialize so its NETWORKACCESS reaches the component conditions (the
+         admin-UI firewall rule); it runs whenever no network choice is recorded in the installer key. -->
     <InstallUISequence>
+      <Custom Action="ReadExistingConfig" Before="CostInitialize"
+              Condition="(Installed OR WIX_UPGRADE_DETECTED) AND NOT (WSR_SAVEDNET = &quot;#1&quot; OR WSR_SAVEDNETANY = &quot;#1&quot;)" />
       <Custom Action="CheckPorts" After="CostFinalize"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
-      <Custom Action="ReadExistingConfig" After="CheckPorts"
-              Condition="(Installed OR WIX_UPGRADE_DETECTED) AND NOT WSR_SAVEDPORT" />
-      <Custom Action="ValidateAdminPort" After="ReadExistingConfig"
+      <Custom Action="ValidateAdminPort" After="CheckPorts"
               Condition="NOT (REMOVE = &quot;ALL&quot;)" />
     </InstallUISequence>
 
     <InstallExecuteSequence>
+      <!-- NOT WSRUIRAN: when the options dialog ran, its (Secure) values must win. -->
+      <Custom Action="ReadExistingConfig" Before="CostInitialize"
+              Condition="(Installed OR WIX_UPGRADE_DETECTED) AND NOT (WSR_SAVEDNET = &quot;#1&quot; OR WSR_SAVEDNETANY = &quot;#1&quot;) AND (NOT WSRUIRAN)" />
       <Custom Action="CheckPorts" After="CostFinalize"
               Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
-      <!-- NOT WSRUIRAN: when the options dialog ran, its (Secure) values must win. -->
-      <Custom Action="ReadExistingConfig" After="CheckPorts"
-              Condition="(Installed OR WIX_UPGRADE_DETECTED) AND (NOT WSR_SAVEDPORT) AND (NOT WSRUIRAN)" />
-      <Custom Action="ValidateAdminPort" After="ReadExistingConfig"
+      <Custom Action="ValidateAdminPort" After="CheckPorts"
               Condition="NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom Action="CleanupLeftoverService" Before="InstallServices"
               Condition="NOT Installed" />
