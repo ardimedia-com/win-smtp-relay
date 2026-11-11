@@ -48,14 +48,15 @@ public class RetentionService(
             .Where(r => r.LastSeenUtc < logCutoff)
             .ExecuteDeleteAsync(ct);
 
-        // Suppression list: 0 = keep indefinitely (the recommended default), so only purge when a positive
-        // window is configured.
+        // Suppression list: entries from hard bounces expire after SuppressionDays (default 30, T1075) — a mailbox
+        // that did not exist may exist again. Complaints and manual entries are deliberate and never age out.
+        // 0 = keep hard bounces indefinitely.
         var suppressions = 0;
         if (s.SuppressionDays > 0)
         {
             var suppressionCutoff = now.AddDays(-s.SuppressionDays);
             suppressions = await db.SuppressionEntries
-                .Where(e => e.CreatedUtc < suppressionCutoff)
+                .Where(e => e.Reason == SuppressionReason.HardBounce && e.CreatedUtc < suppressionCutoff)
                 .ExecuteDeleteAsync(ct);
         }
 
@@ -101,6 +102,50 @@ public class RetentionService(
                 + "{Rejections} rejected-submission row(s), stripped {ResendBodies} resend-grace body/bodies",
                 messages, deliveryLogs, suppressions, rejectedSubmissions, resendBodiesStripped);
 
+        await CompactIfFragmentedAsync(ct);
+
         return new RetentionPurgeResult(messages, deliveryLogs, suppressions, resendBodiesStripped, rejectedSubmissions);
     }
+
+    /// <summary>Free pages that justify a VACUUM: at least this share of the file ...</summary>
+    internal const double CompactFreeShare = 0.25;
+
+    /// <summary>... and at least this many bytes.</summary>
+    internal const long CompactFreeBytes = 16L * 1024 * 1024;
+
+    /// <summary>
+    /// SQLite never gives deleted pages back to the file system: after the purge removed message bodies the file
+    /// keeps its size. When the free pages are a large share of the file, rebuild it (VACUUM). Runs in the nightly
+    /// maintenance window; VACUUM locks the database while it runs, so it is skipped when there is little to gain.
+    /// Best-effort: a failure is logged and the purge result stands.
+    /// </summary>
+    public async Task<bool> CompactIfFragmentedAsync(CancellationToken ct = default)
+    {
+        if (!db.Database.IsSqlite())
+            return false;
+        try
+        {
+            var pageSize = await ScalarAsync("SELECT page_size AS \"Value\" FROM pragma_page_size", ct);
+            var pageCount = await ScalarAsync("SELECT page_count AS \"Value\" FROM pragma_page_count", ct);
+            var freePages = await ScalarAsync("SELECT freelist_count AS \"Value\" FROM pragma_freelist_count", ct);
+            if (pageCount <= 0 || freePages < pageCount * CompactFreeShare || freePages * pageSize < CompactFreeBytes)
+                return false;
+
+            var started = DateTimeOffset.UtcNow;
+            await db.Database.ExecuteSqlRawAsync("VACUUM;", ct);
+            logger.LogInformation(
+                "Database compacted: {FreeMb:F1} MB of free pages released ({FreePages} of {Pages} pages) in {Seconds:F1}s",
+                freePages * pageSize / 1048576.0, freePages, pageCount, (DateTimeOffset.UtcNow - started).TotalSeconds);
+            return true;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Database compaction (VACUUM) failed");
+            return false;
+        }
+    }
+
+    private async Task<long> ScalarAsync(string sql, CancellationToken ct) =>
+        (await db.Database.SqlQueryRaw<long>(sql).ToListAsync(ct)).Single();
+
 }

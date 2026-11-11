@@ -88,7 +88,23 @@ public class StatisticsAggregator(
         var logged = false;
         while (!ct.IsCancellationRequested)
         {
-            var settings = await GetRetentionSettingsAsync(ct);
+            // A settings read can fail transiently (SQLite busy/locked). This runs outside the aggregation's
+            // try/catch, and an exception escaping ExecuteAsync stops the whole host — so fall back to the
+            // defaults for this wake-up instead (M9).
+            StatisticsRetentionSettings settings;
+            try
+            {
+                settings = await GetRetentionSettingsAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Reading the statistics schedule failed — using the default for now");
+                settings = new StatisticsRetentionSettings();
+            }
             var wait = DailySchedule.NextRunUtc(settings.AggregationTimeUtc, new TimeOnly(0, 0), waitStartedUtc) - DateTime.UtcNow;
             if (wait <= TimeSpan.Zero)
                 return true;

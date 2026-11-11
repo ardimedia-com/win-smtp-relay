@@ -129,5 +129,8 @@ public class DomainRoutingTests
     {
         public Task<IReadOnlyList<string>> ResolveMxAsync(string domain, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<string>>(["mx.example.com"]);
+
+        public Task<IReadOnlyList<System.Net.IPAddress>> ResolveHostAddressesAsync(string host, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<System.Net.IPAddress>>([System.Net.IPAddress.Parse("192.0.2.10")]);
     }
 }

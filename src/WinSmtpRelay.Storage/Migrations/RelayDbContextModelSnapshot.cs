@@ -15,7 +15,7 @@ namespace WinSmtpRelay.Storage.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.13");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.15");
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<int>", b =>
                 {
@@ -493,7 +493,7 @@ namespace WinSmtpRelay.Storage.Migrations
                             Profile = "Standard",
                             ResendRetentionDays = 7,
                             StripBodyOnDelivery = true,
-                            SuppressionDays = 0,
+                            SuppressionDays = 30,
                             UpdatedUtc = "2026-01-01T00:00:00.0000000Z"
                         });
                 });
@@ -959,7 +959,13 @@ namespace WinSmtpRelay.Storage.Migrations
                     b.Property<string>("DeliveredRecipients")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FailedRecipients")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LeaseExpiresUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("MessageId")
@@ -968,7 +974,11 @@ namespace WinSmtpRelay.Storage.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("NextRetryUtc")
+                        .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("Origin")
+                        .HasColumnType("INTEGER");
 
                     b.Property<byte[]>("RawMessage")
                         .IsRequired()
@@ -1005,11 +1015,11 @@ namespace WinSmtpRelay.Storage.Migrations
 
                     b.HasIndex("MessageId");
 
-                    b.HasIndex("NextRetryUtc");
-
                     b.HasIndex("Status");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("Status", "NextRetryUtc");
 
                     b.ToTable("QueuedMessages");
                 });
@@ -1271,6 +1281,9 @@ namespace WinSmtpRelay.Storage.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("AllowPlaintextAuth")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("ConnectTimeoutSeconds")
                         .HasColumnType("INTEGER");
 
@@ -1452,6 +1465,9 @@ namespace WinSmtpRelay.Storage.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("DsnEnabled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("EgressIpAddress")
                         .HasMaxLength(45)
                         .HasColumnType("TEXT");
@@ -1481,6 +1497,7 @@ namespace WinSmtpRelay.Storage.Migrations
                         {
                             Id = 1,
                             CreatedUtc = "2026-01-01T00:00:00.0000000Z",
+                            DsnEnabled = true,
                             IsEnabled = true,
                             Name = "Default",
                             Slug = "default"

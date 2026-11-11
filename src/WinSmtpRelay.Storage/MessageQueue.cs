@@ -22,18 +22,14 @@ public class MessageQueue(
 
     public async Task<IReadOnlyList<QueuedMessage>> GetPendingAsync(int maxCount, CancellationToken cancellationToken = default)
     {
-        // SQLite/EF can't translate a range comparison on the nullable DateTimeOffset column combined
-        // with an OR-null, so load the (small) Queued set ordered by Id and filter eligibility — no
-        // retry scheduled, or the retry time has passed — in memory.
+        // An indexed range filter on (Status, NextRetryUtc): NextRetryUtc is non-nullable and stored as a sortable
+        // UTC ISO string, so SQLite filters and orders it without loading any row it does not return.
         var now = DateTimeOffset.UtcNow;
-        var queued = await db.QueuedMessages
-            .Where(m => m.Status == MessageStatus.Queued)
-            .OrderBy(m => m.Id)
+        return await WithoutBody(db.QueuedMessages.AsNoTracking()
+                .Where(m => m.Status == MessageStatus.Queued && m.NextRetryUtc <= now)
+                .OrderBy(m => m.NextRetryUtc).ThenBy(m => m.Id)
+                .Take(maxCount))
             .ToListAsync(cancellationToken);
-        return queued
-            .Where(m => m.NextRetryUtc is null || m.NextRetryUtc <= now)
-            .Take(maxCount)
-            .ToList();
     }
 
     public async Task UpdateStatusAsync(long messageId, MessageStatus status, string? error = null, CancellationToken cancellationToken = default)
@@ -43,9 +39,13 @@ public class MessageQueue(
             .ExecuteUpdateAsync(s => s
                 .SetProperty(m => m.Status, status)
                 .SetProperty(m => m.LastError, error)
-                .SetProperty(m => m.CompletedUtc, status is MessageStatus.Delivered or MessageStatus.Bounced or MessageStatus.Failed or MessageStatus.Suppressed ? DateTimeOffset.UtcNow : (DateTimeOffset?)null),
+                .SetProperty(m => m.CompletedUtc, IsTerminal(status) ? DateTimeOffset.UtcNow : (DateTimeOffset?)null)
+                .SetProperty(m => m.LeaseExpiresUtc, (DateTimeOffset?)null),
                 cancellationToken);
     }
+
+    private static bool IsTerminal(MessageStatus status) =>
+        status is MessageStatus.Delivered or MessageStatus.Bounced or MessageStatus.Failed or MessageStatus.Suppressed;
 
     public async Task StripBodyAsync(long messageId, CancellationToken cancellationToken = default)
     {
@@ -93,7 +93,11 @@ public class MessageQueue(
                 .SetProperty(m => m.LastError, (string?)null)
                 .SetProperty(m => m.CompletedUtc, (DateTimeOffset?)null)
                 .SetProperty(m => m.RetryCount, 0)
-                .SetProperty(m => m.NextRetryUtc, DateTimeOffset.UtcNow),
+                .SetProperty(m => m.NextRetryUtc, DateTimeOffset.UtcNow)
+                // An explicit retry by the admin: recipients that failed permanently get another chance; the
+                // delivered ones stay recorded, so they do not receive the message twice.
+                .SetProperty(m => m.FailedRecipients, (string?)null)
+                .SetProperty(m => m.LeaseExpiresUtc, (DateTimeOffset?)null),
                 cancellationToken);
 
         await audit.WriteAsync(AdminAuditActions.QueueMessageRequeued, actor, tenantId: msg.TenantId,
@@ -118,20 +122,60 @@ public class MessageQueue(
 
     public async Task<IReadOnlyList<QueuedMessage>> GetRecentAsync(int maxCount, CancellationToken cancellationToken = default)
     {
-        return await db.QueuedMessages
-            .OrderByDescending(m => m.Id)
-            .Take(maxCount)
+        return await WithoutBody(db.QueuedMessages.AsNoTracking()
+                .OrderByDescending(m => m.Id)
+                .Take(maxCount))
             .ToListAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<QueuedMessage>> GetNonDeliveredAsync(int maxCount, CancellationToken cancellationToken = default)
     {
-        return await db.QueuedMessages
-            .Where(m => m.Status != MessageStatus.Delivered)
-            .OrderByDescending(m => m.Id)
-            .Take(maxCount)
+        return await WithoutBody(db.QueuedMessages.AsNoTracking()
+                .Where(m => m.Status != MessageStatus.Delivered)
+                .OrderByDescending(m => m.Id)
+                .Take(maxCount))
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<QueuedMessageSummary>> GetSummariesAsync(int maxCount, bool nonDeliveredOnly, CancellationToken cancellationToken = default)
+    {
+        var query = db.QueuedMessages.AsNoTracking();
+        if (nonDeliveredOnly)
+            query = query.Where(m => m.Status != MessageStatus.Delivered);
+        return await query
+            .OrderByDescending(m => m.Id)
+            .Take(maxCount)
+            .Select(m => new QueuedMessageSummary(
+                m.Id, m.TenantId, m.MessageId, m.Sender, m.Recipients, m.SizeBytes, m.Status, m.RetryCount,
+                m.LastError, m.CreatedUtc, m.NextRetryUtc, m.CompletedUtc, m.DeliveredRecipients, m.FailedRecipients,
+                m.Origin))
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>Projects every column except the body; the returned entities carry an empty <see cref="QueuedMessage.RawMessage"/>.</summary>
+    private static IQueryable<QueuedMessage> WithoutBody(IQueryable<QueuedMessage> query) =>
+        query.Select(m => new QueuedMessage
+        {
+            Id = m.Id,
+            TenantId = m.TenantId,
+            MessageId = m.MessageId,
+            Sender = m.Sender,
+            Recipients = m.Recipients,
+            RawMessage = Array.Empty<byte>(),
+            SizeBytes = m.SizeBytes,
+            Status = m.Status,
+            RetryCount = m.RetryCount,
+            LastError = m.LastError,
+            CreatedUtc = m.CreatedUtc,
+            NextRetryUtc = m.NextRetryUtc,
+            CompletedUtc = m.CompletedUtc,
+            SourceIp = m.SourceIp,
+            AuthenticatedUser = m.AuthenticatedUser,
+            DeliveredRecipients = m.DeliveredRecipients,
+            FailedRecipients = m.FailedRecipients,
+            LeaseExpiresUtc = m.LeaseExpiresUtc,
+            Origin = m.Origin,
+        });
 
     public async Task SetDeliveredRecipientsAsync(long messageId, string deliveredRecipients, CancellationToken cancellationToken = default)
     {
@@ -143,12 +187,81 @@ public class MessageQueue(
     public async Task<int> RequeueStaleDeliveringAsync(CancellationToken cancellationToken = default)
     {
         // Single-instance Windows service: at startup nothing is genuinely in flight, so any Delivering
-        // row is a leftover from a previous crash/kill. Reset it to Queued (clear any retry delay).
+        // row is a leftover from a previous crash/kill. Reset it to Queued, due now.
+        var now = DateTimeOffset.UtcNow;
         return await db.QueuedMessages
             .Where(m => m.Status == MessageStatus.Delivering)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(m => m.Status, MessageStatus.Queued)
-                .SetProperty(m => m.NextRetryUtc, (DateTimeOffset?)null),
+                .SetProperty(m => m.NextRetryUtc, now)
+                .SetProperty(m => m.LeaseExpiresUtc, (DateTimeOffset?)null),
+                cancellationToken);
+    }
+
+    public async Task<int> RequeueExpiredLeasesAsync(DateTimeOffset nowUtc, IReadOnlyCollection<long> inFlightIds, CancellationToken cancellationToken = default)
+    {
+        var excluded = inFlightIds.ToList();
+        return await db.QueuedMessages
+            .Where(m => m.Status == MessageStatus.Delivering
+                        && m.LeaseExpiresUtc != null && m.LeaseExpiresUtc < nowUtc
+                        && !excluded.Contains(m.Id))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(m => m.Status, MessageStatus.Queued)
+                .SetProperty(m => m.NextRetryUtc, nowUtc)
+                .SetProperty(m => m.LeaseExpiresUtc, (DateTimeOffset?)null),
+                cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<int>> GetDueTenantsAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default)
+    {
+        return await db.QueuedMessages.AsNoTracking()
+            .Where(m => m.Status == MessageStatus.Queued && m.NextRetryUtc <= nowUtc)
+            .Select(m => m.TenantId)
+            .Distinct()
+            .OrderBy(t => t)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<QueueCandidate>> GetDueCandidatesAsync(int tenantId, DateTimeOffset nowUtc, int maxCount, CancellationToken cancellationToken = default)
+    {
+        return await db.QueuedMessages.AsNoTracking()
+            .Where(m => m.Status == MessageStatus.Queued && m.NextRetryUtc <= nowUtc && m.TenantId == tenantId)
+            .OrderBy(m => m.NextRetryUtc).ThenBy(m => m.Id)
+            .Take(maxCount)
+            .Select(m => new QueueCandidate(m.Id, m.TenantId, m.Recipients))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<QueuedMessage?> TryClaimAsync(long messageId, DateTimeOffset leaseExpiresUtc, CancellationToken cancellationToken = default)
+    {
+        // Conditional on Status == Queued, so a message deleted or claimed in between is not delivered.
+        var claimed = await db.QueuedMessages
+            .Where(m => m.Id == messageId && m.Status == MessageStatus.Queued)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(m => m.Status, MessageStatus.Delivering)
+                .SetProperty(m => m.LeaseExpiresUtc, leaseExpiresUtc),
+                cancellationToken);
+        if (claimed == 0)
+            return null;
+
+        return await db.QueuedMessages.AsNoTracking().FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
+    }
+
+    public async Task CompleteAttemptAsync(long messageId, DeliveryAttemptOutcome outcome, CancellationToken cancellationToken = default)
+    {
+        // One UPDATE statement = one transaction: delivered recipients and status are written together or not at all.
+        DateTimeOffset? completed = IsTerminal(outcome.Status) ? DateTimeOffset.UtcNow : null;
+        await db.QueuedMessages
+            .Where(m => m.Id == messageId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(m => m.Status, outcome.Status)
+                .SetProperty(m => m.DeliveredRecipients, outcome.DeliveredRecipients)
+                .SetProperty(m => m.FailedRecipients, outcome.FailedRecipients)
+                .SetProperty(m => m.RetryCount, outcome.RetryCount)
+                .SetProperty(m => m.NextRetryUtc, outcome.NextRetryUtc)
+                .SetProperty(m => m.LastError, outcome.LastError)
+                .SetProperty(m => m.CompletedUtc, completed)
+                .SetProperty(m => m.LeaseExpiresUtc, (DateTimeOffset?)null),
                 cancellationToken);
     }
 }

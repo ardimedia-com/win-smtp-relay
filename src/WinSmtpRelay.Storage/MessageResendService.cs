@@ -41,7 +41,9 @@ public class MessageResendService(RelayDbContext db) : IMessageResendService
             Status = MessageStatus.Queued,
             CreatedUtc = DateTimeOffset.UtcNow,
             SourceIp = source.SourceIp,
-            AuthenticatedUser = source.AuthenticatedUser
+            AuthenticatedUser = source.AuthenticatedUser,
+            Origin = source.Origin,
+            NextRetryUtc = DateTimeOffset.UtcNow
         };
         db.QueuedMessages.Add(resend);
         await db.SaveChangesAsync(ct);

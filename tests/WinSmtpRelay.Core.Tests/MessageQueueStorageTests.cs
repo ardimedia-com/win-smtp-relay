@@ -97,7 +97,7 @@ public class MessageQueueStorageTests
         var updated = entry.Entity;
 
         Assert.AreEqual(2, updated.RetryCount);
-        Assert.IsNotNull(updated.NextRetryUtc);
+        Assert.IsTrue(Math.Abs((updated.NextRetryUtc - nextRetry).TotalSeconds) < 1);
     }
 
     [TestMethod]

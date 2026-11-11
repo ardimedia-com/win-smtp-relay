@@ -51,20 +51,28 @@ public sealed record ReportSchedule(TimeOnly ReportTime, TimeOnly SelfCheckTime,
         $"{TimeZoneInfo.ConvertTime(utc, Zone):yyyy-MM-dd HH:mm} ({ZoneLabel})";
 
     /// <summary>
-    /// True when the daily digest is due at <paramref name="nowUtc"/>: today's (local) digest time has passed and
-    /// no digest was sent since — and none on the same local day, so moving the time later on a day that already
-    /// had its digest does not send a second one. A digest missed on an earlier day (service down) is not sent
-    /// late; the next one goes out at today's time, as before.
+    /// True when the daily digest is due at <paramref name="nowUtc"/>: the most recent scheduled digest time has
+    /// passed and no digest was sent since — and none on that schedule's local day, so moving the time later on a
+    /// day that already had its digest does not send a second one. The most recent scheduled time may lie on the
+    /// previous local day: a digest scheduled at 23:55 whose poll comes at 00:03 still goes out (it used to be
+    /// skipped). At most one digest is caught up — after a longer outage only the latest one is sent.
     /// </summary>
     public bool IsDigestDue(ReportingSettings settings, DateTime nowUtc)
     {
         var due = DueReportUtc(nowUtc);
-        if (LocalDate(due) != LocalDate(nowUtc))
-            return false;
+        var dueDay = LocalDate(due);
+        // LastDigestSentDate is the schedule day the last digest covered (a caught-up digest is sent the next
+        // morning but belongs to the day before); older rows only have the send moment.
         if (settings.LastDigestSentUtc is { } last)
-            return last.UtcDateTime < due && LocalDate(last.UtcDateTime) != LocalDate(due);
-        return settings.LastDigestSentDate != LocalDate(due);
+            return last.UtcDateTime < due && (settings.LastDigestSentDate ?? LocalDate(last.UtcDateTime)) != dueDay;
+        if (settings.LastDigestSentDate is { } lastDate)
+            return lastDate != dueDay;
+        // Never sent (fresh install): start with today's digest, do not catch up on yesterday's.
+        return dueDay == LocalDate(nowUtc);
     }
+
+    /// <summary>The local schedule day of the digest that is due at <paramref name="nowUtc"/> — its date in the subject.</summary>
+    public DateOnly DueReportDate(DateTime nowUtc) => LocalDate(DueReportUtc(nowUtc));
 
     /// <summary>
     /// Upgrades a row written before local-time schedules existed (<see cref="ReportingSettings.DailyTimeLocal"/>

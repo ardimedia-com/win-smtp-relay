@@ -35,8 +35,15 @@ public class DataRetentionSettings
     /// <summary>Days to keep the per-recipient delivery audit log (Journal). Floored at <see cref="DeliveryLogFloorDays"/>.</summary>
     public int DeliveryLogDays { get; set; } = 90;
 
-    /// <summary>Days to keep suppression-list entries; 0 = keep indefinitely (recommended).</summary>
-    public int SuppressionDays { get; set; }
+    /// <summary>
+    /// Days to keep suppression-list entries that came from a hard bounce; 0 = keep indefinitely. Default 30: a
+    /// mailbox that did not exist may exist again, and a rejection misread as «unknown user» must not block an
+    /// address for good. Complaint and manual entries are never purged by age.
+    /// </summary>
+    public int SuppressionDays { get; set; } = DefaultSuppressionDays;
+
+    /// <summary>Default for <see cref="SuppressionDays"/>.</summary>
+    public const int DefaultSuppressionDays = 30;
 
     /// <summary>
     /// Days to keep the body of a partially-delivered message — one that still has undelivered recipients

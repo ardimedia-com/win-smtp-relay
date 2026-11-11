@@ -84,6 +84,9 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.Property(e => e.Name).HasMaxLength(200);
             entity.Property(e => e.Slug).HasMaxLength(100);
             entity.Property(e => e.EgressIpAddress).HasMaxLength(45);
+            // DsnEnabled: no HasDefaultValue — with a database default of true, EF would omit an explicit false on
+            // insert (false is the CLR sentinel) and the tenant would silently get true. The migration that adds
+            // the column fills existing rows with true instead (T1074).
             entity.HasData(new Tenant
             {
                 Id = TenantDefaults.DefaultTenantId,
@@ -145,10 +148,12 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.Status);
-            entity.HasIndex(e => e.NextRetryUtc);
+            // The queue pick: Status == Queued && NextRetryUtc <= now, ordered by NextRetryUtc.
+            entity.HasIndex(e => new { e.Status, e.NextRetryUtc });
             entity.HasIndex(e => e.MessageId);
             entity.Property(e => e.Sender).HasMaxLength(320);
             entity.Property(e => e.MessageId).HasMaxLength(255);
+            entity.Property(e => e.Origin).HasConversion<int>();
             entity.Property(e => e.SourceIp).HasMaxLength(45);
             entity.Property(e => e.AuthenticatedUser).HasMaxLength(255);
         });
@@ -271,7 +276,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             // as the DKIM key). Transparent converter: callers read/write the decrypted password; the
             // column stays TEXT, so no schema migration is required. See SecretProtector.
             entity.Property(e => e.EncryptedPassword)
-                .HasConversion(v => SecretProtector.Protect(v), v => SecretProtector.Unprotect(v));
+                .HasConversion(v => SecretProtector.Protect(v), v => SecretProtector.UnprotectOrKeep(v));
         });
 
         modelBuilder.Entity<DomainRoute>(entity =>
@@ -297,7 +302,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             // re-encrypted on their next save. The column stays TEXT, so no schema migration is required.
             // See SecretProtector (shared with the smart-host password).
             entity.Property(e => e.PrivateKeyPem)
-                .HasConversion(v => SecretProtector.Protect(v), v => SecretProtector.Unprotect(v));
+                .HasConversion(v => SecretProtector.Protect(v), v => SecretProtector.UnprotectOrKeep(v));
         });
 
         modelBuilder.Entity<RateLimitSettings>(entity =>
@@ -378,7 +383,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
             entity.Property(e => e.Thumbprint).HasMaxLength(100);
             // Encrypt the stored PFX at rest via DPAPI (same converter as the DKIM key / smart-host password).
             entity.Property(e => e.PfxBase64)
-                .HasConversion(v => SecretProtector.Protect(v), v => SecretProtector.Unprotect(v));
+                .HasConversion(v => SecretProtector.Protect(v), v => SecretProtector.UnprotectOrKeep(v));
         });
 
         modelBuilder.Entity<DataRetentionSettings>(entity =>
@@ -392,7 +397,7 @@ public class RelayDbContext(DbContextOptions<RelayDbContext> options, ICurrentTe
                 StripBodyOnDelivery = true,
                 MessageHistoryDays = 30,
                 DeliveryLogDays = 90,
-                SuppressionDays = 0,
+                SuppressionDays = WinSmtpRelay.Core.Models.DataRetentionSettings.DefaultSuppressionDays,
                 ResendRetentionDays = 7,
                 UpdatedUtc = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             });
